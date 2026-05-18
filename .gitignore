@@ -1,0 +1,59 @@
+# Local editor / assistant state
+.vscode/
+.claude/
+
+# Generated documentation caches
+.tmp_pdf_text/
+
+# MounRiver / local IDE metadata
+**/.mrs/
+
+# Build outputs
+build/
+**/build/
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+*.axf
+*.dis
+*.su
+
+# Simulation / waveform outputs
+*.vvp
+*.vcd
+*.fst
+
+# Debug and OpenOCD logs
+*.log
+manual_openocd_*.txt
+openocd_*.txt
+ocd_*.txt
+
+# Temporary dumps / preprocessed files
+*.tmp
+*.bak
+*.orig
+*.swp
+**/*dump*.txt
+**/*preproc*.txt
+**/C*temp*.txt
+
+# Accidental shell artifacts
+/rtthread_port/-p/
+/rtthread_port/!
+
+# Local bring-up experiments
+/rtthread_port/test*.tcl
+/rtthread_port/test_rst*.ps1
+/rtthread_port/test_reset.ps1
+
+# Third-party checkout managed separately
+# /rtthread_port/rt-thread/
+
+# OS noise
+.DS_Store
+Thumbs.db
