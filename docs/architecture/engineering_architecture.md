@@ -12,8 +12,9 @@ does not connect to the PC bridge with WebSocket.
 
 Keyboard to PC communication is based on keyboard-native transports:
 
-- USB wired mode: USB HID for input, plus Vendor HID or CDC for control,
-  configuration, diagnostics, and display events.
+- USB wired mode: USB HID for input, plus Vendor HID for product control,
+  configuration, diagnostics, display events, and firmware update. CDC is
+  debug-only and can be compiled out.
 - 2.4G mode: keyboard to dongle uses a private low-latency wireless protocol;
   dongle to PC exposes USB HID plus a vendor control interface.
 - Bluetooth mode: BLE HID for normal input, plus a custom GATT service for
@@ -47,7 +48,8 @@ USB wired:
   CH32H417 -> PC
     Interface 0: standard USB HID keyboard
     Interface 1: consumer/system HID, if needed
-    Interface 2: Vendor HID or CDC control channel
+    Interface 2: Vendor HID product control channel
+    Optional debug-only: CDC ACM, compile-time gated
 
 2.4G wireless:
   Keyboard -> CH585/2.4G radio -> USB dongle -> PC
@@ -62,6 +64,34 @@ Bluetooth:
 
 The PC should see a normal keyboard even when the optional control software is
 not running.
+
+## Core Assignment
+
+```text
+V3F = Keyboard Engine Core
+  bare-metal realtime loop
+  scan/filter/debounce
+  magnetic switch algorithms
+  keymap/layer/macro
+  HID report generation
+
+V5F = Application / UI / Protocol Core
+  RT-Thread Standard
+  USB stack and Vendor HID control channel
+  Device Current Config manager
+  external Flash coordination
+  display UI
+  diagnostics and firmware update orchestration
+
+CH585 = Wireless / Auxiliary I/O Protocol Processor
+  connected to H417 over USB HS
+  BLE HID
+  2.4G private protocol
+  pairing/retry/encryption/status
+```
+
+The split above is the implementation baseline. V3F is not an optional
+optimization target; it owns the deterministic keyboard engine.
 
 ## Firmware Layering
 
@@ -78,16 +108,18 @@ Device protocol
   diagnostics and log events
 
 Input pipeline
-  magnetic switch sampling
-  debounce/filtering
-  rapid trigger / DKS / SOCD / SpeedTap
-  keymap resolution
-  report routing
+  V3F magnetic switch sampling
+  V3F debounce/filtering
+  V3F rapid trigger / DKS / SOCD / SpeedTap
+  V3F keymap/layer/macro
+  V3F HID report generation
+  V5F USB report sending
 
 Transport adapters
   USB HID keyboard
-  USB Vendor HID or CDC control
-  CH585 2.4G channel
+  USB Vendor HID control
+  CDC debug-only channel
+  H417-to-CH585 USB HS channel
   BLE HID and GATT
 
 Board support
@@ -96,26 +128,23 @@ Board support
   dual-core startup and IPC
 ```
 
-## Core Responsibilities
+## Config Model
 
-V3F should be reserved for hard real-time or near-real-time work when that split
-is useful:
+The product distinguishes PC-side profiles from the keyboard's active settings.
 
-- key scan timing
-- USB event responsiveness
-- low-level watchdog/health monitoring
-- narrow IPC messages to V5F
+```text
+PC Profile Library:
+  reusable presets and user custom profiles
 
-V5F owns feature-level processing:
+Device Current Config:
+  current settings stored and running on the keyboard
+  editable from PC software or the local screen
+  readable by PC software and saveable as a new profile
+```
 
-- magnetic switch algorithms if timing allows
-- device protocol command handling
-- display UI
-- persistent settings
-- high-level transport routing
-
-The exact split can evolve after timing measurements, but keyboard input
-latency must be protected from display and agent-status features.
+V5F reads Device Current Config from external Flash, validates it, compiles a
+compact runtime table, and installs that table into V3F SRAM. V3F does not parse
+full profiles and does not read external Flash in the scan path.
 
 ## Device Protocol Principles
 
@@ -135,6 +164,28 @@ Required properties:
 Do not encode Codex or Claude Code concepts directly in firmware. Firmware may
 display generic agent/session/task/status concepts provided by the PC bridge.
 
+The first device-protocol milestone is Vendor HID hello/capability plus Device
+Current Config read/write. OTA, full screen projection, and wireless transport
+support are reserved but should not block the first control-plane milestone.
+
+## Firmware Update Direction
+
+Firmware update is PC-assisted and transport-controlled:
+
+```text
+PC software -> USB Vendor HID -> H417 V5F -> update target
+```
+
+Initial targets are:
+
+- H417 app firmware
+- CH585 firmware through the H417 USB HS bridge
+- 2.4G dongle firmware through the dongle vendor channel
+
+H417 app update is designed around manifest + hash + A/B slot. Production
+signing and anti-rollback are required before release, but do not need to block
+the first Vendor HID control-plane work.
+
 ## Out of Scope
 
 These are not current implementation targets:
@@ -147,6 +198,20 @@ These are not current implementation targets:
 
 Ethernet-related material in `docs/pre_design_report` is retained as research
 history only.
+
+## Detailed Architecture Documents
+
+The implementation architecture is split across:
+
+- `hardware_architecture.md`
+- `dual_core_architecture.md`
+- `keyboard_engine_v3f.md`
+- `usb_vendor_hid_architecture.md`
+- `device_protocol.md`
+- `local_config_and_profile_model.md`
+- `h417_ch585_usbhs_architecture.md`
+- `display_ui_architecture.md`
+- `firmware_update_architecture.md`
 
 ## Development Workflow
 
