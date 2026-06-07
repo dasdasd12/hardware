@@ -20,7 +20,7 @@ CH32H417
   V5F Application / UI / Protocol Core
   V3F Keyboard Engine Core
         |
-        | USB HS internal board link
+        | CH585 coordination link; SPI ingest for non-key control data
         v
 CH585
   Wireless and auxiliary I/O protocol processor
@@ -39,8 +39,8 @@ V3F = Keyboard Engine Core
   bare-metal realtime loop
   scan/filter/debounce
   magnetic switch algorithms
-  keymap/layer/macro
-  HID report generation
+  binding scopes / behaviors / macros
+  RuntimeIntent generation
 
 V5F = Application / UI / Protocol Core
   RT-Thread Standard
@@ -55,7 +55,8 @@ CH585 = Wireless / Auxiliary I/O Protocol Processor
   BLE HID
   2.4G private protocol
   pairing, retry, encryption, wireless status
-  future auxiliary I/O
+  joystick, encoder, and external-module non-key input
+  unified control data reporting to H417
 ```
 
 V3F owns the deterministic keyboard path. V5F owns product features, state
@@ -68,10 +69,11 @@ The keyboard must remain a good keyboard when PC software is not running.
 Offline-capable behavior:
 
 - standard USB HID keyboard input
-- current keymap, layers, macros, and magnetic settings
+- current binding scopes, behaviors, macros, and magnetic settings
 - rapid trigger, DKS, SOCD, and SpeedTap
 - local screen pages for keyboard settings
-- local modification of Device Current Config
+- local modification of active `ProfilePackage` fields and user-writable
+  `DeviceSettings`
 - current transport mode and basic diagnostics
 
 Offline-degraded behavior:
@@ -83,42 +85,47 @@ Offline-degraded behavior:
 
 ## Configuration Model
 
-The product separates reusable PC presets from device runtime state.
+The product separates reusable PC presets from explicit device resources.
 
 ```text
 PC Profile Library
-  preset profiles
-  user custom profiles
+  reusable DeviceProfiles
   imported/exported profiles
+  software-side WorkspacePresets
 
-Device Current Config
-  current active device settings
-  persisted on device
-  editable from device screen
-  readable and writable from PC software
+Device resources
+  DeviceSettings
+  DeviceProfileStore with five user ProfilePackage slots
+  hidden factory-default ProfilePackage
+  ScreenConfig
+  LightingConfig
+  CalibrationData
+  DeviceState runtime facts
 ```
 
-PC software may write a profile to the device. PC software may also read Device
-Current Config and save it as a new profile. The device screen edits current
-device settings, not the full PC profile library.
+PC software may write a `ProfilePackage` to a device slot and may read slot
+packages back into the PC library. The device screen can switch profiles and
+edit allowed fields of the current active profile or `DeviceSettings`, but it
+does not manage the full PC profile library.
 
 ## Control and Data Paths
 
 ```text
 Input realtime path:
-  sensors -> V3F keyboard engine -> HID report -> V5F USB stack -> PC
+  H417 key scan + CH585 SPI ingest -> V3F keyboard engine
+    -> RuntimeIntent -> V5F report adaptation -> USB/CH585 wireless output
 
 PC control path:
-  PC software -> USB Vendor HID -> V5F device protocol -> config manager
+  PC software -> USB Vendor HID -> V5F device protocol -> resource managers
 
 Runtime config path:
-  external Flash -> V5F config manager -> compiled runtime table -> V3F SRAM
+  DeviceSettings + ProfilePackage -> V5F compiler -> RuntimeTable -> V3F SRAM
 
 Local config path:
-  device screen UI -> V5F config manager -> external Flash -> V3F runtime table
+  device screen UI -> V5F resource manager -> external Flash -> RuntimeTable
 
 Wireless path:
-  V3F HID/key state -> V5F coordination -> CH585 over USB HS -> BLE/2.4G
+  V3F RuntimeIntent -> V5F report adaptation -> CH585 wireless path -> BLE/2.4G
 ```
 
 ## MVP Target
@@ -130,10 +137,10 @@ MVP target:
 
 ```text
 PC <-> MCU Vendor HID control plane
-Device Current Config read/write
-local screen edit of the same config
+DeviceSettings and ProfilePackage slot read/write
+local screen edit of the active profile or DeviceSettings
 external Flash persistence
-V5F-to-V3F runtime config update
+V5F-to-V3F RuntimeTable update
 V3F input behavior affected by config
 ```
 
@@ -141,13 +148,14 @@ MVP acceptance criteria:
 
 - USB composite enumerates with Keyboard HID and Vendor HID.
 - PC software can send `HELLO` and read capabilities.
-- PC software can read Device Current Config.
-- PC software can write one real setting into Device Current Config.
+- PC software can read `DeviceSettings` and device slot metadata.
+- PC software can write one `ProfilePackage` slot or one real
+  `DeviceSettings` field.
 - Device screen can edit the same setting locally.
 - PC software can reconnect and read the device-side edit.
 - Config is persisted across reset.
-- V5F sends compiled runtime config to V3F.
-- V3F output changes according to the updated runtime config.
+- V5F sends compiled RuntimeTable to V3F.
+- V3F RuntimeIntent output changes according to the updated RuntimeTable.
 
 ## Out of Scope for MVP
 

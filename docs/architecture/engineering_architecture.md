@@ -57,7 +57,7 @@ USB wired:
     dongle to PC: USB HID + vendor control channel
 
 Bluetooth:
-  Keyboard -> BLE host
+  Keyboard -> CH585 BLE -> BLE host
     input: BLE HID
     control: custom BLE GATT service
 ```
@@ -72,22 +72,23 @@ V3F = Keyboard Engine Core
   bare-metal realtime loop
   scan/filter/debounce
   magnetic switch algorithms
-  keymap/layer/macro
-  HID report generation
+  binding scopes / behaviors / macros
+  RuntimeIntent generation
 
 V5F = Application / UI / Protocol Core
   RT-Thread Standard
   USB stack and Vendor HID control channel
-  Device Current Config manager
+  DeviceSettings / DeviceProfileStore / ScreenConfig / LightingConfig managers
   external Flash coordination
   display UI
   diagnostics and firmware update orchestration
 
 CH585 = Wireless / Auxiliary I/O Protocol Processor
-  connected to H417 over USB HS
+  reports non-key control data to H417 through SPI ingest
   BLE HID
   2.4G private protocol
   pairing/retry/encryption/status
+  joystick, encoder, and extension-module input handling
 ```
 
 The split above is the implementation baseline. V3F is not an optional
@@ -111,15 +112,15 @@ Input pipeline
   V3F magnetic switch sampling
   V3F debounce/filtering
   V3F rapid trigger / DKS / SOCD / SpeedTap
-  V3F keymap/layer/macro
-  V3F HID report generation
-  V5F USB report sending
+  V3F binding scope / behavior / macro processing
+  V3F RuntimeIntent generation
+  V5F report adaptation and USB/wireless sending
 
 Transport adapters
   USB HID keyboard
   USB Vendor HID control
   CDC debug-only channel
-  H417-to-CH585 USB HS channel
+  H417-to-CH585 SPI ingest and control channel
   BLE HID and GATT
 
 Board support
@@ -130,21 +131,25 @@ Board support
 
 ## Config Model
 
-The product distinguishes PC-side profiles from the keyboard's active settings.
+The product distinguishes PC-side reusable profiles from explicit device
+resources.
 
 ```text
 PC Profile Library:
-  reusable presets and user custom profiles
+  reusable DeviceProfiles and imports/exports
+  software-side WorkspacePresets
 
-Device Current Config:
-  current settings stored and running on the keyboard
-  editable from PC software or the local screen
-  readable by PC software and saveable as a new profile
+Device resources:
+  DeviceSettings
+  DeviceProfileStore with five user ProfilePackage slots
+  hidden factory-default ProfilePackage
+  ScreenConfig / LightingConfig / CalibrationData
+  DeviceState runtime facts
 ```
 
-V5F reads Device Current Config from external Flash, validates it, compiles a
-compact runtime table, and installs that table into V3F SRAM. V3F does not parse
-full profiles and does not read external Flash in the scan path.
+V5F reads `DeviceSettings`, selects a `ProfilePackage` slot, validates it,
+compiles a compact RuntimeTable, and installs that table into V3F SRAM. V3F
+does not parse full profiles and does not read external Flash in the scan path.
 
 ## Device Protocol Principles
 
@@ -164,9 +169,10 @@ Required properties:
 Do not encode Codex or Claude Code concepts directly in firmware. Firmware may
 display generic agent/session/task/status concepts provided by the PC bridge.
 
-The first device-protocol milestone is Vendor HID hello/capability plus Device
-Current Config read/write. OTA, full screen projection, and wireless transport
-support are reserved but should not block the first control-plane milestone.
+The first device-protocol milestone is Vendor HID hello/capability plus
+`DeviceSettings` and `ProfilePackage` slot read/write. OTA, full screen
+projection, and wireless transport support are reserved but should not block the
+first control-plane milestone.
 
 ## Firmware Update Direction
 
@@ -179,7 +185,7 @@ PC software -> USB Vendor HID -> H417 V5F -> update target
 Initial targets are:
 
 - H417 app firmware
-- CH585 firmware through the H417 USB HS bridge
+- CH585 firmware through the H417-managed CH585 update transport
 - 2.4G dongle firmware through the dongle vendor channel
 
 H417 app update is designed around manifest + hash + A/B slot. Production

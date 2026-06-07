@@ -1,8 +1,8 @@
 # Device Protocol
 
 The device protocol is the firmware-facing contract between PC software and
-the keyboard. It runs over Vendor HID first, and later over BLE GATT or dongle
-vendor channels when those transports exist.
+the keyboard. It runs over Vendor HID first, and later over CH585-backed BLE
+GATT or dongle vendor channels when those transports exist.
 
 The protocol is transport-independent. Transport frames carry device protocol
 messages.
@@ -28,7 +28,7 @@ USB Vendor HID
 Future transports:
 
 ```text
-BLE GATT custom service
+CH585-backed BLE GATT custom service
 2.4G dongle vendor channel
 simulator transport for tests
 ```
@@ -71,8 +71,9 @@ Mandatory identity fields:
 - firmware version
 - bootloader version, if available
 - protocol version
-- active config revision
-- active runtime config generation
+- active profile slot
+- active ProfilePackage revision
+- active RuntimeTable generation
 
 Mandatory capability fields:
 
@@ -91,7 +92,8 @@ Initial message families:
 ```text
 hello
 capabilities
-current_config
+device_settings
+profile_package_slot
 runtime_config_status
 screen_state
 slot_mapping
@@ -114,31 +116,42 @@ action availability
 
 The firmware does not know what Codex or Claude Code is.
 
-## Current Config Messages
+## Device Resource Messages
 
-Required current config operations:
+Required `DeviceSettings` operations:
 
 ```text
-GET_CONFIG_REVISION
-GET_CURRENT_CONFIG_SUMMARY
-READ_CURRENT_CONFIG_BEGIN
-READ_CURRENT_CONFIG_CHUNK
-READ_CURRENT_CONFIG_END
-WRITE_CURRENT_CONFIG_BEGIN
-WRITE_CURRENT_CONFIG_CHUNK
-WRITE_CURRENT_CONFIG_COMMIT
-WRITE_CURRENT_CONFIG_ABORT
-CONFIG_CHANGE_RECORD
+GET_DEVICE_SETTINGS_SUMMARY
+READ_DEVICE_SETTINGS
+WRITE_DEVICE_SETTINGS
+DEVICE_SETTINGS_CHANGE_RECORD
+```
+
+Required `ProfilePackage` slot operations:
+
+```text
+GET_PROFILE_SLOT_METADATA
+READ_PROFILE_PACKAGE_BEGIN
+READ_PROFILE_PACKAGE_CHUNK
+READ_PROFILE_PACKAGE_END
+WRITE_PROFILE_PACKAGE_BEGIN
+WRITE_PROFILE_PACKAGE_CHUNK
+WRITE_PROFILE_PACKAGE_COMMIT
+WRITE_PROFILE_PACKAGE_ABORT
+PROFILE_SWITCH_REQUEST
+PROFILE_SLOT_CHANGE_RECORD
 ```
 
 Write commit rules:
 
 - V5F validates schema and device capability compatibility.
-- V5F persists Device Current Config to external Flash.
-- V5F compiles runtime tables for V3F.
-- V3F accepts or rejects runtime table generation.
-- Config revision advances only after persistence and V3F activation succeed,
-  or the response must clearly report partial status.
+- V5F persists the target resource to external Flash atomically.
+- If the changed resource affects the active keyboard profile, V5F compiles a
+  RuntimeTable for V3F.
+- V3F accepts or rejects RuntimeTable installation.
+- Resource revision and RuntimeTable generation are separate facts. Responses
+  must clearly report persisted-but-not-active, active, rejected, or rollback
+  states.
 
 ## Screen State Messages
 
@@ -176,7 +189,7 @@ return a resync/error response rather than guessing.
 Diagnostics must expose enough state for PC software and development tooling:
 
 - firmware/protocol versions
-- active config revision
+- active profile slot and ProfilePackage revision
 - active V3F runtime generation
 - V3F heartbeat
 - V5F heartbeat
@@ -233,8 +246,8 @@ Initial error codes:
 - payload too large
 - invalid checksum
 - invalid chunk sequence
-- config validation failed
-- config generation rejected by V3F
+- resource validation failed
+- RuntimeTable generation rejected by V3F
 - stale slot generation
 - firmware manifest invalid
 - firmware hash mismatch
@@ -245,8 +258,9 @@ Initial error codes:
 MVP includes:
 
 - hello/capabilities
-- current config read/write
-- config revision
+- DeviceSettings read/write
+- ProfilePackage slot metadata and one slot write path
+- resource revision
 - diagnostics summary
 - error responses
 

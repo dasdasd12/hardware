@@ -94,6 +94,7 @@ static rt_err_t ch32_configure(struct rt_serial_device *serial, struct serial_co
     }
 
     RCC_HB2PeriphClockCmd(uart->hw_config->gpio_periph_clock, ENABLE);
+    RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO, ENABLE);
     RCC_HB1PeriphClockCmd(uart->hw_config->uart_periph_clock, ENABLE);
 
     GPIO_PinAFConfig(uart->hw_config->tx_gpio_port, uart->hw_config->tx_pin_source, uart->hw_config->gpio_af);
@@ -105,7 +106,7 @@ static rt_err_t ch32_configure(struct rt_serial_device *serial, struct serial_co
     GPIO_Init(uart->hw_config->tx_gpio_port, &GPIO_InitStructure);
 
     GPIO_InitStructure.GPIO_Pin   = uart->hw_config->rx_gpio_pin;
-    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IN_FLOATING;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IPU;
     GPIO_Init(uart->hw_config->rx_gpio_port, &GPIO_InitStructure);
 
     USART_Init(uart->config->Instance, &uart->Init);
@@ -217,6 +218,12 @@ int rt_hw_usart_init(void)
                                        RT_DEVICE_FLAG_RDWR | RT_DEVICE_FLAG_INT_RX,
                                        &uart_obj[i]);
         RT_ASSERT(result == RT_EOK);
+
+        /* Explicit configure: guarantees USART_Cmd(ENABLE) regardless of how
+           rt_console_set_device opens the device. Some RT-Thread versions skip
+           configure on stream opens, which would leave ch32_putc stuck on
+           USART_FLAG_TC. */
+        ch32_configure(&uart_obj[i].serial, &uart_obj[i].serial.config);
     }
 
     return (int)result;

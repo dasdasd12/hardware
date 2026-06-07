@@ -114,7 +114,7 @@ Application owns:
 CH585 update is bridged through H417:
 
 ```text
-PC software -> Vendor HID -> H417 V5F -> USB HS -> CH585 update mode
+PC software -> Vendor HID -> H417 V5F -> CH585 update transport
 ```
 
 Rules:
@@ -164,15 +164,17 @@ Each transfer has:
 
 - basic keyboard mode should remain recoverable after failed app update
 - update images are never executed before validation
-- Device Current Config is not erased by firmware update unless explicitly
-  required by migration
+- DeviceSettings, ProfilePackage slots, ScreenConfig, LightingConfig, and
+  CalibrationData are not erased by firmware update unless explicitly required
+  by migration
 - bootloader/recovery path must be testable
 - production firmware must reject unsigned packages once signing is enabled
 
 ## MVP Scope
 
 MVP architecture reserves update messages and package format. Full update
-implementation can follow after Vendor HID current config read/write is stable.
+implementation can follow after Vendor HID DeviceSettings and ProfilePackage
+slot read/write are stable.
 
 First implementation target:
 

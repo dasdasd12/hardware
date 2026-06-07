@@ -24,7 +24,7 @@ ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 # EVT SDK root
-EVT_ROOT     := C:/program1/hardware/WCH/CH32H417/CH32H417EVT/EVT/EXAM
+EVT_ROOT     ?= ../third_party/wch_ch32h417_evt
 SRC_ROOT     := $(EVT_ROOT)/SRC
 
 # RT-Thread root
@@ -111,6 +111,7 @@ CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/class/hid/usbd_hid.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/class/cdc/usbd_cdc_acm.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/osal/usb_osal_rtthread.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/port/ch32h417/usb_dc_ch32h417.c
+CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/port/ch32h417/usb_dc_ch32h417_usbhs.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/demo/hid_cdc_composite.c
 
 # EVT SDK

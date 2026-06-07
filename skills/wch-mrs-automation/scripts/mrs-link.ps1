@@ -9,7 +9,7 @@
 #>
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("set-target", "set-line-mode", "get-chip-id", "query-rprotect", "disable-rprotect", "flash", "reset")]
+    [ValidateSet("set-target", "set-line-mode", "get-chip-id", "query-rprotect", "disable-rprotect", "flash", "reset", "dump-link-status", "rehandshake", "hold-nrst", "release-nrst")]
     [string]$Action,
 
     [int]$ChipID = 198,
@@ -28,13 +28,60 @@ param(
     [string]$CommunicationLibPath = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\Others\CommunicationLib\default",
     [string]$FirmwareLinkPath = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\Others\Firmware_Link\default",
 
+    [string]$TraceLog = "",
+
     [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
 
-function Write-MrsInfo { param([string]$Message) Write-Host "[MRS]  $Message" }
-function Write-MrsWarn { param([string]$Message) Write-Host "[WARN] $Message" -ForegroundColor Yellow }
+if (-not $TraceLog) {
+    $TraceLog = Join-Path $env:TEMP "wch-mrs-trace.log"
+}
+
+function Write-MrsTrace {
+    param([string]$Line)
+    $stamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff")
+    $pid32 = if ([Environment]::Is64BitProcess) { "ps64" } else { "ps32" }
+    try {
+        Add-Content -LiteralPath $TraceLog -Value "[$stamp][$pid32] $Line" -ErrorAction SilentlyContinue
+    } catch {}
+}
+
+function Write-MrsInfo {
+    param([string]$Message)
+    Write-Host "[MRS]  $Message"
+    Write-MrsTrace "INFO  $Message"
+}
+
+function Write-MrsWarn {
+    param([string]$Message)
+    Write-Host "[WARN] $Message" -ForegroundColor Yellow
+    Write-MrsTrace "WARN  $Message"
+}
+
+function Invoke-MrsCall {
+    <#
+    Wraps a P/Invoke and records its return code + duration to the trace log.
+    The scriptblock must return an integer.
+    #>
+    param(
+        [string]$Name,
+        [scriptblock]$Call
+    )
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $ret = -1
+    try {
+        $ret = & $Call
+    } catch {
+        $sw.Stop()
+        Write-MrsTrace ("CALL  {0} EXCEPTION {1} (after {2}ms)" -f $Name, $_.Exception.Message, $sw.ElapsedMilliseconds)
+        throw
+    }
+    $sw.Stop()
+    Write-MrsTrace ("CALL  {0} ret={1} ({2}ms)" -f $Name, $ret, $sw.ElapsedMilliseconds)
+    return $ret
+}
 
 function Get-DebugMode {
     param([string]$Mode)
@@ -143,7 +190,8 @@ function Restart-UnderWow64IfNeeded {
         "-OperationType", $OperationType,
         "-FlashAddress", $FlashAddress,
         "-CommunicationLibPath", $CommunicationLibPath,
-        "-FirmwareLinkPath", $FirmwareLinkPath
+        "-FirmwareLinkPath", $FirmwareLinkPath,
+        "-TraceLog", $TraceLog
     )
     if ($DataFilePath) { $args += @("-DataFilePath", $DataFilePath) }
     if ($DryRun) { $args += "-DryRun" }
@@ -174,6 +222,7 @@ if ($Action -eq "flash") {
 
 if ($DryRun) {
     Write-MrsInfo "Dry run: action=$Action chip=$ChipID interface=$DebugInterface clk=$ClkSpeed"
+    Write-MrsInfo "Trace log would be: $TraceLog"
     if ($Action -eq "flash") {
         Write-MrsInfo ("operation=0x{0:X2} ({1}) address=$FlashAddress file=$DataFilePath" -f $OperationType, (Get-OperationDescription $OperationType))
     }
@@ -224,6 +273,9 @@ public static class MRSNativeLink {
     [DllImport(@"$dllLiteral", CallingConvention=CallingConvention.StdCall)]
     public static extern int McuCompiler_ResetB(int chipType, int debugMode);
 
+    [DllImport(@"$dllLiteral", CallingConvention=CallingConvention.StdCall)]
+    public static extern int McuCompiler_SetRSTPin(int level);
+
     [DllImport(@"$dllLiteral", CallingConvention=CallingConvention.StdCall, CharSet=CharSet.Ansi)]
     public static extern int MRSFunc_FlashOperationExB(int chipType, int clkSpeed, int operaType, int addrSel, [MarshalAs(UnmanagedType.LPStr)] string dataFileName);
 }
@@ -238,7 +290,10 @@ try {
     [MRSNativeLink]::SetDllDirectory($CommunicationLibPath) | Out-Null
 
     Write-MrsInfo "Host is 32-bit PowerShell: $(-not [Environment]::Is64BitProcess)"
-    $setRet = [MRSNativeLink]::McuCompiler_SetTargetChip($ChipID, $debugMode)
+    Write-MrsInfo "Trace log: $TraceLog"
+    Write-MrsTrace "ENTER action=$Action chip=$ChipID debugMode=$debugMode clk=$clk operation=0x$('{0:X2}' -f $OperationType)"
+
+    $setRet = Invoke-MrsCall -Name "SetTargetChip" -Call { [MRSNativeLink]::McuCompiler_SetTargetChip($ChipID, $debugMode) }
     Write-MrsInfo "SetTargetChip=$setRet (chip=$ChipID debugMode=$debugMode)"
     if ($setRet -ne 0) {
         throw "McuCompiler_SetTargetChip failed: $setRet"
@@ -247,7 +302,7 @@ try {
     # Retry OpenDevice for transient WCH-Link errors (100=open failed, 128=comm failure, 129=timeout)
     $openRet = -1
     for ($attempt = 1; $attempt -le $maxOpenAttempts; $attempt++) {
-        $openRet = [MRSNativeLink]::McuCompiler_OpenDevice()
+        $openRet = Invoke-MrsCall -Name "OpenDevice" -Call { [MRSNativeLink]::McuCompiler_OpenDevice() }
         Write-MrsInfo "OpenDevice=$openRet (attempt $attempt/$maxOpenAttempts)"
         if ($openRet -eq 0) { break }
         if ($attempt -lt $maxOpenAttempts) {
@@ -265,8 +320,9 @@ try {
     if (Test-Path -LiteralPath $firmwareCfg) {
         [int]$linkType = 0
         [int]$linkMode = 0
-        $compareRet = [MRSNativeLink]::McuCompiler_CompareVersion($firmwareCfg, [ref]$linkType, [ref]$linkMode)
+        $compareRet = Invoke-MrsCall -Name "CompareVersion" -Call { [MRSNativeLink]::McuCompiler_CompareVersion($firmwareCfg, [ref]$linkType, [ref]$linkMode) }
         Write-MrsInfo ("CompareVersion=$compareRet linkType=0x{0:X2} linkMode=0x{1:X2}" -f $linkType, $linkMode)
+        Write-MrsTrace ("STATE linkType=0x{0:X2} linkMode=0x{1:X2}" -f $linkType, $linkMode)
         if ($compareRet -ne 0) {
             throw "McuCompiler_CompareVersion failed: $compareRet"
         }
@@ -274,8 +330,11 @@ try {
         Write-MrsWarn "Firmware config not found: $firmwareCfg"
     }
 
-    if ($Action -eq "set-line-mode" -or $Action -eq "flash") {
-        $lineRet = [MRSNativeLink]::McuCompiler_SetSDLineMode($debugMode)
+    # SetSDLineMode is only needed for the explicit set-line-mode action; SetTargetChip
+    # already programs the link's debug mode for upcoming operations. Calling it on every
+    # flash is an extra failure surface — see plan Layer B.2.
+    if ($Action -eq "set-line-mode") {
+        $lineRet = Invoke-MrsCall -Name "SetSDLineMode" -Call { [MRSNativeLink]::McuCompiler_SetSDLineMode($debugMode) }
         Write-MrsInfo "SetSDLineMode=$lineRet (debugMode=$debugMode)"
         if ($lineRet -ne 0) {
             Write-MrsWarn (Get-MRSErrorText $lineRet)
@@ -287,8 +346,26 @@ try {
         exit 0
     }
 
+    if ($Action -eq "dump-link-status" -or $Action -eq "rehandshake") {
+        $linkedChip = Invoke-MrsCall -Name "GetLinkedMCUID" -Call { [MRSNativeLink]::MRSFunc_GetLinkedMCUID() }
+        Write-MrsInfo "LinkedMCUID=$linkedChip"
+        Write-MrsTrace "STATE linkedChip=$linkedChip expected=$ChipID"
+
+        $protect = Invoke-MrsCall -Name "QueryRProtect" -Call { [MRSNativeLink]::MRSFunc_QueryRProtect($ChipID, $clk) }
+        Write-MrsInfo "ReadProtect=$protect ($(Get-RProtectText $protect))"
+        Write-MrsTrace "STATE readProtect=$protect"
+
+        if ($Action -eq "rehandshake") {
+            exit 0
+        }
+        if ($linkedChip -eq $ChipID -and ($protect -eq 3 -or $protect -eq 4)) {
+            exit 0
+        }
+        exit 1
+    }
+
     if ($Action -eq "reset") {
-        $ret = [MRSNativeLink]::McuCompiler_ResetB($ChipID, $debugMode)
+        $ret = Invoke-MrsCall -Name "ResetB" -Call { [MRSNativeLink]::McuCompiler_ResetB($ChipID, $debugMode) }
         Write-MrsInfo "ResetB=$ret"
         if ($ret -ne 0) {
             Write-MrsWarn (Get-MRSErrorText $ret)
@@ -297,8 +374,19 @@ try {
         exit 0
     }
 
+    if ($Action -eq "hold-nrst" -or $Action -eq "release-nrst") {
+        $level = if ($Action -eq "hold-nrst") { 0 } else { 1 }
+        $ret = Invoke-MrsCall -Name "SetRSTPin($level)" -Call { [MRSNativeLink]::McuCompiler_SetRSTPin($level) }
+        Write-MrsInfo "SetRSTPin($level)=$ret"
+        if ($ret -ne 0) {
+            Write-MrsWarn (Get-MRSErrorText $ret)
+            exit 1
+        }
+        exit 0
+    }
+
     if ($Action -eq "get-chip-id") {
-        $linkedChip = [MRSNativeLink]::MRSFunc_GetLinkedMCUID()
+        $linkedChip = Invoke-MrsCall -Name "GetLinkedMCUID" -Call { [MRSNativeLink]::MRSFunc_GetLinkedMCUID() }
         Write-MrsInfo "LinkedMCUID=$linkedChip"
         if ($linkedChip -ne $ChipID) {
             Write-MrsWarn "Linked chip ID does not match expected chip ID $ChipID."
@@ -308,14 +396,14 @@ try {
     }
 
     if ($Action -eq "query-rprotect") {
-        $protect = [MRSNativeLink]::MRSFunc_QueryRProtect($ChipID, $clk)
+        $protect = Invoke-MrsCall -Name "QueryRProtect" -Call { [MRSNativeLink]::MRSFunc_QueryRProtect($ChipID, $clk) }
         Write-MrsInfo "ReadProtect=$protect ($(Get-RProtectText $protect))"
         if ($protect -ne 3 -and $protect -ne 4) { exit 1 }
         exit 0
     }
 
     if ($Action -eq "disable-rprotect") {
-        $ret = [MRSNativeLink]::MRSFunc_DisableRProtect($ChipID, $clk)
+        $ret = Invoke-MrsCall -Name "DisableRProtect" -Call { [MRSNativeLink]::MRSFunc_DisableRProtect($ChipID, $clk) }
         Write-MrsInfo "DisableRProtect=$ret"
         if ($ret -ne 0) {
             Write-MrsWarn (Get-MRSErrorText $ret)
@@ -326,21 +414,53 @@ try {
 
     Write-MrsInfo ("FlashOperationExB operation=0x{0:X2} ({1}) address=$FlashAddress file=$DataFilePath" -f $OperationType, (Get-OperationDescription $OperationType))
 
-    # Retry FlashOperationExB for transient communication errors
+    # Capture read-protect state before flash so we can detect if the operation flipped it.
+    $protectBefore = Invoke-MrsCall -Name "QueryRProtect[pre]" -Call { [MRSNativeLink]::MRSFunc_QueryRProtect($ChipID, $clk) }
+    Write-MrsTrace "STATE readProtect[pre]=$protectBefore ($(Get-RProtectText $protectBefore))"
+
+    # Hardware-confirmed pattern (rt-thread project, CH32H417, PB8/PB9 SDI):
+    # after the previous flash ended with reset-run, V5F is executing user code
+    # at 400 MHz and the chip's SDI does not handshake cleanly on the next
+    # flash attempt. QueryRProtect returns 104 (Failed to configure MCU/SWD
+    # comm). The fix is the clear-code-flash bit (0x40) in FlashOperationExB:
+    # the DLL uses a more aggressive entry sequence (NRST pulse + option-byte
+    # path) that succeeds even when the CPU is busy. Confirmed by -Action
+    # recover, which uses op 0x4C against a 4-byte stub and always recovers.
+    $effectiveOperation = $OperationType
+    if ($protectBefore -eq 104) {
+        Write-MrsWarn "QueryRProtect[pre]=104 (chip busy / SDI not responding). OR-ing clear-code-flash (0x40) into op for forced entry."
+        $effectiveOperation = $OperationType -bor 0x40
+        Write-MrsInfo ("Effective operation: 0x{0:X2} ({1})" -f $effectiveOperation, (Get-OperationDescription $effectiveOperation))
+    }
+
+    # Retry FlashOperationExB. Error 104 is the chip-busy signature on this
+    # hardware; on retry we OR clear-code-flash into the operation byte to
+    # trigger the DLL's aggressive entry sequence.
     $flashRet = -1
     for ($attempt = 1; $attempt -le $maxFlashAttempts; $attempt++) {
-        $flashRet = [MRSNativeLink]::MRSFunc_FlashOperationExB($ChipID, $clk, $OperationType, $flashAddr, $DataFilePath)
-        Write-MrsInfo "FlashOperationExB=$flashRet (attempt $attempt/$maxFlashAttempts)"
+        $flashRet = Invoke-MrsCall -Name "FlashOperationExB[$attempt]" -Call { [MRSNativeLink]::MRSFunc_FlashOperationExB($ChipID, $clk, $effectiveOperation, $flashAddr, $DataFilePath) }
+        Write-MrsInfo ("FlashOperationExB=$flashRet (attempt $attempt/$maxFlashAttempts, op=0x{0:X2})" -f $effectiveOperation)
         if ($flashRet -eq 0) { break }
 
-        $isRetryable = ($flashRet -eq 100 -or $flashRet -eq 128 -or $flashRet -eq 129 -or $flashRet -eq 110)
+        $isRetryable = ($flashRet -eq 100 -or $flashRet -eq 104 -or $flashRet -eq 128 -or $flashRet -eq 129 -or $flashRet -eq 110)
         if ($isRetryable -and $attempt -lt $maxFlashAttempts) {
             Write-MrsWarn (Get-MRSErrorText $flashRet)
+            if ($flashRet -eq 104 -and (($effectiveOperation -band 0x40) -eq 0)) {
+                $effectiveOperation = $effectiveOperation -bor 0x40
+                Write-MrsInfo ("Escalating to op 0x{0:X2} (added clear-code-flash) before retry." -f $effectiveOperation)
+            }
             Write-MrsInfo "Waiting 1.5s before retry..."
             Start-Sleep -Seconds 1.5
         } else {
             break
         }
+    }
+
+    # Re-check protection state after flash; surface any unexpected transition.
+    $protectAfter = Invoke-MrsCall -Name "QueryRProtect[post]" -Call { [MRSNativeLink]::MRSFunc_QueryRProtect($ChipID, $clk) }
+    Write-MrsTrace "STATE readProtect[post]=$protectAfter ($(Get-RProtectText $protectAfter))"
+    if ($protectBefore -ne $protectAfter) {
+        Write-MrsWarn ("ReadProtect changed during flash: {0} -> {1}" -f (Get-RProtectText $protectBefore), (Get-RProtectText $protectAfter))
     }
 
     if ($flashRet -ne 0) {
@@ -356,9 +476,10 @@ try {
     exit 0
 } finally {
     if ($deviceOpened) {
-        $closeRet = [MRSNativeLink]::McuCompiler_CloseDevice()
+        $closeRet = Invoke-MrsCall -Name "CloseDevice" -Call { [MRSNativeLink]::McuCompiler_CloseDevice() }
         Write-MrsInfo "CloseDevice=$closeRet"
     }
     if ($oldTmp) { $env:TMP = $oldTmp }
     if ($oldTemp) { $env:TEMP = $oldTemp }
+    Write-MrsTrace "EXIT action=$Action"
 }

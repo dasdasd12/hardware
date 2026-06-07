@@ -36,8 +36,11 @@ INC += -I"$(SRC_ROOT)/Debug" -I"$(SRC_ROOT)/Core" -I"$(SRC_ROOT)/Peripheral/inc"
 # Source files
 APP_SRC := $(PROJECT_ROOT)/main.c
 APP_SRC += $(PROJECT_ROOT)/system_ch32h417.c
+APP_SRC += $(PROJECT_ROOT)/adc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_pwr.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_adc.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_dma.c
 
 # Startup and linker
 STARTUP := $(PROJECT_ROOT)/startup_ch32h417_v3f.S

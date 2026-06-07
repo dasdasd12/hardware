@@ -1,49 +1,63 @@
 $openocd = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\OpenOCD\OpenOCD\bin\openocd.exe"
 $ocdBin  = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\OpenOCD\OpenOCD\bin"
-$gdb     = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\Toolchain\RISC-V Embedded GCC12\bin\riscv-wch-elf-gdb.exe"
 $cfg     = "wch-dual-core.cfg"
 
 $v5fElf = "build\v5f\rtthread_ch32h417_v5f.elf"
 $v3fElf = "v3f_wakeup\build\v3f_wakeup.elf"
 
-Write-Host "=== 1. Starting OpenOCD Server ==="
-$ocdProc = Start-Process -FilePath $openocd -ArgumentList "-s", $ocdBin, "-f", $cfg -NoNewWindow -PassThru -RedirectStandardOutput "openocd_out.txt" -RedirectStandardError "openocd_err.txt"
-Start-Sleep -Seconds 4
+Set-Location $PSScriptRoot
 
-$ocdErr = Get-Content "openocd_err.txt" -Raw
-Write-Host "OpenOCD stderr:"
-Write-Host $ocdErr
+function Quote-CmdArg([string]$arg) {
+    return '"' + ($arg -replace '"', '\"') + '"'
+}
 
-if ($ocdErr -match "failed to connect") {
-    Write-Host "ERROR: OpenOCD could not connect to the target."
-    Write-Host "Please ensure the two-wire debug interface is enabled (use WCHISPTool with BOOT0=VCC)."
-    if (!$ocdProc.HasExited) { Stop-Process -Id $ocdProc.Id -Force }
+if (!(Test-Path $v5fElf)) {
+    Write-Host "ERROR: V5F ELF not found: $v5fElf"
     exit 1
 }
 
-Write-Host "=== 2. Flash V5F RT-Thread (port 3334) ==="
-& $gdb -batch `
-  -ex "set remotetimeout 30" `
-  -ex "target remote localhost:3334" `
-  -ex "monitor reset halt" `
-  -ex "load" `
-  -ex "info registers pc" `
-  $v5fElf
+if (!(Test-Path $v3fElf)) {
+    Write-Host "ERROR: V3F ELF not found: $v3fElf"
+    exit 1
+}
 
-Write-Host "=== 3. Flash V3F Wake-up (port 3333) ==="
-& $gdb -batch `
-  -ex "set remotetimeout 30" `
-  -ex "target remote localhost:3333" `
-  -ex "monitor reset halt" `
-  -ex "load" `
-  -ex 'set $pc = main' `
-  -ex "detach" `
-  -ex "quit" `
-  $v3fElf
+$v5fElfArg = $v5fElf.Replace("\", "/")
+$v3fElfArg = $v3fElf.Replace("\", "/")
+$stdoutLog = "openocd_dual_flash.out.log"
+$stderrLog = "openocd_dual_flash.err.log"
 
-Write-Host "=== 4. Stopping OpenOCD ==="
-if (!$ocdProc.HasExited) {
-    Stop-Process -Id $ocdProc.Id -Force
+Write-Host "=== Flash V5F, flash V3F, then run V3F boot core ==="
+$openocdArgs = @(
+    "-s", $ocdBin,
+    "-f", $cfg,
+    "-c", "page_erase",
+    "-c", "init",
+    "-c", "targets wch_riscv.cpu.1",
+    "-c", "halt",
+    "-c", "program `"$v5fElfArg`" verify",
+    "-c", "targets wch_riscv.cpu.0",
+    "-c", "halt",
+    "-c", "program `"$v3fElfArg`" verify",
+    "-c", "reset run",
+    "-c", "shutdown"
+)
+
+$cmdLine = (Quote-CmdArg $openocd) + " " +
+    (($openocdArgs | ForEach-Object { Quote-CmdArg $_ }) -join " ") +
+    " 1> " + (Quote-CmdArg $stdoutLog) +
+    " 2> " + (Quote-CmdArg $stderrLog)
+
+& "C:\Windows\System32\cmd.exe" /d /c $cmdLine
+$openocdExitCode = $LASTEXITCODE
+
+$ocdOut = Get-Content $stdoutLog -Raw
+$ocdErr = Get-Content $stderrLog -Raw
+if ($ocdOut) { Write-Host $ocdOut }
+if ($ocdErr) { Write-Host $ocdErr }
+
+if ($openocdExitCode -ne 0) {
+    Write-Host "ERROR: OpenOCD flash failed. See $stdoutLog and $stderrLog"
+    exit $openocdExitCode
 }
 
 Write-Host "Done. V3F should now be running and has woken V5F."

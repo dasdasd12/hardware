@@ -1,12 +1,16 @@
 # V3F Keyboard Engine
 
-The V3F core owns the deterministic keyboard engine. It runs a bare-metal
-realtime loop and produces final HID keyboard reports for V5F to send.
+The V3F core owns deterministic realtime keyboard behavior. It runs a
+bare-metal loop and produces bounded `RuntimeIntent` output for V5F to adapt and
+send.
+
+V3F does not generate final USB or wireless host reports. V5F owns report
+adaptation, USB endpoints, and CH585 wireless coordination.
 
 ## Runtime Model
 
 ```text
-Bare-metal loop + interrupts + static runtime tables
+bare-metal loop + interrupts + static RuntimeTable + bounded queues
 ```
 
 Do not run RT-Thread Nano on V3F in the initial architecture. The engine should
@@ -15,16 +19,16 @@ prefer bounded memory, predictable loop timing, and explicit state machines.
 ## Pipeline
 
 ```text
-scan schedule
-  -> hall sensor acquisition
-  -> normalization/filtering
-  -> calibration correction
-  -> per-key analog state
-  -> debounce/actuation/release
-  -> rapid trigger / DKS / SOCD / SpeedTap
-  -> keymap/layer/macro
-  -> HID report generation
-  -> V5F report queue
+H417 key scan
+CH585 non-key input over SPI ingest
+  -> Control Data Layer
+  -> type+mode trigger algorithms
+  -> ControlSignal queue
+  -> interaction_rules
+  -> binding_scopes dispatch
+  -> behavior execution
+  -> RuntimeIntent queue
+  -> V5F report adaptation / device request handling
 ```
 
 Every stage must have bounded execution time.
@@ -33,99 +37,121 @@ Every stage must have bounded execution time.
 
 Runtime inputs:
 
-- matrix and sensor layout table
-- per-key analog config
-- calibration table
-- keymap table
-- layer table
-- macro table
-- behavior feature flags
-- transport mode hints from V5F
+- `RuntimeTableBinary`
+- control index map
+- trigger tables for control `type + mode`
+- dispatch tables for `binding_scopes`
+- behavior table
+- interaction rule table
+- macro bytecode
+- mutable parameter slots
+- calibration-corrected `ControlState` / `ControlEvent`
+- `DeviceSettings.report_policy` fields compiled into runtime parameters where
+  they affect keyboard algorithm or RuntimeIntent shape
 
 These inputs are provided by V5F as compiled runtime tables in SRAM. V3F does
-not parse full PC profiles.
+not parse full `ProfilePackage` source and does not read external Flash in the
+scan path.
 
 ## Outputs
 
 Primary output:
 
-- HID keyboard reports
+- `RuntimeIntent` queue
+
+RuntimeIntent families:
+
+- host input intent: keyboard, consumer, mouse, gamepad usage intent
+- device request intent: bounded commands allowed from profile behavior
+- macro executor scheduling result
+- diagnostic/trace events in debug builds
 
 Secondary outputs:
 
-- optional consumer/system reports, if included in runtime table
-- key event trace in debug builds
 - scan timing statistics
-- active config generation
+- active runtime generation
 - fault and health status
+- optional key/control event trace in debug builds
 
-## Per-Key Analog State
+## Per-Control Runtime State
 
-Each physical key should have a compact runtime state:
+Each control has compact runtime state appropriate to its type:
 
 ```text
-raw sample
-filtered position
-calibrated position
-pressed/released state
-actuation threshold
-release threshold
-rapid trigger baseline
-last event timestamp
+raw or normalized value
+calibrated value
+pressed/released/down state
+trigger baseline
+last signal timestamp
+mode-specific state
 feature flags
+release-to-rearm state
 ```
 
-Per-key settings belong to analog key config, not to keymap. Keymap answers
-"what does this key do"; analog config answers "when does this key trigger".
+Per-control trigger settings belong to profile trigger parameters, not to
+binding dispatch. Binding dispatch answers "what happens after this signal";
+trigger parameters answer "when does this signal exist".
 
 ## Behavior Features
 
 Initial engine features:
 
-- actuation/release threshold
+- normal analog key trigger
 - rapid trigger
+- analog output mode
 - DKS
-- SOCD
-- SpeedTap
-- layer activation
-- macros that are safe to execute offline
+- SOCD interaction rule
+- combo interaction rule
+- binding scope activation
+- tap-hold
+- profile switch request
+- safe offline macros
 
-The feature implementation must use runtime tables, not dynamic allocation.
+The feature implementation must use runtime tables, fixed-size arrays, and
+bounded queues.
 
-## Keymap, Layer, and Macro Ownership
+## Profile Processing Ownership
 
-V3F owns offline-capable keyboard behavior:
+V3F owns offline-capable profile processing:
 
-- keymap resolution
-- layer state
-- macro sequencing
-- HID report composition
+- trigger algorithm state
+- binding scope activation state
+- behavior dispatch
+- macro scheduling
+- interaction rule state
+- RuntimeIntent generation
 
 V5F owns:
 
-- full Device Current Config
-- persistence
-- editing UI
+- `DeviceSettings` persistence
+- `ProfilePackage` slot persistence
 - validation and compilation
-- Agent Control unavailable/fallback behavior
+- runtime table installation transaction
+- screen UI
+- report adaptation and transport sending
+- Agent unavailable/fallback presentation
 
-Agent-related bindings do not execute offline as agent actions. V3F may expose
-an unavailable action state or pass a compact event to V5F when PC software is
-available.
+Agent-related bindings do not execute offline as agent actions. A future
+software-side agent action may be projected to the screen or Local Core, but it
+must not be hidden inside V3F keyboard behavior.
 
 ## Runtime Config Install
 
 Runtime config install flow:
 
-1. V5F validates Device Current Config.
-2. V5F compiles compact tables for V3F.
-3. V5F writes tables to staging shared memory.
+1. V5F validates the target `ProfilePackage` and relevant `DeviceSettings`.
+2. V5F compiles `RuntimeTableBinary`.
+3. V5F writes the table to staging shared memory.
 4. V5F sends install request with version, size, generation, and checksum.
 5. V3F validates the staging data.
-6. V3F activates tables at a safe scan boundary.
-7. V3F reports success/failure and active generation.
+6. V3F freezes dispatch at a safe boundary, neutralizes active outputs through
+   RuntimeIntent, and clears engine runtime state.
+7. V3F activates the new table at a safe scan boundary.
+8. V3F reports success/failure and active generation.
 
-Failed install must not corrupt the previous active table.
+Failed install must not corrupt the previous active table. If installation fails
+after freeze, V3F restarts the previous valid table with cleared runtime state
+and V5F reports rollback to the previous active slot.
 
 ## Timing Requirements
 
@@ -133,12 +159,14 @@ Exact scan and report targets depend on hardware measurement. The architecture
 requires:
 
 - scan loop timing is measured
-- report generation timing is measured
+- trigger and dispatch cost is measured
+- RuntimeIntent queue latency is measured
 - overruns are counted
 - feature cost can be disabled and compared
 - timing summaries are available to V5F diagnostics
 
-Do not add display, storage, or protocol parsing work to V3F scan path.
+Do not add display, storage, report transport, or protocol parsing work to the
+V3F scan path.
 
 ## Memory Rules
 
@@ -151,7 +179,7 @@ V3F realtime path should use:
 - no external Flash access in scan path
 - no unbounded string processing
 
-External Flash stores persisted config, but V5F loads and compiles it.
+External Flash stores persisted resources, but V5F loads and compiles them.
 
 ## Error Handling
 
@@ -161,9 +189,9 @@ V3F error classes:
 - runtime table checksum mismatch
 - table too large
 - scan overrun
-- report queue overrun
+- RuntimeIntent queue overrun
 - unsupported feature flag
-- sensor fault
+- sensor/control fault
 - IPC timeout
 
 Errors are reported to V5F and surfaced through device diagnostics.
@@ -172,14 +200,15 @@ Errors are reported to V5F and surfaced through device diagnostics.
 
 Engine tests should cover:
 
-- threshold actuation/release
+- normal actuation/release
 - rapid trigger state transitions
-- per-key override
-- layer priority
-- macro sequencing
+- per-control override
+- binding scope priority
+- overlay activation
+- macro scheduling
 - SOCD resolution
-- HID report generation
-- config generation swap
+- combo suppress/release behavior
+- RuntimeIntent generation
+- runtime table generation swap
 - invalid table rejection
-- scan/report overrun counters
-
+- scan/dispatch/queue overrun counters

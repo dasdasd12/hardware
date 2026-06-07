@@ -12,7 +12,7 @@ PC software:
 V5F:
   renders UI with LVGL or custom renderer
   handles local setting edits
-  persists Device Current Config changes
+  persists explicit resource changes
 ```
 
 LVGL is the preferred first implementation direction. A custom renderer remains
@@ -45,19 +45,19 @@ PC software owns:
 Initial screen pages:
 
 - device status
-- active Device Current Config summary
+- active profile slot and `DeviceSettings` summary
 - basic keyboard settings
 - magnetic setting basics
-- transport mode/status
+- transport/status display
 - diagnostics summary
 - Agent/status view when PC software is connected
 
 Initial local editable settings:
 
-- active/current config selection
+- active profile slot selection
 - actuation and rapid trigger basics
-- transport mode
-- screen brightness/theme/page preference
+- user-writable `DeviceSettings`
+- screen brightness/theme/page preference, once `ScreenConfig` is specified
 - safe macro enable/disable
 
 Screen rotation is not a first-stage user setting. If needed, it belongs to
@@ -84,8 +84,12 @@ fallback content. They must not execute hidden local actions.
 Local edits go through V5F config manager:
 
 ```text
-screen control -> V5F config edit -> validation -> Device Current Config
-  -> persist -> compile runtime table -> V3F install
+screen control
+  -> V5F resource edit
+  -> validation
+  -> persist active ProfilePackage / DeviceSettings / ScreenConfig
+  -> compile RuntimeTable when the active profile behavior changed
+  -> V3F install when needed
 ```
 
 The screen UI should show whether the edit is active, pending, rejected, or
@@ -109,8 +113,8 @@ Widget
   action binding
 ```
 
-Future PC profile/screen layout sync can update page definitions or widget
-configuration, but live agent state remains runtime data, not profile storage.
+Future PC screen layout sync updates `ScreenConfig`, not `ProfilePackage`. Live
+agent state remains runtime/projected data, not profile storage.
 
 ## Performance Rules
 
@@ -130,7 +134,9 @@ Persist on device:
 
 - current screen page preference
 - brightness/theme preference
-- local settings that are part of Device Current Config
+- local `ScreenConfig` fields, once defined
+- local `DeviceSettings` fields edited through screen
+- active `ProfilePackage` fields edited through screen
 - fallback display state
 
 Do not persist full agent logs or PC profile library on the device.
@@ -143,6 +149,6 @@ MVP display should prove:
 - one editable keyboard setting
 - local edit persists
 - local edit updates V3F runtime behavior
-- PC can read the changed Device Current Config
+- PC can read the changed resource
 - Agent unavailable state is displayed when PC software is disconnected
 

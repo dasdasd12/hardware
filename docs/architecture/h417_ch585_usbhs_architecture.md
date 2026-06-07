@@ -1,54 +1,123 @@
-# H417 to CH585 USB HS Architecture
+# H417 to CH585 Link Architecture
 
-CH585 is a wireless and auxiliary I/O protocol processor connected to H417
-through USB HS.
+This file keeps its historical filename, but the current architecture no longer
+treats USB HS as the required H417-CH585 runtime input link.
 
-## Physical Link
+The current HTML architecture is authoritative:
+
+- H417 directly handles key scan.
+- CH585 handles non-key hardware input, wireless state, and external modules.
+- Non-key input that participates in keyboard behavior is converted by CH585
+  into the unified control data contract and reported to H417 through the SPI
+  ingest path.
+- CH585 internal scan architecture, filtering, module enumeration, and private
+  extension-module protocols are not defined in this document.
+
+USB HS may be reconsidered later for a separate high-bandwidth or firmware
+update path, but it is not the current Control Data Layer ingest contract.
+
+## Physical and Logical Links
+
+Current required link:
 
 ```text
-CH32H417 USB HS Host <-> CH585 USB Device
+CH585 -> H417:
+  SPI ingest frames for unified non-key control data
+
+H417 -> CH585:
+  bounded control/config commands required for wireless policy and diagnostics
+  exact transport for these commands remains part of the CH585/H417 protocol
+  spec, not Profile schema
 ```
 
-The exact USB class/interface shape can evolve, but the logical link must carry
-framed messages with flow control, status, and update support.
+Possible future or optional link:
+
+```text
+USB HS:
+  reserved for future high-bandwidth diagnostics, firmware update, or alternate
+  CH585 control transport if hardware and firmware choose to use it
+```
 
 ## CH585 Role
 
 CH585 owns:
 
-- BLE HID
-- 2.4G private wireless protocol
+- BLE HID and 2.4G private wireless protocol
 - pairing and bonding state
 - wireless retry/ack/channel handling
 - wireless encryption/authentication, when implemented
 - wireless connection status
-- future auxiliary I/O protocol handling
+- joystick, encoder, and other non-key local input handling
+- external module ingress when modules are attached to CH585 USB or other
+  extension ports
+- conversion of non-key/module input into unified source/control/event reports
+  before H417 consumes it
 
 CH585 does not own:
 
-- full Device Current Config
+- `DeviceSettings`
+- `ProfilePackage` source semantics
 - PC Profile Library
 - Agent Control
-- global keyboard policy
-- V3F runtime table generation
+- global keyboard behavior policy
+- V3F RuntimeTable generation
 - device screen UI
 
 ## H417 Role
 
 H417 owns product state and coordination:
 
-- V5F config manager
-- V3F keyboard engine runtime tables
+- V5F resource managers
+- V3F keyboard engine RuntimeTables
 - device protocol to PC software
 - display UI
 - diagnostics aggregation
-- CH585 high-level commands
-- CH585 firmware update bridge
+- CH585 high-level policy commands
+- factory reset coordination across H417 and CH585 resources
 
 H417 treats CH585 as a capable protocol processor, not a dumb radio. However,
 H417 remains the product coordination authority.
 
+## SPI Ingest Boundary
+
+CH585-to-H417 non-key input frames must enter the same Control Data Layer as
+H417 key scan.
+
+```text
+CH585 local input or extension module
+  -> CH585 source adapter
+  -> unified source_index / control_index / data_kind / event_code
+  -> SPI ingest
+  -> H417 Control Data Layer
+  -> V3F Profile Processing
+```
+
+Rules:
+
+- SPI v1 carries unified `control_index`, not a CH585-private channel number.
+- Unknown source, unknown control, or type mismatch cannot enter Profile
+  Processing.
+- CH585 raw calibration is applied before SPI where CH585 owns the raw hardware.
+- H417/V3F consumes normalized `ControlState` and `ControlEvent` facts.
+- Profile never defines CH585 physical channels or extension-module private
+  protocols.
+
 ## Logical Message Families
+
+CH585 to H417:
+
+```text
+CONTROL_STATE_FRAME
+CONTROL_EVENT_FRAME
+SOURCE_STATUS
+WIRELESS_STATUS
+PAIRING_STATUS
+BLE_CONNECTION_STATUS
+2G4_CONNECTION_STATUS
+RADIO_DIAGNOSTICS
+CH585_ERROR
+CH585_FW_UPDATE_STATUS
+```
 
 H417 to CH585:
 
@@ -60,44 +129,30 @@ PAIRING_START
 PAIRING_CANCEL
 RADIO_CHANNEL_SET
 WIRELESS_CONFIG_SET
-HID_REPORT_TX
+WIRELESS_RATE_SET
+CH585_DIAGNOSTIC_QUERY
 CH585_FW_UPDATE_BEGIN
 CH585_FW_UPDATE_CHUNK
 CH585_FW_UPDATE_COMMIT
 ```
 
-CH585 to H417:
+Message names are logical. Final IDs and frame layout belong in the CH585/H417
+protocol header and the Runtime Contract SPI ingest specification.
+
+## Wireless Output Boundary
+
+V3F does not directly talk to CH585.
 
 ```text
-WIRELESS_STATUS
-PAIRING_STATUS
-BLE_CONNECTION_STATUS
-2G4_CONNECTION_STATUS
-HID_REPORT_RX_OR_ACK
-RADIO_DIAGNOSTICS
-CH585_ERROR
-CH585_FW_UPDATE_STATUS
+V3F RuntimeIntent
+  -> V5F report adaptation
+  -> CH585 wireless output path
+  -> BLE / 2.4G host
 ```
 
-Message names are logical. Final IDs belong in a protocol header file when
-implementation begins.
-
-## Wireless HID Data Flow
-
-For wireless output:
-
-```text
-V3F keyboard engine -> HID report -> V5F coordination -> CH585 USB HS -> BLE/2.4G
-```
-
-For wireless status:
-
-```text
-CH585 -> V5F diagnostics/config manager -> device screen and PC software
-```
-
-V3F should not directly own CH585 communication. V5F bridges keyboard engine
-output and wireless protocol state.
+CH585 owns wireless host details. H417 owns product policy and decides what
+profile/report policy is active. Wireless host records, pairing state, and
+current connection facts are not stored in `ProfilePackage`.
 
 ## Config Boundary
 
@@ -108,47 +163,42 @@ CH585 may persist radio-specific settings:
 - BLE identity/bond metadata
 - wireless calibration data
 
-H417 persists product-level Device Current Config. If PC software changes a
-wireless setting, V5F validates it and then sends the CH585-specific subset to
-CH585.
+H417 persists product-level resources such as `DeviceSettings` and
+`ProfilePackage` slots. If PC software changes a wireless policy, V5F validates
+the system-level setting and sends the CH585-specific subset to CH585.
 
 ## Firmware Update Bridge
 
 CH585 firmware update is coordinated by H417:
 
 ```text
-PC software -> Vendor HID -> H417 V5F -> USB HS -> CH585 boot/update mode
+PC software -> Vendor HID -> H417 V5F -> CH585 update transport
 ```
+
+The exact H417-to-CH585 update transport is not fixed by this document. If USB
+HS is later used for update mode, it must remain separate from the SPI control
+data ingest contract.
 
 H417 verifies package target and transfer integrity before instructing CH585 to
 commit. CH585 reports update progress and final status back through H417.
 
-CH585 update must not corrupt H417 app firmware or Device Current Config.
+CH585 update must not corrupt H417 app firmware, `DeviceSettings`,
+`ProfilePackage` slots, or user calibration data.
 
 ## Diagnostics
 
 Minimum CH585 diagnostics:
 
 - CH585 firmware version
+- SPI ingest health
 - wireless mode
 - BLE connection status
 - 2.4G connection status
 - pairing state
 - radio error counters
-- USB HS link state
+- extension-module source status
 - last CH585 error code
 - CH585 update status
 
 These diagnostics should be exposed to PC software through the main device
-protocol.
-
-## Future Auxiliary I/O
-
-CH585 may later handle auxiliary I/O if it is useful. Any auxiliary I/O feature
-must follow these rules:
-
-- H417 owns product-level configuration.
-- CH585 owns only protocol/local hardware handling.
-- H417 receives status and errors.
-- Features are capability-negotiated.
-
+protocol and to Screen through compact local status pages.

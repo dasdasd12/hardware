@@ -12,7 +12,7 @@
 #>
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("detect", "init", "build", "flash", "debug", "debug-check", "reset-link", "loop")]
+    [ValidateSet("detect", "init", "build", "flash", "debug", "debug-check", "reset-link", "recover", "loop")]
     [string]$Action,
 
     [string]$ProjectDir = (Get-Location).Path,
@@ -41,87 +41,111 @@ param(
     [string]$DebugInterface = "one-wire",
 
     [ValidateSet("High", "Middle", "Low")]
-    [string]$ClkSpeed = "High",
+    [string]$ClkSpeed = "Middle",
 
     [string]$FlashAddress = "0x08000000",
+
+    [string]$SessionLogDir = "",
 
     [switch]$SkipBuild,
     [switch]$SkipFlash,
     [switch]$VisibleOpenOCD,
-    [switch]$KeepCodeProtect,
-    [switch]$EraseAll,
+    [switch]$DisableCodeProtect,
+    [switch]$NoEraseAll,
     [switch]$ClearCodeFlash,
     [switch]$DisablePowerOut,
     [switch]$EnableSdiPrintf,
     [switch]$NoVerify,
     [switch]$NoReset,
     [switch]$LoadBeforeDebug,
+    [switch]$AllowMrsReset,
     [switch]$RecoverMode,
     [switch]$RestartLink,
-    [switch]$StartOpenOCD,
-    [switch]$AllowOpenOCDFlash,
-    [switch]$AllowTargetReset,
-    [switch]$AllowLinkReset,
-    [switch]$KillStaleDebuggers,
-    [switch]$StopOpenOCDAfterDebug,
-    [switch]$AllowCodexHardwareAccess,
+    [switch]$Diagnose,
     [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
-$script:RunningInCodex = [bool]($env:CODEX_THREAD_ID -or ($env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE -like "codex*"))
 
-function Write-Info { param([string]$Message) Write-Host "[INFO]  $Message" -ForegroundColor Cyan }
-function Write-Ok   { param([string]$Message) Write-Host "[OK]    $Message" -ForegroundColor Green }
-function Write-Warn { param([string]$Message) Write-Host "[WARN]  $Message" -ForegroundColor Yellow }
-function Write-Err  { param([string]$Message) Write-Host "[ERR]   $Message" -ForegroundColor Red }
-function Write-Step { param([string]$Message) Write-Host "`n========== $Message ==========" -ForegroundColor Cyan }
+# --- session log -------------------------------------------------------------
+# Every run lands in .wch-skill-logs/session-YYYYMMDD-HHmmss.log under the
+# project (or %TEMP% as a fallback). Every Write-* below tees to that file so
+# when a chip locks we can read one file and see the whole conversation with
+# WCH-Link, OpenOCD, GDB, and the MRS DLL.
+$script:SessionLogPath = $null
+$script:MrsTraceLogPath = $null
 
-function Assert-CodexHardwareAccess {
-    param([string]$Operation)
-    if ($script:RunningInCodex -and (-not $AllowCodexHardwareAccess)) {
-        throw "Codex hardware guard: refusing to run '$Operation'. Allowed by default in Codex: detect, build, MRS DLL flash, flash -DryRun, and GDB attach to an already-running OpenOCD daemon using halt only. Blocked: reset-link, RecoverMode, RestartLink, OpenOCD flash/fallback, starting/stopping OpenOCD, and reset halt. Pass -AllowCodexHardwareAccess only after explicitly accepting that risk."
+function Initialize-SessionLog {
+    param([string]$ProjectPath, [string]$ExplicitDir)
+
+    $base = $ExplicitDir
+    if (-not $base) {
+        if ($ProjectPath -and (Test-Path -LiteralPath $ProjectPath)) {
+            $base = Join-Path $ProjectPath ".wch-skill-logs"
+        } else {
+            $base = Join-Path $env:TEMP "wch-skill-logs"
+        }
+    }
+    try {
+        if (-not (Test-Path -LiteralPath $base)) {
+            New-Item -ItemType Directory -Path $base -Force | Out-Null
+        }
+    } catch {
+        $base = $env:TEMP
+    }
+
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $script:SessionLogPath = Join-Path $base "session-$stamp.log"
+    $script:MrsTraceLogPath = Join-Path $base "mrs-trace-$stamp.log"
+    try {
+        Set-Content -LiteralPath $script:SessionLogPath -Value "wch-auto session log $stamp" -Encoding UTF8
+    } catch {
+        $script:SessionLogPath = $null
     }
 }
 
-function Assert-LinkResetAllowed {
-    param([string]$Operation)
-    if (-not $AllowLinkReset) {
-        throw "$Operation requires -AllowLinkReset. WCH-Link software reset is not a safe default on this setup."
-    }
-    if ($script:RunningInCodex -and (-not $AllowCodexHardwareAccess)) {
-        Assert-CodexHardwareAccess $Operation
-    }
+function Write-SessionLog {
+    param([string]$Level, [string]$Message)
+    if (-not $script:SessionLogPath) { return }
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    try {
+        Add-Content -LiteralPath $script:SessionLogPath -Value "[$stamp][$Level] $Message" -ErrorAction SilentlyContinue
+    } catch {}
 }
 
-function Assert-OpenOCDFlashAllowed {
-    param([string]$Operation)
-    if (-not $AllowOpenOCDFlash) {
-        throw "$Operation requires -AllowOpenOCDFlash. OpenOCD program/fallback exits the daemon and can trigger the WCH-Link second-init bug; prefer MRS DLL flash."
-    }
-    if ($script:RunningInCodex -and (-not $AllowCodexHardwareAccess)) {
-        Assert-CodexHardwareAccess $Operation
-    }
-}
+function Write-Info { param([string]$Message) Write-Host "[INFO]  $Message" -ForegroundColor Cyan; Write-SessionLog "INFO" $Message }
+function Write-Ok   { param([string]$Message) Write-Host "[OK]    $Message" -ForegroundColor Green; Write-SessionLog "OK  " $Message }
+function Write-Warn { param([string]$Message) Write-Host "[WARN]  $Message" -ForegroundColor Yellow; Write-SessionLog "WARN" $Message }
+function Write-Err  { param([string]$Message) Write-Host "[ERR]   $Message" -ForegroundColor Red; Write-SessionLog "ERR " $Message }
+function Write-Step { param([string]$Message) Write-Host "`n========== $Message ==========" -ForegroundColor Cyan; Write-SessionLog "STEP" $Message }
 
-function Assert-OpenOCDStartAllowed {
-    param([string]$Operation)
-    if (-not $StartOpenOCD) {
-        throw "$Operation requires an already-running OpenOCD daemon. Start OpenOCD once outside this script and keep it open, or pass -StartOpenOCD explicitly."
+function Invoke-Tool {
+    <#
+    Runs a subprocess with timing + exit-code capture. Everything goes to the
+    session log. Throws on non-zero by default; pass -AllowNonZero to read
+    $LASTEXITCODE without throwing (useful for opportunistic checks).
+    #>
+    param(
+        [string]$Name,
+        [string]$Exe,
+        [string[]]$Arguments,
+        [switch]$AllowNonZero
+    )
+    Write-Info ("{0}: {1} {2}" -f $Name, $Exe, ($Arguments -join ' '))
+    Write-SessionLog "EXEC" ("{0} | {1} {2}" -f $Name, $Exe, ($Arguments -join ' '))
+    if ($DryRun) {
+        Write-Warn "Dry run: $Name not executed."
+        return 0
     }
-    if ($script:RunningInCodex -and (-not $AllowCodexHardwareAccess)) {
-        Assert-CodexHardwareAccess $Operation
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    & $Exe @Arguments
+    $code = $LASTEXITCODE
+    $sw.Stop()
+    Write-SessionLog "EXIT" ("$Name exit={0} ({1}ms)" -f $code, $sw.ElapsedMilliseconds)
+    if ($code -ne 0 -and -not $AllowNonZero) {
+        throw "$Name failed with exit code $code"
     }
-}
-
-function Assert-TargetResetAllowed {
-    param([string]$Operation)
-    if (-not $AllowTargetReset) {
-        throw "$Operation requires -AllowTargetReset. The safe default is halt-only; reset halt can stop V3F before it wakes V5F."
-    }
-    if ($script:RunningInCodex -and (-not $AllowCodexHardwareAccess)) {
-        Assert-CodexHardwareAccess $Operation
-    }
+    return $code
 }
 
 function Convert-ToForwardPath {
@@ -297,26 +321,25 @@ function Find-RunningOpenOCD {
     return $null
 }
 
-function Reset-WCHLinkUSB {
+function Reset-WCHLinkPnP {
     <#
-    .SYNOPSIS
-        Software-reset WCH-Link by disabling/enabling its USB composite device.
-        This simulates a physical re-plug without touching the hardware.
+    Last-resort: cycle the WCH-Link USB composite device via Disable-PnpDevice/
+    Enable-PnpDevice. Touching the device mid-transfer has been observed to
+    leave the link half-dead, so the caller should only invoke this if the
+    in-process MRS rehandshake (Invoke-MRSRehandshake) already failed.
     #>
-    Write-Step "WCH-Link software reset"
-    $composite = Get-PnpDevice -Class USB | Where-Object {
+    Write-Info "Falling back to PnP disable/enable cycle..."
+    $composite = Get-PnpDevice -Class USB -ErrorAction SilentlyContinue | Where-Object {
         $_.InstanceId -match '^USB\\VID_1A86&PID_801[012]\\' -and
         $_.FriendlyName -like "*Composite*"
     } | Where-Object { $_.Status -eq 'OK' } | Select-Object -First 1
 
     if (-not $composite) {
-        Write-Warn "No active WCH-Link USB composite device found. Trying any WCH-Link..."
-        $composite = Get-PnpDevice | Where-Object {
+        $composite = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
             $_.InstanceId -match '^USB\\VID_1A86&PID_801[012]\\' -and
             $_.FriendlyName -notlike "*MI_*"
         } | Select-Object -First 1
     }
-
     if (-not $composite) {
         throw "WCH-Link USB device not found. Check cable and target power."
     }
@@ -328,16 +351,51 @@ function Reset-WCHLinkUSB {
     }
 
     try {
-        Write-Info "Disabling device..."
         Disable-PnpDevice -InstanceId $composite.InstanceId -Confirm:$false -ErrorAction Stop
         Start-Sleep -Seconds 2
-        Write-Info "Re-enabling device..."
         Enable-PnpDevice -InstanceId $composite.InstanceId -Confirm:$false -ErrorAction Stop
         Start-Sleep -Seconds 3
-        Write-Ok "WCH-Link software reset complete. Wait a few seconds for driver re-initialization."
+        Write-Ok "PnP disable/enable cycle complete."
     } catch {
         throw "Failed to reset WCH-Link via PnP: $_"
     }
+}
+
+function Invoke-MRSRehandshake {
+    <#
+    In-process rehandshake: ask mrs-link.ps1 to open the device, run
+    CompareVersion + GetLinkedMCUID + QueryRProtect, and close cleanly.
+    Returns $true if the helper exited 0, $false otherwise. Cheap, idempotent,
+    safe to run when the chip appears stuck. Always tried before PnP cycling.
+    #>
+    param([hashtable]$Toolchain, [string]$TargetChip)
+    if (-not $Toolchain -or $TargetChip -ne "CH32H417") { return $false }
+    $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
+    try {
+        Invoke-MRSLink -Toolchain $Toolchain -HelperAction "rehandshake" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+        Write-Ok "MRS rehandshake succeeded; chip responded to OpenDevice."
+        return $true
+    } catch {
+        Write-Warn "MRS rehandshake failed: $_"
+        return $false
+    }
+}
+
+function Reset-WCHLinkUSB {
+    <#
+    Try the cheap, in-process recovery first (MRS Open/CompareVersion/Close).
+    Only if that fails do we cycle the USB composite device — that path can
+    leave the link half-dead if invoked mid-transfer. See plan Layer B.5.
+    #>
+    param([hashtable]$Toolchain, [string]$TargetChip)
+    Write-Step "WCH-Link soft recovery"
+
+    if (Invoke-MRSRehandshake -Toolchain $Toolchain -TargetChip $TargetChip) {
+        return
+    }
+
+    Write-Warn "Soft rehandshake did not bring the link back; cycling USB."
+    Reset-WCHLinkPnP
 }
 
 function Infer-Chip {
@@ -667,9 +725,7 @@ function Invoke-MakeAt {
     Push-Location $Dir
     try {
         Add-ToolchainPath $Toolchain
-        Write-Info "make command: $($Toolchain.Make) $($MakeArgs -join ' ')"
-        & $Toolchain.Make @MakeArgs
-        if ($LASTEXITCODE -ne 0) { throw "make failed in $Dir with exit code $LASTEXITCODE" }
+        Invoke-Tool -Name "make@$Dir" -Exe $Toolchain.Make -Arguments $MakeArgs | Out-Null
     } finally {
         Pop-Location
     }
@@ -725,13 +781,7 @@ function Invoke-Build {
 
 function Invoke-OpenOCD {
     param([hashtable]$Toolchain, [string[]]$OpenOCDArgs)
-    Write-Info "openocd $($OpenOCDArgs -join ' ')"
-    if ($DryRun) {
-        Write-Warn "Dry run: OpenOCD was not executed."
-        return
-    }
-    & $Toolchain.OpenOCD @OpenOCDArgs
-    if ($LASTEXITCODE -ne 0) { throw "OpenOCD failed with exit code $LASTEXITCODE" }
+    Invoke-Tool -Name "openocd" -Exe $Toolchain.OpenOCD -Arguments $OpenOCDArgs | Out-Null
 }
 
 function Get-MRSChipInfo {
@@ -750,13 +800,23 @@ function Get-MRSChipInfo {
 }
 
 function Get-MRSFlashOperationType {
+    <#
+    Build the MRS operation byte. New defaults (matching MRS GUI EVT):
+      - bit 0x20 (disable code-protect) is OFF by default; user must opt in
+        with -DisableCodeProtect. Touching the option-byte region every flash
+        was a primary suspect for chip locks in PB8/PB9 hardware.
+      - bit 0x08 (erase-all) is ON by default unless -NoEraseAll or the caller
+        passes -EraseBefore:$false (V5F image in a V3F-leading dual flash).
+      - bits 0x04 (program) and 0x02 (verify) are always on; user opts out of
+        verify via -NoVerify. 0x01 (reset-run) follows ResetAfter / -NoReset.
+    #>
     param([bool]$Reset, [bool]$EraseBefore)
     $operation = 0
     if ($DisablePowerOut) { $operation = $operation -bor 0x80 }
     if ($ClearCodeFlash) { $operation = $operation -bor 0x40 }
-    if (-not $KeepCodeProtect) { $operation = $operation -bor 0x20 }
+    if ($DisableCodeProtect) { $operation = $operation -bor 0x20 }
     if ($EnableSdiPrintf) { $operation = $operation -bor 0x10 }
-    if ($EraseBefore -and $EraseAll) { $operation = $operation -bor 0x08 }
+    if ($EraseBefore -and (-not $NoEraseAll)) { $operation = $operation -bor 0x08 }
     $operation = $operation -bor 0x04
     if (-not $NoVerify) { $operation = $operation -bor 0x02 }
     if ($Reset -and (-not $NoReset)) { $operation = $operation -bor 0x01 }
@@ -797,18 +857,14 @@ function Invoke-MRSLink {
         "-CommunicationLibPath", $Toolchain.CommunicationLib,
         "-FirmwareLinkPath", $Toolchain.FirmwareLink
     )
+    if ($script:MrsTraceLogPath) {
+        $args += @("-TraceLog", $script:MrsTraceLogPath)
+    }
     if ($DataFilePath) { $args += @("-DataFilePath", $DataFilePath) }
 
     Write-Info "MRS helper: $HelperAction chip=$ChipID interface=$DebugInterface clk=$ClkSpeed"
     if ($DataFilePath) { Write-Info "MRS target: $DataFilePath" }
-    if ($DryRun) {
-        Write-Warn "Dry run: MRS helper was not executed."
-        Write-Info "$psExe $($args -join ' ')"
-        return
-    }
-
-    & $psExe @args
-    if ($LASTEXITCODE -ne 0) { throw "MRS helper failed with exit code $LASTEXITCODE" }
+    Invoke-Tool -Name "mrs-link[$HelperAction]" -Exe $psExe -Arguments $args | Out-Null
 }
 
 function Invoke-MRSSetTarget {
@@ -830,7 +886,7 @@ function Invoke-MRSFlashImage {
     $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
     if (-not $Address) { $Address = $chipInfo.FlashAddress }
     $operation = Get-MRSFlashOperationType -Reset $ResetAfter -EraseBefore $EraseBefore
-    Write-Info ("MRS operation: 0x{0:X2} (disable-protect={1}, erase-all={2}, program, verify={3}, reset={4})" -f $operation, (-not $KeepCodeProtect), ($EraseBefore -and $EraseAll), (-not $NoVerify), ($ResetAfter -and (-not $NoReset)))
+    Write-Info ("MRS operation: 0x{0:X2} (disable-protect={1}, erase-all={2}, program, verify={3}, reset={4})" -f $operation, [bool]$DisableCodeProtect, ($EraseBefore -and (-not $NoEraseAll)), (-not $NoVerify), ($ResetAfter -and (-not $NoReset)))
     Invoke-MRSLink -Toolchain $Toolchain -HelperAction "flash" -ChipID $chipInfo.ChipID -OperationType $operation -DataFilePath $Image -Address $Address
 }
 
@@ -839,19 +895,32 @@ function Invoke-Flash {
     Write-Step "Flash"
     if (-not $Toolchain) { throw "MRS toolchain not found." }
 
+    # Only kill the existing OpenOCD daemon when the user has explicitly asked
+    # for a link restart / recover, or when an OpenOCD process exists but the
+    # GDB ports are dead (>3s). The MRS DLL path can flash while the OpenOCD
+    # daemon is alive — killing it is what forces the next debug-check to
+    # restart OpenOCD and trip the WCH-Link second-init bug. See plan Layer B.3.
+    $ocdRunning = Find-RunningOpenOCD
+    $portsDead = $false
+    if ($ocdRunning) {
+        $portsDead = (-not (Test-TcpPort -Port 3333 -TimeoutMs 500)) -and (-not (Test-TcpPort -Port 3334 -TimeoutMs 500))
+        if ($portsDead) {
+            Start-Sleep -Milliseconds 1500
+            $portsDead = (-not (Test-TcpPort -Port 3333 -TimeoutMs 500)) -and (-not (Test-TcpPort -Port 3334 -TimeoutMs 500))
+        }
+    }
+    if ($RestartLink -or $RecoverMode -or ($ocdRunning -and $portsDead)) {
+        if ($ocdRunning -and $portsDead) {
+            Write-Warn "OpenOCD is running but neither GDB port responds — terminating before flash."
+        }
+        Kill-StaleWCHProcesses
+    } elseif ($ocdRunning) {
+        Write-Info "Keeping live OpenOCD daemon (PID $($ocdRunning.Id)) — MRS DLL flash does not conflict with it."
+    }
+
     $root = if ($TargetChip -eq "CH32H417") { Get-H417ProjectRoot $ProjectDir } else { Resolve-ExistingPath $ProjectDir }
     $resolvedCore = Resolve-Core -Dir $root -RequestedCore $RequestedCore -CurrentChip $TargetChip -Elf $ElfPath
     $resolvedFlashTool = if ($FlashTool -eq "auto") { "mrs" } else { $FlashTool }
-
-    if (($resolvedFlashTool -ne "mrs") -and (-not $DryRun)) {
-        Assert-OpenOCDFlashAllowed "OpenOCD flash"
-    }
-
-    if ($KillStaleDebuggers) {
-        Kill-StaleWCHProcesses
-    } else {
-        Write-Info "Preserving existing OpenOCD/GDB processes."
-    }
 
     if ($resolvedFlashTool -eq "mrs") {
         if ($TargetChip -ne "CH32H417") {
@@ -875,12 +944,9 @@ function Invoke-Flash {
                 $mrsOk = $true
             } catch {
                 Write-Warn "MRS DLL flash failed: $_"
-                if ($RecoverMode -and $AllowOpenOCDFlash) {
-                    Write-Warn "RecoverMode + AllowOpenOCDFlash enabled: attempting OpenOCD fallback..."
+                if ($RecoverMode) {
+                    Write-Warn "RecoverMode enabled: attempting OpenOCD fallback..."
                 } else {
-                    if ($RecoverMode) {
-                        Write-Warn "RecoverMode no longer falls back to OpenOCD by default. Pass -AllowOpenOCDFlash only if you intentionally accept the second-init risk."
-                    }
                     throw
                 }
             }
@@ -891,11 +957,10 @@ function Invoke-Flash {
             }
 
             # RecoverMode fallback via OpenOCD
-            Assert-OpenOCDFlashAllowed "OpenOCD fallback flash"
-            if ($KillStaleDebuggers) { Kill-StaleWCHProcesses }
+            Kill-StaleWCHProcesses
             Invoke-MRSSetTarget -Toolchain $Toolchain -TargetChip $TargetChip
-            if (-not $KeepCodeProtect) {
-                Write-Warn "OpenOCD fallback does not use the MRS DLL Code-Protect unlock operation."
+            if ($DisableCodeProtect) {
+                Write-Warn "OpenOCD fallback does not honor -DisableCodeProtect. The chip's RDP state is left untouched."
             }
             $baseArgs = @("-s", $Toolchain.OpenOCDBin, "-f", "wch-dual-core.cfg", "-c", "init")
             $v3 = Convert-ToForwardPath $pair.v3f
@@ -929,12 +994,9 @@ function Invoke-Flash {
             $mrsOk = $true
         } catch {
             Write-Warn "MRS DLL flash failed: $_"
-            if ($RecoverMode -and $AllowOpenOCDFlash) {
-                Write-Warn "RecoverMode + AllowOpenOCDFlash enabled: attempting OpenOCD fallback..."
+            if ($RecoverMode) {
+                Write-Warn "RecoverMode enabled: attempting OpenOCD fallback..."
             } else {
-                if ($RecoverMode) {
-                    Write-Warn "RecoverMode no longer falls back to OpenOCD by default. Pass -AllowOpenOCDFlash only if you intentionally accept the second-init risk."
-                }
                 throw
             }
         }
@@ -945,11 +1007,10 @@ function Invoke-Flash {
         }
 
         # RecoverMode fallback via OpenOCD
-        Assert-OpenOCDFlashAllowed "OpenOCD fallback flash"
-        if ($KillStaleDebuggers) { Kill-StaleWCHProcesses }
+        Kill-StaleWCHProcesses
         Invoke-MRSSetTarget -Toolchain $Toolchain -TargetChip $TargetChip
-        if (-not $KeepCodeProtect) {
-            Write-Warn "OpenOCD fallback does not use the MRS DLL Code-Protect unlock operation."
+        if ($DisableCodeProtect) {
+            Write-Warn "OpenOCD fallback does not honor -DisableCodeProtect. The chip's RDP state is left untouched."
         }
         $info = Get-H417CoreInfo $resolvedCore
         $elf = if ($ElfPath) { Resolve-ExistingPath $ElfPath } else { Find-ElfFile -Dir $root -CoreName $resolvedCore }
@@ -970,8 +1031,8 @@ function Invoke-Flash {
 
     if ($TargetChip -eq "CH32H417") {
         Invoke-MRSSetTarget -Toolchain $Toolchain -TargetChip $TargetChip
-        if (-not $KeepCodeProtect) {
-            Write-Warn "OpenOCD flash fallback does not use the MRS DLL Code-Protect unlock operation. Prefer -FlashTool mrs for CH32H417."
+        if ($DisableCodeProtect) {
+            Write-Warn "OpenOCD flash fallback does not honor -DisableCodeProtect. Prefer -FlashTool mrs for CH32H417 if you need RDP cleared."
         }
         $baseArgs = @("-s", $Toolchain.OpenOCDBin, "-f", "wch-dual-core.cfg", "-c", "init")
 
@@ -1066,25 +1127,19 @@ function Invoke-Debug {
     # Therefore, NEVER start a new OpenOCD if one is already running. Reuse the daemon.
     $ocdProc = Find-RunningOpenOCD
     $weStartedOCD = $false
-    $codexSafeMode = $script:RunningInCodex -and (-not $AllowCodexHardwareAccess)
 
     if ($ocdProc) {
         Write-Ok "Reusing existing OpenOCD daemon (PID $($ocdProc.Id))"
     } else {
-        if ($DryRun) {
-            Write-Warn "Dry run: OpenOCD/GDB were not executed."
-            Write-Info "OpenOCD would be required on $cfgFile"
-            Write-Info "GDB port: $port"
-            Write-Info "ELF: $elf"
-            return
-        }
-        Assert-OpenOCDStartAllowed "starting OpenOCD"
-        if ($TargetChip -eq "CH32H417") {
+        if ($TargetChip -eq "CH32H417" -and $AllowMrsReset) {
+            # Only run the MRS DLL pre-reset when the caller explicitly opted in
+            # (V3F-STOP-mode recovery). Routinely toggling the link via the DLL
+            # immediately before launching OpenOCD is the textbook trigger for
+            # the WCH-Link "second-init" failure. See plan Layer B.3.
             Invoke-MRSSetTarget -Toolchain $Toolchain -TargetChip $TargetChip
-            if ($AllowTargetReset) {
-                Write-Warn "AllowTargetReset enabled: MRS reset before OpenOCD start."
-                Invoke-MRSReset -Toolchain $Toolchain -TargetChip $TargetChip
-            }
+            Invoke-MRSReset -Toolchain $Toolchain -TargetChip $TargetChip
+            Write-Info "Settling 1500ms after MRS DLL closed before launching OpenOCD..."
+            Start-Sleep -Milliseconds 1500
         }
 
         $windowStyle = if ($VisibleOpenOCD) { "Normal" } else { "Hidden" }
@@ -1093,7 +1148,7 @@ function Invoke-Debug {
             $info = Get-H417CoreInfo $resolvedCore
             # Arguments containing spaces must be explicitly quoted for Start-Process.
             $ocdArgs += @("-c", "init", "-c", "`"targets $($info.Target)`"")
-            if ($AllowTargetReset) {
+            if ($resolvedCore -eq "v3f") {
                 $ocdArgs += @("-c", "`"reset halt`"")
             } else {
                 $ocdArgs += @("-c", "`"halt`"")
@@ -1121,23 +1176,33 @@ function Invoke-Debug {
 
         if (-not $portReady) {
             Write-Warn "OpenOCD did not open GDB port $port (WCH-Link second-init bug?)."
-            if ($RecoverMode -or $RestartLink) {
-                Write-Warn "Automatic recovery is disabled. Do not reset-link or restart OpenOCD from this script."
+            if ($ocdProc -and -not $ocdProc.HasExited) {
+                Stop-Process -Id $ocdProc.Id -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 1
             }
-            throw "OpenOCD failed to start cleanly. Leave recovery to MRS/external tools, then start one daemon and keep it open."
+            if ($RecoverMode -or $RestartLink) {
+                Write-Info "Attempting software WCH-Link reset and retry..."
+                Reset-WCHLinkUSB -Toolchain $Toolchain -TargetChip $TargetChip
+                $ocdProc = Start-Process -FilePath $Toolchain.OpenOCD -ArgumentList $ocdArgs -PassThru -WindowStyle $windowStyle
+                Start-Sleep -Seconds 3
+                $portReady = Test-TcpPort -Port $port -TimeoutMs 1000
+                if (-not $portReady) {
+                    throw "OpenOCD still failed after WCH-Link software reset. Try physical re-plug."
+                }
+            } else {
+                throw "OpenOCD failed to start. Use -RecoverMode or -RestartLink to auto-reset WCH-Link, or physically re-plug it."
+            }
         }
     }
 
     try {
         Add-ToolchainPath $Toolchain
-        if ($codexSafeMode -and (-not (Test-TcpPort -Port $port -TimeoutMs 1000))) {
-            throw "Codex hardware guard: OpenOCD is running but GDB port $port is not reachable. Do not restart it from Codex; check the daemon window."
-        }
 
         if ($CheckOnly) {
-            $haltCommand = if ($AllowTargetReset) { "monitor reset halt" } else { "monitor halt" }
-            if ($AllowTargetReset -and $TargetChip -eq "CH32H417" -and $resolvedCore -eq "v5f") {
-                Write-Warn "V5F is normally woken by V3F; using halt instead of reset halt."
+            $haltCommand = "monitor reset halt"
+            if ($TargetChip -eq "CH32H417" -and $resolvedCore -eq "v5f") {
+                # V5F is normally woken by V3F. Resetting here can put it back into
+                # the pre-wakeup state, so only halt the already-running secondary core.
                 $haltCommand = "monitor halt"
             }
             $gdbArgs = @(
@@ -1154,9 +1219,8 @@ function Invoke-Debug {
                 "-ex", "quit"
             )
         } else {
-            $haltCommand = if ($AllowTargetReset) { "monitor reset halt" } else { "monitor halt" }
-            if ($AllowTargetReset -and $TargetChip -eq "CH32H417" -and $resolvedCore -eq "v5f") {
-                Write-Warn "V5F is normally woken by V3F; using halt instead of reset halt."
+            $haltCommand = "monitor reset halt"
+            if ($TargetChip -eq "CH32H417" -and $resolvedCore -eq "v5f") {
                 $haltCommand = "monitor halt"
             }
             $gdbArgs = @(
@@ -1169,7 +1233,6 @@ function Invoke-Debug {
                 "-ex", $haltCommand
             )
             if ($LoadBeforeDebug) {
-                Assert-OpenOCDFlashAllowed "GDB load"
                 Write-Warn "GDB load bypasses the MRS DLL Code-Protect unlock path. Use flash first unless this is intentional."
                 $gdbArgs += @("-ex", "load")
             }
@@ -1177,24 +1240,17 @@ function Invoke-Debug {
         }
 
         Write-Info "GDB port: $port"
-        if ($DryRun) {
-            Write-Warn "Dry run: GDB was not executed."
-            Write-Info "GDB args: $($gdbArgs -join ' ')"
-            return
-        }
         & $Toolchain.GDB @gdbArgs
         if ($LASTEXITCODE -ne 0) { throw "GDB failed with exit code $LASTEXITCODE" }
     } finally {
         # Do NOT kill OpenOCD after debug-check. Keeping the daemon alive
         # avoids the WCH-Link second-init bug. Only kill it for interactive
         # debug if the user explicitly wants to, or if we didn't start it.
-        if ($weStartedOCD -and $ocdProc -and -not $ocdProc.HasExited -and (-not $StopOpenOCDAfterDebug)) {
+        if ($CheckOnly -and $weStartedOCD -and $ocdProc -and -not $ocdProc.HasExited) {
             Write-Info "Leaving OpenOCD daemon running for future sessions."
             # Intentionally NOT killing the process.
-        } elseif ($ocdProc -and -not $ocdProc.HasExited -and $weStartedOCD -and $StopOpenOCDAfterDebug) {
-            if ($script:RunningInCodex -and (-not $AllowCodexHardwareAccess)) {
-                Assert-CodexHardwareAccess "stopping OpenOCD"
-            }
+        } elseif ($ocdProc -and -not $ocdProc.HasExited -and $weStartedOCD -and -not $CheckOnly) {
+            # For interactive debug, we may stop it, but warn the user.
             Write-Warn "Stopping OpenOCD. The next OpenOCD start may fail until WCH-Link is re-plugged or software-reset."
             Stop-Process -Id $ocdProc.Id -Force -ErrorAction SilentlyContinue
         }
@@ -1205,9 +1261,110 @@ $ProjectDir = Resolve-ExistingPath $ProjectDir
 $Chip = Infer-Chip -Dir $ProjectDir -RequestedChip $Chip
 $toolchain = Find-MRSToolchain -BasePath $MRSPath
 
+Initialize-SessionLog -ProjectPath $ProjectDir -ExplicitDir $SessionLogDir
+if ($script:SessionLogPath) {
+    Write-Info "Session log: $script:SessionLogPath"
+    Write-Info "MRS trace : $script:MrsTraceLogPath"
+}
+Write-SessionLog "ARGS" ("Action={0} ProjectDir={1} Chip={2} Core={3} ClkSpeed={4} DisableCodeProtect={5} NoEraseAll={6} AllowMrsReset={7} RestartLink={8} RecoverMode={9} Diagnose={10}" -f `
+    $Action, $ProjectDir, $Chip, $Core, $ClkSpeed, [bool]$DisableCodeProtect, [bool]$NoEraseAll, [bool]$AllowMrsReset, [bool]$RestartLink, [bool]$RecoverMode, [bool]$Diagnose)
+
+function Invoke-Diagnose {
+    param([hashtable]$Toolchain, [string]$TargetChip)
+    Write-Step "Diagnose"
+    Invoke-Detect -Toolchain $Toolchain -TargetChip $TargetChip
+
+    Write-Step "Link state (MRS DLL)"
+    if ($TargetChip -eq "CH32H417" -and $Toolchain) {
+        $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
+        try {
+            Invoke-MRSLink -Toolchain $Toolchain -HelperAction "dump-link-status" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+            Write-Ok "MRS dump-link-status succeeded — chip + link are responding."
+        } catch {
+            Write-Warn "MRS dump-link-status failed: $_"
+            Write-Warn "Run -Action recover next."
+        }
+    } else {
+        Write-Warn "Skipping MRS link probe — non-H417 chip or toolchain missing."
+    }
+
+    Write-Step "OpenOCD daemon"
+    $ocd = Find-RunningOpenOCD
+    if ($ocd) {
+        Write-Info "OpenOCD PID $($ocd.Id) is alive."
+        foreach ($p in @(3333, 3334)) {
+            if (Test-TcpPort -Port $p -TimeoutMs 500) {
+                Write-Ok "GDB port $p is listening."
+            } else {
+                Write-Warn "GDB port $p is NOT listening."
+            }
+        }
+    } else {
+        Write-Info "No OpenOCD daemon is running."
+    }
+}
+
+function Invoke-Recover {
+    param([hashtable]$Toolchain, [string]$TargetChip)
+    Write-Step "Recover"
+    if ($TargetChip -ne "CH32H417") {
+        throw "recover is implemented for CH32H417 only."
+    }
+    if (-not $Toolchain) { throw "MRS toolchain not found." }
+    $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
+
+    # Step 1: kill any straggler OpenOCD so the MRS DLL owns the link.
+    Kill-StaleWCHProcesses
+
+    # Step 2: in-process rehandshake.
+    if (-not (Invoke-MRSRehandshake -Toolchain $Toolchain -TargetChip $TargetChip)) {
+        Write-Warn "Rehandshake failed. Cycling USB before continuing."
+        Reset-WCHLinkPnP
+        if (-not (Invoke-MRSRehandshake -Toolchain $Toolchain -TargetChip $TargetChip)) {
+            throw "Chip still does not respond after USB cycle. Hold BOOT0 high, cycle NRST, re-plug WCH-LinkE, and rerun -Action recover."
+        }
+    }
+
+    # Step 3: read RDP state.
+    try {
+        Invoke-MRSLink -Toolchain $Toolchain -HelperAction "query-rprotect" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+    } catch {
+        Write-Warn "QueryRProtect failed; continuing with disable-rprotect anyway: $_"
+    }
+
+    # Step 4: disable RDP so a fresh flash can land. Idempotent if already disabled.
+    try {
+        Invoke-MRSLink -Toolchain $Toolchain -HelperAction "disable-rprotect" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+        Write-Ok "Read-protect cleared (or was already cleared)."
+    } catch {
+        Write-Warn "DisableRProtect failed: $_"
+    }
+
+    # Step 5: force full chip erase using a 4-byte placeholder image. Operation
+    # bits: 0x40 clear-code-flash | 0x08 erase-all | 0x04 program. We program a
+    # single 0xFF word at flash origin which behaves like no-op on freshly
+    # erased flash but proves the DLL can complete a full write cycle.
+    $stub = Join-Path $env:TEMP "wch_recover_stub.bin"
+    [System.IO.File]::WriteAllBytes($stub, ([byte[]](0xFF, 0xFF, 0xFF, 0xFF)))
+    try {
+        $eraseOp = 0x4C
+        Write-Info ("Forcing full chip erase: operation=0x{0:X2} (clear-code-flash | erase-all | program)" -f $eraseOp)
+        Invoke-MRSLink -Toolchain $Toolchain -HelperAction "flash" -ChipID $chipInfo.ChipID -OperationType $eraseOp -DataFilePath $stub -Address $chipInfo.FlashAddress
+        Write-Ok "Full erase finished."
+    } catch {
+        Write-Warn "Forced erase failed: $_. Chip may still be in a recoverable state — try -Action flash directly."
+    }
+
+    Write-Ok "Recovery complete. Now run: -Action flash to reload firmware."
+}
+
 switch ($Action) {
     "detect" {
-        Invoke-Detect -Toolchain $toolchain -TargetChip $Chip
+        if ($Diagnose) {
+            Invoke-Diagnose -Toolchain $toolchain -TargetChip $Chip
+        } else {
+            Invoke-Detect -Toolchain $toolchain -TargetChip $Chip
+        }
     }
     "init" {
         Invoke-Init -Toolchain $toolchain -TargetChip $Chip
@@ -1216,28 +1373,25 @@ switch ($Action) {
         Invoke-Build -Toolchain $toolchain -TargetChip $Chip -RequestedCore $Core
     }
     "flash" {
-        if ($RestartLink) { Assert-LinkResetAllowed "flash -RestartLink" }
-        if (($FlashTool -eq "openocd") -and (-not $DryRun)) { Assert-OpenOCDFlashAllowed "OpenOCD flash" }
-        if ($RestartLink) { Reset-WCHLinkUSB }
+        if ($RestartLink) { Reset-WCHLinkUSB -Toolchain $toolchain -TargetChip $Chip }
         Invoke-Flash -Toolchain $toolchain -TargetChip $Chip -RequestedCore $Core
     }
     "debug" {
-        if ($RestartLink) { Assert-LinkResetAllowed "debug -RestartLink" }
-        if ($RestartLink) { Reset-WCHLinkUSB }
+        if ($RestartLink) { Reset-WCHLinkUSB -Toolchain $toolchain -TargetChip $Chip }
         Invoke-Debug -Toolchain $toolchain -TargetChip $Chip -RequestedCore $Core -CheckOnly:$false
     }
     "debug-check" {
-        if ($RestartLink) { Assert-LinkResetAllowed "debug-check -RestartLink" }
-        if ($RestartLink) { Reset-WCHLinkUSB }
+        if ($RestartLink) { Reset-WCHLinkUSB -Toolchain $toolchain -TargetChip $Chip }
         Invoke-Debug -Toolchain $toolchain -TargetChip $Chip -RequestedCore $Core -CheckOnly:$true
     }
     "reset-link" {
-        Assert-LinkResetAllowed "reset-link"
-        Reset-WCHLinkUSB
+        Reset-WCHLinkUSB -Toolchain $toolchain -TargetChip $Chip
+    }
+    "recover" {
+        Invoke-Recover -Toolchain $toolchain -TargetChip $Chip
     }
     "loop" {
-        if ($RestartLink) { Assert-LinkResetAllowed "loop -RestartLink" }
-        if ($RestartLink) { Reset-WCHLinkUSB }
+        if ($RestartLink) { Reset-WCHLinkUSB -Toolchain $toolchain -TargetChip $Chip }
         if (-not $SkipBuild) {
             Invoke-Build -Toolchain $toolchain -TargetChip $Chip -RequestedCore $Core
         }

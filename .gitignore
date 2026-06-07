@@ -46,6 +46,9 @@ ocd_*.txt
 /rtthread_port/-p/
 /rtthread_port/!
 
+# Local backup of RT-Thread's original nested Git metadata after vendoring.
+/rtthread_port/rt-thread/.git_vendor_backup/
+
 # Local bring-up experiments
 /rtthread_port/test*.tcl
 /rtthread_port/test_rst*.ps1
