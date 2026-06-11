@@ -1,0 +1,7 @@
+﻿{
+    "createdAt":  "2026-06-09T17:04:31.1593269+08:00",
+    "reason":  "MRS DLL v5f flash failed: mrs-link[flash] failed with exit code 1",
+    "sessionLog":  "C:\\program1\\Program\\AI_keyb_wch\\hardware\\rtthread_port\\.wch-skill-logs\\session-20260609-170426-531-42412.log",
+    "mrsTrace":  "C:\\program1\\Program\\AI_keyb_wch\\hardware\\rtthread_port\\.wch-skill-logs\\mrs-trace-20260609-170426-531-42412.log",
+    "nextStep":  "Run detect -Diagnose and ask the user before running recover. Do not retry normal flash blindly."
+}

@@ -50,7 +50,7 @@ Build each core with its own startup and linker script. Do not compile both star
 .\wch-auto.ps1 -Action flash -ProjectDir <project> -Chip CH32H417 -Core both
 ```
 
-The skill defaults to MRS DLL flash. For dual-core it flashes V3F first (address `0x08000000`, erase), then V5F (address `0x08010000`, no erase, reset run). The V5F reset boots V3F, which calls `NVIC_WakeUp_V5F` to start the secondary core cleanly.
+The skill defaults to MRS DLL flash. For dual-core it follows the official single-download method: flash V3F first (address `0x08000000`, Erase All), then V5F (address `0x08010000`, no Erase All, reset run). The V5F reset boots V3F, which calls `NVIC_WakeUp_V5F` to start the secondary core cleanly.
 
 ### MRS DLL Flash Addresses
 
@@ -114,7 +114,7 @@ The EVT `.wvproj` files show how MounRiver configures OpenOCD per core:
 | V3F  | `-c noload`          | `true`                 |
 | V5F  | `-c page_erase`      | `false`                |
 
-The skill applies these same options when it starts OpenOCD for each core:
+The generated MRS/VS Code launch template applies these same options:
 - **V3F**: `-c noload` prevents OpenOCD from reloading the image before debug (the V3F image is already in flash).
 - **V5F**: `-c page_erase` enables page erase for the secondary core.
 
@@ -177,8 +177,8 @@ If OpenOCD does fail to start (port does not open), the skill recovers in this o
 # `reset-link` is the same recovery without the forced erase.
 .\wch-auto.ps1 -Action reset-link
 
-# Or, opportunistically as part of the next operation:
-.\wch-auto.ps1 -Action debug-check -ProjectDir <project> -Core v3f -RecoverMode
+# Or, opportunistically as part of the next MRS DLL flash:
+.\wch-auto.ps1 -Action flash -ProjectDir <project> -Core both -RecoverMode
 ```
 
 `reset-link` (and `recover`'s first phase) calls `OpenDevice` / `CompareVersion` / `CloseDevice` via the MRS DLL first. Only if that fails does it fall back to `Disable-PnpDevice` / `Enable-PnpDevice` on the WCH-Link USB composite device. PnP cycling mid-transfer was observed to leave the link half-dead, so demoting it to a last resort is intentional.
@@ -198,7 +198,7 @@ Confirmed on hardware 2026-05-26 with the `rtthread_port` project (V3F wakeup + 
 - After `-Action flash -Core both`, the chip immediately runs the user firmware. V5F is at 400 MHz; V3F is in STOP after waking V5F.
 - `MRS DLL` calls still succeed: `OpenDevice` / `CompareVersion` / `MRSFunc_FlashOperationExB` (with the `0x40` clear-code-flash escalation) all return 0.
 - `OpenOCD`'s `wlink_init` returns `WCH-Link failed to connect with riscvchip` for both `wch_riscv.cpu.0` and `wch_riscv.cpu.1`.
-- `-RecoverMode` runs the in-process MRS rehandshake (which succeeds), then re-launches OpenOCD — which fails identically.
+- `debug-check -RecoverMode` now reports this limitation directly instead of re-launching OpenOCD and failing identically.
 
 Root cause is **driver-asymmetric**: the MRS DLL uses an aggressive SDI entry sequence (NRST pulse + option-byte halt path, same as `clear-code-flash`) that re-establishes SDI even when the CPU is busy. OpenOCD 0.11.0+dev-snapshot's `wlink` driver does not implement this and silently fails the handshake against a running chip.
 

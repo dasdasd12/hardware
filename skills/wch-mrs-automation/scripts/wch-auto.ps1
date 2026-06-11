@@ -68,12 +68,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 # --- session log -------------------------------------------------------------
-# Every run lands in .wch-skill-logs/session-YYYYMMDD-HHmmss.log under the
+# Every run lands in .wch-skill-logs/session-YYYYMMDD-HHmmss-fff-PID.log under the
 # project (or %TEMP% as a fallback). Every Write-* below tees to that file so
 # when a chip locks we can read one file and see the whole conversation with
 # WCH-Link, OpenOCD, GDB, and the MRS DLL.
 $script:SessionLogPath = $null
 $script:MrsTraceLogPath = $null
+$script:FlashFailureLockoutPath = $null
 
 function Initialize-SessionLog {
     param([string]$ProjectPath, [string]$ExplicitDir)
@@ -94,9 +95,10 @@ function Initialize-SessionLog {
         $base = $env:TEMP
     }
 
-    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $stamp = "{0}-{1}" -f (Get-Date -Format "yyyyMMdd-HHmmss-fff"), $PID
     $script:SessionLogPath = Join-Path $base "session-$stamp.log"
     $script:MrsTraceLogPath = Join-Path $base "mrs-trace-$stamp.log"
+    $script:FlashFailureLockoutPath = Join-Path $base "flash-failure-lockout.json"
     try {
         Set-Content -LiteralPath $script:SessionLogPath -Value "wch-auto session log $stamp" -Encoding UTF8
     } catch {
@@ -118,6 +120,46 @@ function Write-Ok   { param([string]$Message) Write-Host "[OK]    $Message" -For
 function Write-Warn { param([string]$Message) Write-Host "[WARN]  $Message" -ForegroundColor Yellow; Write-SessionLog "WARN" $Message }
 function Write-Err  { param([string]$Message) Write-Host "[ERR]   $Message" -ForegroundColor Red; Write-SessionLog "ERR " $Message }
 function Write-Step { param([string]$Message) Write-Host "`n========== $Message ==========" -ForegroundColor Cyan; Write-SessionLog "STEP" $Message }
+
+function Set-FlashFailureLockout {
+    param([string]$Reason)
+    if (-not $script:FlashFailureLockoutPath) { return }
+
+    $payload = [ordered]@{
+        createdAt = (Get-Date).ToString("o")
+        reason = $Reason
+        sessionLog = $script:SessionLogPath
+        mrsTrace = $script:MrsTraceLogPath
+        nextStep = "Run detect -Diagnose and ask the user before running recover. Do not retry normal flash blindly."
+    }
+    try {
+        $payload | ConvertTo-Json | Set-Content -LiteralPath $script:FlashFailureLockoutPath -Encoding UTF8
+        Write-Warn "Flash failure lockout written: $script:FlashFailureLockoutPath"
+    } catch {
+        Write-Warn "Could not write flash failure lockout: $_"
+    }
+}
+
+function Clear-FlashFailureLockout {
+    if (-not $script:FlashFailureLockoutPath) { return }
+    if (Test-Path -LiteralPath $script:FlashFailureLockoutPath) {
+        Remove-Item -LiteralPath $script:FlashFailureLockoutPath -Force
+        Write-Info "Cleared flash failure lockout: $script:FlashFailureLockoutPath"
+    }
+}
+
+function Assert-NoFlashFailureLockout {
+    if (-not $script:FlashFailureLockoutPath) { return }
+    if (-not (Test-Path -LiteralPath $script:FlashFailureLockoutPath)) { return }
+
+    $detail = ""
+    try {
+        $lockout = Get-Content -LiteralPath $script:FlashFailureLockoutPath -Raw | ConvertFrom-Json
+        if ($lockout.reason) { $detail = " Last failure: $($lockout.reason)" }
+    } catch {}
+
+    throw "Previous MRS flash failure lockout exists: $script:FlashFailureLockoutPath.$detail Refusing normal flash to avoid repeated lock attempts. Run -Action detect -Diagnose, then ask the user before -Action recover. Delete the lockout file only after hardware was manually recovered."
+}
 
 function Invoke-Tool {
     <#
@@ -373,7 +415,7 @@ function Invoke-MRSRehandshake {
     $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
     try {
         Invoke-MRSLink -Toolchain $Toolchain -HelperAction "rehandshake" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
-        Write-Ok "MRS rehandshake succeeded; chip responded to OpenDevice."
+        Write-Ok "MRS rehandshake succeeded; chip ID and RDP response are usable."
         return $true
     } catch {
         Write-Warn "MRS rehandshake failed: $_"
@@ -686,7 +728,7 @@ function Invoke-Detect {
         Write-Step "CH32H417 mapping"
         Write-Host "V3F: target wch_riscv.cpu.0, GDB 3333, flash origin 0x00000000" -ForegroundColor White
         Write-Host "V5F: target wch_riscv.cpu.1, GDB 3334, flash origin 0x00010000" -ForegroundColor White
-        Write-Host "Dual projects flash V5F first, then V3F, then resume." -ForegroundColor White
+        Write-Host "Dual projects flash V3F first, then V5F, then reset/run." -ForegroundColor White
     }
 
     $root = if ($TargetChip -eq "CH32H417") { Get-H417ProjectRoot $ProjectDir } else { Resolve-ExistingPath $ProjectDir }
@@ -871,7 +913,7 @@ function Invoke-MRSSetTarget {
     param([hashtable]$Toolchain, [string]$TargetChip)
     if ($TargetChip -ne "CH32H417") { return }
     $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
-    Invoke-MRSLink -Toolchain $Toolchain -HelperAction "set-line-mode" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+    Invoke-MRSLink -Toolchain $Toolchain -HelperAction "set-target" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
 }
 
 function Invoke-MRSReset {
@@ -881,6 +923,33 @@ function Invoke-MRSReset {
     Invoke-MRSLink -Toolchain $Toolchain -HelperAction "reset" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
 }
 
+function Invoke-MRSTargetResetPulse {
+    param([hashtable]$Toolchain, [string]$TargetChip)
+    if ($TargetChip -ne "CH32H417") { return }
+
+    $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
+    Write-Warn "Pulsing target NRST via WCH-Link RST before retry."
+
+    $releaseError = $null
+    try {
+        Invoke-MRSLink -Toolchain $Toolchain -HelperAction "hold-nrst" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+        Start-Sleep -Milliseconds 500
+    } finally {
+        try {
+            Invoke-MRSLink -Toolchain $Toolchain -HelperAction "release-nrst" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+        } catch {
+            $releaseError = $_
+        }
+    }
+
+    if ($releaseError) {
+        throw "Target NRST release failed: $releaseError"
+    }
+
+    Start-Sleep -Milliseconds 700
+    Write-Info "Target NRST pulse finished; next MRS flash runs in a fresh helper process."
+}
+
 function Invoke-MRSFlashImage {
     param([hashtable]$Toolchain, [string]$TargetChip, [string]$Image, [bool]$ResetAfter, [bool]$EraseBefore = $true, [string]$Address = "")
     $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
@@ -888,6 +957,21 @@ function Invoke-MRSFlashImage {
     $operation = Get-MRSFlashOperationType -Reset $ResetAfter -EraseBefore $EraseBefore
     Write-Info ("MRS operation: 0x{0:X2} (disable-protect={1}, erase-all={2}, program, verify={3}, reset={4})" -f $operation, [bool]$DisableCodeProtect, ($EraseBefore -and (-not $NoEraseAll)), (-not $NoVerify), ($ResetAfter -and (-not $NoReset)))
     Invoke-MRSLink -Toolchain $Toolchain -HelperAction "flash" -ChipID $chipInfo.ChipID -OperationType $operation -DataFilePath $Image -Address $Address
+}
+
+function Invoke-MRSFlashPreflight {
+    param([hashtable]$Toolchain, [string]$TargetChip)
+    if ($TargetChip -ne "CH32H417") { return }
+
+    $chipInfo = Get-MRSChipInfo -TargetChip $TargetChip
+    Write-Info "Preflight: checking MRS link, chip ID, and read-protect state before flash."
+    try {
+        Invoke-MRSLink -Toolchain $Toolchain -HelperAction "dump-link-status" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+        Write-Ok "MRS flash preflight passed."
+    } catch {
+        Set-FlashFailureLockout "MRS flash preflight failed: $_"
+        throw "MRS flash preflight failed; refusing to program in this state. $_"
+    }
 }
 
 function Invoke-Flash {
@@ -927,6 +1011,11 @@ function Invoke-Flash {
             throw "MRS DLL flash is currently enabled for CH32H417 only. Use -FlashTool openocd for $TargetChip."
         }
 
+        if (-not $RecoverMode) {
+            Assert-NoFlashFailureLockout
+        }
+        Invoke-MRSFlashPreflight -Toolchain $Toolchain -TargetChip $TargetChip
+
         if ($resolvedCore -eq "both") {
             $pair = Find-H417ImagePair -Dir $root
             if (-not $pair.v3f -or -not $pair.v5f) {
@@ -935,98 +1024,68 @@ function Invoke-Flash {
             Write-Info "V3F image: $($pair.v3f)"
             Write-Info "V5F image: $($pair.v5f)"
 
-            $mrsOk = $false
-            try {
-                Invoke-MRSFlashImage -Toolchain $Toolchain -TargetChip $TargetChip -Image $pair.v3f -ResetAfter:$false -EraseBefore:$true -Address "0x08000000"
-                Write-Info "Waiting 1s for target to settle after V3F flash..."
-                Start-Sleep -Seconds 1
-                Invoke-MRSFlashImage -Toolchain $Toolchain -TargetChip $TargetChip -Image $pair.v5f -ResetAfter:$true -EraseBefore:$false -Address "0x08010000"
-                $mrsOk = $true
-            } catch {
-                Write-Warn "MRS DLL flash failed: $_"
-                if ($RecoverMode) {
-                    Write-Warn "RecoverMode enabled: attempting OpenOCD fallback..."
-                } else {
-                    throw
+            $recoverRetried = $false
+            while ($true) {
+                try {
+                    Invoke-MRSFlashImage -Toolchain $Toolchain -TargetChip $TargetChip -Image $pair.v3f -ResetAfter:$false -EraseBefore:$true -Address "0x08000000"
+                    Write-Info "Waiting 1s for target to settle after V3F flash..."
+                    Start-Sleep -Seconds 1
+                    Invoke-MRSFlashImage -Toolchain $Toolchain -TargetChip $TargetChip -Image $pair.v5f -ResetAfter:$true -EraseBefore:$false -Address "0x08010000"
+                    Write-Ok "Dual-core MRS flash finished"
+                    return
+                } catch {
+                    Write-Warn "MRS DLL flash failed: $_"
+                    Set-FlashFailureLockout "MRS DLL dual-core flash failed: $_"
+                    if ($RecoverMode -and -not $recoverRetried) {
+                        $recoverRetried = $true
+                        Write-Warn "RecoverMode enabled: running recover, then retrying MRS DLL flash once."
+                        Invoke-Recover -Toolchain $Toolchain -TargetChip $TargetChip
+                        continue
+                    }
+                    throw "MRS DLL flash failed and lockout was written. Do not retry normal flash until detect/recover has been handled. $_"
                 }
             }
-
-            if ($mrsOk) {
-                Write-Ok "Dual-core MRS flash finished"
-                return
-            }
-
-            # RecoverMode fallback via OpenOCD
-            Kill-StaleWCHProcesses
-            Invoke-MRSSetTarget -Toolchain $Toolchain -TargetChip $TargetChip
-            if ($DisableCodeProtect) {
-                Write-Warn "OpenOCD fallback does not honor -DisableCodeProtect. The chip's RDP state is left untouched."
-            }
-            $baseArgs = @("-s", $Toolchain.OpenOCDBin, "-f", "wch-dual-core.cfg", "-c", "init")
-            $v3 = Convert-ToForwardPath $pair.v3f
-            $v5 = Convert-ToForwardPath $pair.v5f
-            $args = $baseArgs + @(
-                "-c", "targets wch_riscv.cpu.1",
-                "-c", "halt",
-                "-c", "program `"$v5`" verify",
-                "-c", "resume",
-                "-c", "targets wch_riscv.cpu.0",
-                "-c", "halt",
-                "-c", "program `"$v3`" verify",
-                "-c", "resume",
-                "-c", "exit"
-            )
-            Invoke-OpenOCD -Toolchain $Toolchain -OpenOCDArgs $args
-            Write-Ok "Dual-core OpenOCD fallback flash finished"
-            return
         }
 
-        $image = Resolve-FlashImage -Dir $root -CoreName $resolvedCore -ExplicitImage $ImagePath -ExplicitElf $ElfPath
+        $explicitImage = $ImagePath
+        $explicitElf = $ElfPath
+        if ($resolvedCore -eq "v3f") {
+            if ($ImagePathV3F) { $explicitImage = $ImagePathV3F }
+            if ($ElfPathV3F) { $explicitElf = $ElfPathV3F }
+        } elseif ($resolvedCore -eq "v5f") {
+            if ($ImagePathV5F) { $explicitImage = $ImagePathV5F }
+            if ($ElfPathV5F) { $explicitElf = $ElfPathV5F }
+        }
+
+        $image = Resolve-FlashImage -Dir $root -CoreName $resolvedCore -ExplicitImage $explicitImage -ExplicitElf $explicitElf
         if (-not $image) { throw "Flash image not found for $resolvedCore. Build first or pass -ImagePath." }
+        $flashAddress = "0x08000000"
+        $eraseBefore = $true
         if ($resolvedCore -eq "v5f") {
             Write-Warn "V5F-only flash will not normally run after reset unless a V3F image wakes V5F."
+            $flashAddress = "0x08010000"
+            $eraseBefore = $false
         }
         Write-Info "$($resolvedCore.ToUpper()) image: $image"
 
-        $mrsOk = $false
-        try {
-            Invoke-MRSFlashImage -Toolchain $Toolchain -TargetChip $TargetChip -Image $image -ResetAfter:$true
-            $mrsOk = $true
-        } catch {
-            Write-Warn "MRS DLL flash failed: $_"
-            if ($RecoverMode) {
-                Write-Warn "RecoverMode enabled: attempting OpenOCD fallback..."
-            } else {
-                throw
+        $recoverRetried = $false
+        while ($true) {
+            try {
+                Invoke-MRSFlashImage -Toolchain $Toolchain -TargetChip $TargetChip -Image $image -ResetAfter:$true -EraseBefore:$eraseBefore -Address $flashAddress
+                Write-Ok "MRS flash finished"
+                return
+            } catch {
+                Write-Warn "MRS DLL flash failed: $_"
+                Set-FlashFailureLockout "MRS DLL $resolvedCore flash failed: $_"
+                if ($RecoverMode -and -not $recoverRetried) {
+                    $recoverRetried = $true
+                    Write-Warn "RecoverMode enabled: running recover, then retrying MRS DLL flash once."
+                    Invoke-Recover -Toolchain $Toolchain -TargetChip $TargetChip
+                    continue
+                }
+                throw "MRS DLL flash failed and lockout was written. Do not retry normal flash until detect/recover has been handled. $_"
             }
         }
-
-        if ($mrsOk) {
-            Write-Ok "MRS flash finished"
-            return
-        }
-
-        # RecoverMode fallback via OpenOCD
-        Kill-StaleWCHProcesses
-        Invoke-MRSSetTarget -Toolchain $Toolchain -TargetChip $TargetChip
-        if ($DisableCodeProtect) {
-            Write-Warn "OpenOCD fallback does not honor -DisableCodeProtect. The chip's RDP state is left untouched."
-        }
-        $info = Get-H417CoreInfo $resolvedCore
-        $elf = if ($ElfPath) { Resolve-ExistingPath $ElfPath } else { Find-ElfFile -Dir $root -CoreName $resolvedCore }
-        if (-not $elf) { throw "ELF not found for $resolvedCore. Build first or pass -ElfPath." }
-        $elfForward = Convert-ToForwardPath $elf
-        $programCmd = if ($resolvedCore -eq "v3f") { "program `"$elfForward`" verify reset" } else { "program `"$elfForward`" verify" }
-        $args = @("-s", $Toolchain.OpenOCDBin, "-f", "wch-dual-core.cfg", "-c", "init") + @(
-            "-c", "targets $($info.Target)",
-            "-c", "halt",
-            "-c", $programCmd,
-            "-c", "exit"
-        )
-        Write-Info "OpenOCD fallback for $resolvedCore"
-        Invoke-OpenOCD -Toolchain $Toolchain -OpenOCDArgs $args
-        Write-Ok "OpenOCD fallback flash finished"
-        return
     }
 
     if ($TargetChip -eq "CH32H417") {
@@ -1180,7 +1239,10 @@ function Invoke-Debug {
                 Stop-Process -Id $ocdProc.Id -Force -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 1
             }
-            if ($RecoverMode -or $RestartLink) {
+            if ($RecoverMode) {
+                throw "RecoverMode cannot make OpenOCD attach to a running CH32H417. Use -Action recover followed by -Action flash for flash recovery, or hold BOOT0 high/power-cycle before debug-check."
+            }
+            if ($RestartLink) {
                 Write-Info "Attempting software WCH-Link reset and retry..."
                 Reset-WCHLinkUSB -Toolchain $Toolchain -TargetChip $TargetChip
                 $ocdProc = Start-Process -FilePath $Toolchain.OpenOCD -ArgumentList $ocdArgs -PassThru -WindowStyle $windowStyle
@@ -1272,6 +1334,10 @@ Write-SessionLog "ARGS" ("Action={0} ProjectDir={1} Chip={2} Core={3} ClkSpeed={
 function Invoke-Diagnose {
     param([hashtable]$Toolchain, [string]$TargetChip)
     Write-Step "Diagnose"
+    if ($script:FlashFailureLockoutPath -and (Test-Path -LiteralPath $script:FlashFailureLockoutPath)) {
+        Write-Warn "Flash failure lockout exists: $script:FlashFailureLockoutPath"
+        Write-Warn "Do not retry normal flash until the user has approved recovery or manually cleared the hardware state."
+    }
     Invoke-Detect -Toolchain $Toolchain -TargetChip $TargetChip
 
     Write-Step "Link state (MRS DLL)"
@@ -1352,9 +1418,18 @@ function Invoke-Recover {
         Invoke-MRSLink -Toolchain $Toolchain -HelperAction "flash" -ChipID $chipInfo.ChipID -OperationType $eraseOp -DataFilePath $stub -Address $chipInfo.FlashAddress
         Write-Ok "Full erase finished."
     } catch {
-        Write-Warn "Forced erase failed: $_. Chip may still be in a recoverable state — try -Action flash directly."
+        throw "Forced erase failed: $_"
     }
 
+    # Step 6: verify that the link and RDP query are usable after the erase.
+    try {
+        Invoke-MRSLink -Toolchain $Toolchain -HelperAction "dump-link-status" -ChipID $chipInfo.ChipID -Address $chipInfo.FlashAddress
+        Write-Ok "Post-recovery link/RDP verification succeeded."
+    } catch {
+        throw "Recovery verification failed: $_"
+    }
+
+    Clear-FlashFailureLockout
     Write-Ok "Recovery complete. Now run: -Action flash to reload firmware."
 }
 

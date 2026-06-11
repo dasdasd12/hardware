@@ -32,6 +32,8 @@ RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
 
 # Defines (only board-specific ones; RT-Thread config macros are in rtconfig.h)
 DEFS := -DCore_V5F -DBSP_USING_UART8 -D__RT_KERNEL_SOURCE__ -D__RT_IPC_SOURCE__ -DCONFIG_CHERRYUSB
+DEFS += -DAPP_USBSS_SKIP_FOR_V3F_OFFICIAL=1
+DEFS += -DAPP_ENABLE_USB_TEST=0
 
 # Include paths
 INC := -I"$(PROJECT_ROOT)" -I"$(PROJECT_ROOT)/bsp" -I"$(PROJECT_ROOT)/drivers" -I"$(PROJECT_ROOT)/libcpu"
@@ -45,7 +47,6 @@ INC += -I"$(SRC_ROOT)/Debug" -I"$(SRC_ROOT)/Core" -I"$(SRC_ROOT)/Peripheral/inc"
 CHERRYUSB_ROOT := $(RTT_ROOT)/components/drivers/usb/cherryusb
 INC += -I"$(CHERRYUSB_ROOT)/core"
 INC += -I"$(CHERRYUSB_ROOT)/common"
-INC += -I"$(CHERRYUSB_ROOT)/class/hid"
 INC += -I"$(CHERRYUSB_ROOT)/class/cdc"
 INC += -I"$(CHERRYUSB_ROOT)/port/ch32h417"
 
@@ -104,15 +105,16 @@ DRV_SRC += $(PROJECT_ROOT)/drivers/drv_gpio.c
 
 # Application
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
+APP_SRC += $(PROJECT_ROOT)/applications/usb_cdc_dual.c
 
 # CherryUSB stack
 CHERRYUSB_SRC := $(CHERRYUSB_ROOT)/core/usbd_core.c
-CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/class/hid/usbd_hid.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/class/cdc/usbd_cdc_acm.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/osal/usb_osal_rtthread.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/port/ch32h417/usb_dc_ch32h417.c
+CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/port/ch32h417/usb_dc_ch32h417_usbss.c
+CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/port/ch32h417/usb_dc_ch32h417_usbfs.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/port/ch32h417/usb_dc_ch32h417_usbhs.c
-CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/demo/hid_cdc_composite.c
 
 # EVT SDK
 SDK_SRC := $(wildcard $(SRC_ROOT)/Debug/*.c)

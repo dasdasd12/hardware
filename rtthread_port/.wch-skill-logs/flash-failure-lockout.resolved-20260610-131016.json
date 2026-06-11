@@ -1,0 +1,7 @@
+﻿{
+    "createdAt":  "2026-06-09T20:21:46.5111509+08:00",
+    "reason":  "MRS DLL dual-core flash failed: mrs-link[flash] failed with exit code 1",
+    "sessionLog":  "C:\\program1\\Program\\AI_keyb_wch\\hardware\\rtthread_port\\.wch-skill-logs\\session-20260609-202136-924-45988.log",
+    "mrsTrace":  "C:\\program1\\Program\\AI_keyb_wch\\hardware\\rtthread_port\\.wch-skill-logs\\mrs-trace-20260609-202136-924-45988.log",
+    "nextStep":  "Run detect -Diagnose and ask the user before running recover. Do not retry normal flash blindly."
+}

@@ -64,7 +64,7 @@
 /* ================ USB Device Port Configuration ================*/
 
 #ifndef CONFIG_USBDEV_MAX_BUS
-#define CONFIG_USBDEV_MAX_BUS 1
+#define CONFIG_USBDEV_MAX_BUS 3
 #endif
 
 // #define CONFIG_USBDEV_SOF_ENABLE

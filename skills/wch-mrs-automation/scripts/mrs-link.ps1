@@ -283,7 +283,6 @@ public static class MRSNativeLink {
 
 $deviceOpened = $false
 $maxOpenAttempts = 2
-$maxFlashAttempts = 2
 
 try {
     Add-Type -TypeDefinition $code
@@ -355,11 +354,24 @@ try {
         Write-MrsInfo "ReadProtect=$protect ($(Get-RProtectText $protect))"
         Write-MrsTrace "STATE readProtect=$protect"
 
-        if ($Action -eq "rehandshake") {
+        $linkOk = ($linkedChip -eq $ChipID)
+        $protectReadable = ($protect -eq 3 -or $protect -eq 4)
+        $protectBusy = ($protect -eq 104 -or $protect -eq 128 -or $protect -eq 129)
+
+        if ($Action -eq "rehandshake" -and $linkOk -and ($protectReadable -or $protectBusy)) {
+            if ($protectBusy) {
+                Write-MrsWarn "ReadProtect query returned a transient communication state; allowing recover to continue."
+            }
             exit 0
         }
-        if ($linkedChip -eq $ChipID -and ($protect -eq 3 -or $protect -eq 4)) {
+        if ($linkOk -and $protectReadable) {
             exit 0
+        }
+        if (-not $linkOk) {
+            Write-MrsWarn "Linked chip ID does not match expected chip ID $ChipID."
+        }
+        if (-not ($protectReadable -or $protectBusy)) {
+            Write-MrsWarn "ReadProtect state is not usable for recovery: $protect."
         }
         exit 1
     }
@@ -418,37 +430,34 @@ try {
     $protectBefore = Invoke-MrsCall -Name "QueryRProtect[pre]" -Call { [MRSNativeLink]::MRSFunc_QueryRProtect($ChipID, $clk) }
     Write-MrsTrace "STATE readProtect[pre]=$protectBefore ($(Get-RProtectText $protectBefore))"
 
-    # Hardware-confirmed pattern (rt-thread project, CH32H417, PB8/PB9 SDI):
-    # after the previous flash ended with reset-run, V5F is executing user code
-    # at 400 MHz and the chip's SDI does not handshake cleanly on the next
-    # flash attempt. QueryRProtect returns 104 (Failed to configure MCU/SWD
-    # comm). The fix is the clear-code-flash bit (0x40) in FlashOperationExB:
-    # the DLL uses a more aggressive entry sequence (NRST pulse + option-byte
-    # path) that succeeds even when the CPU is busy. Confirmed by -Action
-    # recover, which uses op 0x4C against a 4-byte stub and always recovers.
-    $effectiveOperation = $OperationType
-    if ($protectBefore -eq 104) {
-        Write-MrsWarn "QueryRProtect[pre]=104 (chip busy / SDI not responding). OR-ing clear-code-flash (0x40) into op for forced entry."
-        $effectiveOperation = $OperationType -bor 0x40
-        Write-MrsInfo ("Effective operation: 0x{0:X2} ({1})" -f $effectiveOperation, (Get-OperationDescription $effectiveOperation))
+    $usesClearCodeFlash = (($OperationType -band 0x40) -ne 0)
+    $usesDisableProtect = (($OperationType -band 0x20) -ne 0)
+
+    # Normal daily flash must not auto-enter clear-code-flash / option-byte
+    # paths. If the chip is already busy or read-protected, stop and let
+    # wch-auto.ps1 write a lockout sentinel instead of trying risky retries.
+    if (-not $usesClearCodeFlash) {
+        if ($protectBefore -eq 3 -and -not $usesDisableProtect) {
+            Write-MrsWarn "Refusing normal flash because QueryRProtect[pre]=3 (enabled). Run recover only after user approval."
+            exit 1
+        }
+        if ($protectBefore -ne 4 -and -not ($protectBefore -eq 3 -and $usesDisableProtect)) {
+            Write-MrsWarn "Refusing normal flash because QueryRProtect[pre]=$protectBefore is not a safe disabled state."
+            exit 1
+        }
     }
 
-    # Retry FlashOperationExB. Error 104 is the chip-busy signature on this
-    # hardware; on retry we OR clear-code-flash into the operation byte to
-    # trigger the DLL's aggressive entry sequence.
+    $effectiveOperation = $OperationType
+    $maxFlashAttempts = if ($usesClearCodeFlash) { 2 } else { 1 }
     $flashRet = -1
     for ($attempt = 1; $attempt -le $maxFlashAttempts; $attempt++) {
         $flashRet = Invoke-MrsCall -Name "FlashOperationExB[$attempt]" -Call { [MRSNativeLink]::MRSFunc_FlashOperationExB($ChipID, $clk, $effectiveOperation, $flashAddr, $DataFilePath) }
         Write-MrsInfo ("FlashOperationExB=$flashRet (attempt $attempt/$maxFlashAttempts, op=0x{0:X2})" -f $effectiveOperation)
         if ($flashRet -eq 0) { break }
 
-        $isRetryable = ($flashRet -eq 100 -or $flashRet -eq 104 -or $flashRet -eq 128 -or $flashRet -eq 129 -or $flashRet -eq 110)
+        $isRetryable = $usesClearCodeFlash -and ($flashRet -eq 100 -or $flashRet -eq 104 -or $flashRet -eq 128 -or $flashRet -eq 129 -or $flashRet -eq 110)
         if ($isRetryable -and $attempt -lt $maxFlashAttempts) {
             Write-MrsWarn (Get-MRSErrorText $flashRet)
-            if ($flashRet -eq 104 -and (($effectiveOperation -band 0x40) -eq 0)) {
-                $effectiveOperation = $effectiveOperation -bor 0x40
-                Write-MrsInfo ("Escalating to op 0x{0:X2} (added clear-code-flash) before retry." -f $effectiveOperation)
-            }
             Write-MrsInfo "Waiting 1.5s before retry..."
             Start-Sleep -Seconds 1.5
         } else {

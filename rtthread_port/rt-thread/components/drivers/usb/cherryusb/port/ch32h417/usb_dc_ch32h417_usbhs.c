@@ -5,6 +5,7 @@
  */
 #include "usb_dc_ch32h417_usbhs.h"
 
+#include <rtthread.h>
 #include <string.h>
 
 #include "ch32h417.h"
@@ -87,7 +88,33 @@ struct ch32h417_usbhs_udc {
     struct usb_dc_ep_state out_ep[USB_CH32H417_MAX_EP_NUM];
 };
 
+struct ch32h417_usbhs_diag {
+    volatile uint32_t irq;
+    volatile uint32_t reset;
+    volatile uint32_t suspend;
+    volatile uint32_t sleep;
+    volatile uint32_t lpm;
+    volatile uint32_t link_ready;
+    volatile uint32_t transfer;
+    volatile uint32_t setup;
+    volatile uint32_t ep0_in;
+    volatile uint32_t ep0_out;
+    volatile uint32_t ep_in;
+    volatile uint32_t ep_out;
+    volatile uint32_t set_addr;
+    volatile uint32_t stall;
+    volatile uint32_t last_int_fg;
+    volatile uint32_t last_int_st;
+    volatile uint32_t last_rx_len;
+    volatile uint32_t rcc_ctlr;
+    volatile uint32_t rcc_pllcfgr;
+    volatile uint32_t rcc_pllcfgr2;
+    volatile uint32_t rcc_hbpcenr;
+};
+
 static struct ch32h417_usbhs_udc g_ch32h417_usbhs_udc;
+static struct ch32h417_usbhs_diag g_ch32h417_usbhs_diag;
+static uint8_t g_ch32h417_usbhs_initialized;
 
 static __attribute__((aligned(4))) uint8_t ep0_buffer[USB_CH32H417_EP0_MPS];
 static __attribute__((aligned(4))) uint8_t ep_tx_buffer[USB_CH32H417_MAX_EP_NUM][USBHS_EP_BUFFER_SIZE];
@@ -188,6 +215,44 @@ __WEAK void usb_dc_low_level_deinit(void)
     (void)0;
 }
 
+static int usbhs_rcc_init(void)
+{
+    uint32_t timeout;
+
+    if ((RCC->CTLR & RCC_USBHS_PLLRDY) == 0U) {
+        if ((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS) {
+            RCC_USBHS_PLLCmd(DISABLE);
+            RCC_USBHSPLLCLKConfig(RCC_USBHSPLLSource_HSE);
+            RCC_USBHSPLLReferConfig(RCC_USBHSPLLRefer_25M);
+            RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
+        }
+
+        RCC_USBHS_PLLCmd(ENABLE);
+        for (timeout = 0U; timeout < USBHS_INIT_TIMEOUT; timeout++) {
+            if ((RCC->CTLR & RCC_USBHS_PLLRDY) != 0U) {
+                break;
+            }
+            __NOP();
+        }
+        if (timeout >= USBHS_INIT_TIMEOUT) {
+            rt_kprintf("[USBHS] PLL ready timeout ctl=0x%08x pll=0x%08x pll2=0x%08x\r\n",
+                       (unsigned int)RCC->CTLR,
+                       (unsigned int)RCC->PLLCFGR,
+                       (unsigned int)RCC->PLLCFGR2);
+            return -1;
+        }
+    }
+
+    RCC_UTMIcmd(ENABLE);
+    RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, ENABLE);
+    return 0;
+}
+
+static void usbhs_rcc_deinit(void)
+{
+    RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, DISABLE);
+}
+
 static void usbhs_ep0_state_init(void)
 {
     g_ch32h417_usbhs_udc.out_ep[0].ep_mps = USB_CH32H417_EP0_MPS;
@@ -279,7 +344,7 @@ static void usbhs_ep_prime_out(uint8_t ep_idx)
     }
 }
 
-static void usbhs_handle_setup_packet(void)
+static void usbhs_handle_setup_packet(uint8_t busid)
 {
     g_ch32h417_usbhs_udc.out_ep[0].ep_toggle = 0U;
     g_ch32h417_usbhs_udc.out_ep[0].actual_xfer_len = 0U;
@@ -288,7 +353,8 @@ static void usbhs_handle_setup_packet(void)
     g_ch32h417_usbhs_udc.in_ep[0].actual_xfer_len = 0U;
     g_ch32h417_usbhs_udc.in_ep[0].xfer_len = 0U;
     g_ch32h417_usbhs_udc.in_ep[0].xfer_buf = NULL;
-    usbd_event_ep0_setup_complete_handler(0U, ep0_buffer);
+    g_ch32h417_usbhs_diag.setup++;
+    usbd_event_ep0_setup_complete_handler(busid, ep0_buffer);
     usbhs_ep_prime_out(0U);
 }
 
@@ -309,6 +375,7 @@ static void usbhs_handle_ep0_in_xfer_complete(uint8_t busid)
 
     if (ep0->xfer_len == 0U) {
         usbhs_apply_pending_address();
+        g_ch32h417_usbhs_diag.ep0_in++;
         usbd_event_ep_in_complete_handler(busid, USB_CONTROL_IN_EP0, ep0->actual_xfer_len);
     } else {
         uint32_t next_len = (ep0->xfer_len > ep0->ep_mps) ? ep0->ep_mps : ep0->xfer_len;
@@ -346,6 +413,7 @@ static void usbhs_handle_ep_in_xfer_complete(uint8_t busid, uint8_t ep_idx)
     }
 
     if (last != 0U) {
+        g_ch32h417_usbhs_diag.ep_in++;
         usbd_event_ep_in_complete_handler(busid, (uint8_t)(ep_idx | 0x80U), ep->actual_xfer_len);
     }
 }
@@ -357,7 +425,7 @@ static void usbhs_handle_ep0_out_xfer_complete(uint8_t busid)
     uint8_t done = 0U;
 
     if ((*usbhs_ep_rx_ctrl_reg(0U) & USBHS_UEP_RX_SETUP_IS) != 0U) {
-        usbhs_handle_setup_packet();
+        usbhs_handle_setup_packet(busid);
         return;
     }
 
@@ -380,6 +448,7 @@ static void usbhs_handle_ep0_out_xfer_complete(uint8_t busid)
     }
 
     if (done != 0U) {
+        g_ch32h417_usbhs_diag.ep0_out++;
         usbd_event_ep_out_complete_handler(busid, USB_CONTROL_OUT_EP0, ep0->actual_xfer_len);
     } else {
         ep0->ep_toggle ^= 1U;
@@ -410,6 +479,7 @@ static void usbhs_handle_ep_out_xfer_complete(uint8_t busid, uint8_t ep_idx)
 
     if ((ep->xfer_len == 0U) || (rx_len < ep->ep_mps)) {
         ep->xfer_len = 0U;
+        g_ch32h417_usbhs_diag.ep_out++;
         usbd_event_ep_out_complete_handler(busid, ep_idx, ep->actual_xfer_len);
     } else {
         ep->ep_toggle ^= 1U;
@@ -419,48 +489,58 @@ static void usbhs_handle_ep_out_xfer_complete(uint8_t busid, uint8_t ep_idx)
 
 int usb_dc_ch32h417_usbhs_init(uint8_t busid)
 {
-    (void)busid;
+    if (busid != USB_CH32H417_BUS_HS) {
+        return -1;
+    }
+
     usb_dc_low_level_init();
+    if (usbhs_rcc_init() != 0) {
+        return -1;
+    }
+
     memset(&g_ch32h417_usbhs_udc, 0, sizeof(g_ch32h417_usbhs_udc));
+    memset(&g_ch32h417_usbhs_diag, 0, sizeof(g_ch32h417_usbhs_diag));
     g_ch32h417_usbhs_udc.port_speed = USB_SPEED_HIGH;
 
-    rt_kprintf("[USBHS] init\r\n");
+    USBHSD->CONTROL = USBHS_UD_RST_LINK | USBHS_UD_PHY_SUSPENDM;
+    USBHSD->INT_FG = 0xFFU;
+    USBHSD->INT_EN = USBHS_UDIE_BUS_RST | USBHS_UDIE_SUSPEND | USBHS_UDIE_BUS_SLEEP |
+                     USBHS_UDIE_LPM_ACT | USBHS_UDIE_TRANSFER | USBHS_UDIE_LINK_RDY;
+    USBHSD->BASE_MODE = USBHS_UD_SPEED_HIGH;
+    usbhs_clear_all_transfer_state();
+    USBHSD->DEV_AD = 0U;
+    USBHSD->CONTROL = USBHS_UD_DEV_EN | USBHS_UD_DMA_EN | USBHS_UD_LPM_EN | USBHS_UD_PHY_SUSPENDM;
 
-    RCC_USBHS_PLLCmd(DISABLE);
-    RCC_USBHSPLLCLKConfig(RCC_USBHSPLLSource_HSE);
-    RCC_USBHSPLLReferConfig(RCC_USBHSPLLRefer_25M);
-    RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
-    RCC_USBHS_PLLCmd(ENABLE);
-    RCC_UTMIcmd(ENABLE);
-    RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, ENABLE);
+    g_ch32h417_usbhs_initialized = 1U;
+    g_ch32h417_usbhs_diag.rcc_ctlr = RCC->CTLR;
+    g_ch32h417_usbhs_diag.rcc_pllcfgr = RCC->PLLCFGR;
+    g_ch32h417_usbhs_diag.rcc_pllcfgr2 = RCC->PLLCFGR2;
+    g_ch32h417_usbhs_diag.rcc_hbpcenr = RCC->HBPCENR;
 
-    *usbhs_reg8(USBHS_OFFSET_USB_CTRL) = (uint8_t)(USBHS_UD_RST_LINK | USBHS_UD_PHY_SUSPENDM);
-    *usbhs_reg8(USBHS_OFFSET_USB_INT_EN) = (uint8_t)(USBHS_UDIE_BUS_RST | USBHS_UDIE_SUSPEND | USBHS_UDIE_BUS_SLEEP |
-                                                        USBHS_UDIE_LPM_ACT | USBHS_UDIE_TRANSFER | USBHS_UDIE_LINK_RDY);
-    *usbhs_reg8(USBHS_OFFSET_USB_INT_FG) = (uint8_t)0xFFU;
-    *usbhs_reg8(USBHS_OFFSET_USB_BASE_MODE) = USBHS_UD_SPEED_HIGH;
-    *usbhs_reg16(USBHS_OFFSET_UEP_TX_EN) = 0U;
-    *usbhs_reg16(USBHS_OFFSET_UEP_RX_EN) = 0U;
-    *usbhs_reg8(USBHS_OFFSET_USB_CTRL) = (uint8_t)(USBHS_UD_DEV_EN | USBHS_UD_DMA_EN | USBHS_UD_LPM_EN | USBHS_UD_PHY_SUSPENDM);
-
-    usbhs_ep0_state_init();
+    NVIC_SetPriority(USBHS_IRQn, 1);
     NVIC_EnableIRQ(USBHS_IRQn);
-
-    (void)USBHS_INIT_TIMEOUT;
+    rt_kprintf("[USBHS] device init done ctl=0x%02x mode=0x%02x ie=0x%02x fg=0x%02x rcc=0x%08x/0x%08x/0x%08x hb=0x%08x\r\n",
+               (unsigned int)USBHSD->CONTROL,
+               (unsigned int)USBHSD->BASE_MODE,
+               (unsigned int)USBHSD->INT_EN,
+               (unsigned int)USBHSD->INT_FG,
+               (unsigned int)RCC->CTLR,
+               (unsigned int)RCC->PLLCFGR,
+               (unsigned int)RCC->PLLCFGR2,
+               (unsigned int)RCC->HBPCENR);
     return 0;
-  }
+}
 
 int usb_dc_ch32h417_usbhs_deinit(uint8_t busid)
 {
     (void)busid;
 
     NVIC_DisableIRQ(USBHS_IRQn);
-    RCC_HBPeriphClockCmd(RCC_HBPeriph_USBHS, DISABLE);
-    RCC_UTMIcmd(DISABLE);
-    RCC_USBHS_PLLCmd(DISABLE);
-    *usbhs_reg8(USBHS_OFFSET_USB_CTRL) = USBHS_UD_RST_LINK;
-    *usbhs_reg16(USBHS_OFFSET_UEP_TX_EN) = 0U;
-    *usbhs_reg16(USBHS_OFFSET_UEP_RX_EN) = 0U;
+    USBHSD->CONTROL = USBHS_UD_RST_SIE | USBHS_UD_RST_LINK;
+    USBHSD->INT_EN = 0U;
+    USBHSD->INT_FG = 0xFFU;
+    g_ch32h417_usbhs_initialized = 0U;
+    usbhs_rcc_deinit();
     usb_dc_low_level_deinit();
     return 0;
 }
@@ -470,6 +550,7 @@ int usb_dc_ch32h417_usbhs_set_address(uint8_t busid, const uint8_t addr)
     (void)busid;
     g_ch32h417_usbhs_udc.dev_addr = addr;
     g_ch32h417_usbhs_udc.addr_pending = 1U;
+    g_ch32h417_usbhs_diag.set_addr++;
     return 0;
 }
 
@@ -566,6 +647,7 @@ int usb_dc_ch32h417_usbhs_set_stall(uint8_t busid, uint8_t ep)
         *usbhs_ep_rx_ctrl_reg(0U) = USBHS_UEP_RX_RES_STALL | USBHS_UEP_RX_D0 | USBHS_UEP_RX_TOG_MATCH;
         g_ch32h417_usbhs_udc.in_ep[0].ep_stalled = 1U;
         g_ch32h417_usbhs_udc.out_ep[0].ep_stalled = 1U;
+        g_ch32h417_usbhs_diag.stall++;
     } else if (USB_EP_DIR_IS_OUT(ep)) {
         *usbhs_ep_rx_ctrl_reg(ep_idx) = USBHS_UEP_RX_RES_STALL | USBHS_UEP_RX_D0;
         g_ch32h417_usbhs_udc.out_ep[ep_idx].ep_stalled = 1U;
@@ -680,6 +762,43 @@ int usb_dc_ch32h417_usbhs_start_read(uint8_t busid, uint8_t ep, uint8_t *data, u
     return 0;
 }
 
+void usb_dc_ch32h417_usbhs_dump_diag(void)
+{
+    if (g_ch32h417_usbhs_initialized == 0U) {
+        return;
+    }
+
+    rt_kprintf("[USBHS diag] irq=%u rst=%u sus=%u slp=%u lpm=%u rdy=%u xfer=%u setup=%u in0=%u out0=%u in=%u out=%u stall=%u addr=%u\r\n",
+               (unsigned int)g_ch32h417_usbhs_diag.irq,
+               (unsigned int)g_ch32h417_usbhs_diag.reset,
+               (unsigned int)g_ch32h417_usbhs_diag.suspend,
+               (unsigned int)g_ch32h417_usbhs_diag.sleep,
+               (unsigned int)g_ch32h417_usbhs_diag.lpm,
+               (unsigned int)g_ch32h417_usbhs_diag.link_ready,
+               (unsigned int)g_ch32h417_usbhs_diag.transfer,
+               (unsigned int)g_ch32h417_usbhs_diag.setup,
+               (unsigned int)g_ch32h417_usbhs_diag.ep0_in,
+               (unsigned int)g_ch32h417_usbhs_diag.ep0_out,
+               (unsigned int)g_ch32h417_usbhs_diag.ep_in,
+               (unsigned int)g_ch32h417_usbhs_diag.ep_out,
+               (unsigned int)g_ch32h417_usbhs_diag.stall,
+               (unsigned int)g_ch32h417_usbhs_diag.set_addr);
+    rt_kprintf("[USBHS regs] ctl=0x%02x mode=0x%02x ie=0x%02x fg=0x%02x st=0x%02x da=0x%02x rxlen=%u e0t=0x%02x e0r=0x%02x rcc=0x%08x/0x%08x/0x%08x hb=0x%08x\r\n",
+               (unsigned int)USBHSD->CONTROL,
+               (unsigned int)USBHSD->BASE_MODE,
+               (unsigned int)USBHSD->INT_EN,
+               (unsigned int)USBHSD->INT_FG,
+               (unsigned int)USBHSD->INT_ST,
+               (unsigned int)USBHSD->DEV_AD,
+               (unsigned int)(*usbhs_ep_rx_len_reg(0U)),
+               (unsigned int)(*usbhs_ep_tx_ctrl_reg(0U)),
+               (unsigned int)(*usbhs_ep_rx_ctrl_reg(0U)),
+               (unsigned int)RCC->CTLR,
+               (unsigned int)RCC->PLLCFGR,
+               (unsigned int)RCC->PLLCFGR2,
+               (unsigned int)RCC->HBPCENR);
+}
+
 void USBD_IRQHandler(uint8_t busid)
 {
     uint8_t int_fg;
@@ -690,27 +809,45 @@ void USBD_IRQHandler(uint8_t busid)
     if (int_fg == 0U) {
         return;
     }
+    int_st = *usbhs_reg8(USBHS_OFFSET_USB_INT_ST);
+    g_ch32h417_usbhs_diag.irq++;
+    g_ch32h417_usbhs_diag.last_int_fg = int_fg;
+    g_ch32h417_usbhs_diag.last_int_st = int_st;
+    g_ch32h417_usbhs_diag.last_rx_len = (uint32_t)(*usbhs_ep_rx_len_reg(0U));
 
     if ((int_fg & USBHS_UDIF_BUS_RST) != 0U) {
         uint32_t reset_loop;
+        g_ch32h417_usbhs_diag.reset++;
         for (reset_loop = 0U; reset_loop < USBHS_INIT_TIMEOUT; reset_loop++) {
             (void)reset_loop;
         }
         usbhs_clear_all_transfer_state();
+        g_ch32h417_usbhs_udc.port_speed = USB_SPEED_HIGH;
+        g_ch32h417_usbhs_udc.dev_addr = 0U;
+        g_ch32h417_usbhs_udc.addr_pending = 0U;
+        *usbhs_reg8(USBHS_OFFSET_USB_DEV_AD) = 0U;
         *usbhs_reg8(USBHS_OFFSET_USB_CTRL) = (uint8_t)(USBHS_UD_RST_LINK | USBHS_UD_PHY_SUSPENDM);
         *usbhs_reg8(USBHS_OFFSET_USB_CTRL) = (uint8_t)(USBHS_UD_DEV_EN | USBHS_UD_DMA_EN | USBHS_UD_LPM_EN | USBHS_UD_PHY_SUSPENDM);
         usbd_event_reset_handler(busid);
     }
 
     if ((int_fg & USBHS_UDIF_SUSPEND) != 0U) {
+        g_ch32h417_usbhs_diag.suspend++;
         usbd_event_suspend_handler(busid);
     }
+    if ((int_fg & USBHS_UDIF_BUS_SLEEP) != 0U) {
+        g_ch32h417_usbhs_diag.sleep++;
+    }
+    if ((int_fg & USBHS_UDIF_LPM_ACT) != 0U) {
+        g_ch32h417_usbhs_diag.lpm++;
+    }
     if ((int_fg & USBHS_UDIF_LINK_RDY) != 0U) {
+        g_ch32h417_usbhs_diag.link_ready++;
         usbd_event_connect_handler(busid);
     }
 
     if ((int_fg & USBHS_UDIF_TRANSFER) != 0U) {
-        int_st = *usbhs_reg8(USBHS_OFFSET_USB_INT_ST);
+        g_ch32h417_usbhs_diag.transfer++;
         ep_idx = (uint8_t)(int_st & USBHS_UD_INT_EP_ID_MASK);
 
         if (ep_idx < USB_CH32H417_MAX_EP_NUM) {
@@ -738,7 +875,7 @@ void USBHS_IRQHandler(void)
 {
     GET_INT_SP();
     rt_interrupt_enter();
-    USBD_IRQHandler(0U);
+    USBD_IRQHandler(USB_CH32H417_BUS_HS);
     rt_interrupt_leave();
     FREE_INT_SP();
 }

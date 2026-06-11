@@ -991,7 +991,7 @@ void usbd_event_reset_handler(uint8_t busid)
     g_usbd_core[busid].device_address = 0;
     g_usbd_core[busid].configuration = 0;
     g_usbd_core[busid].ep0_next_state = USBD_EP0_STATE_SETUP;
-    g_usbd_core[busid].speed = USB_SPEED_UNKNOWN;
+    g_usbd_core[busid].speed = usbd_get_port_speed(busid);
 
     USB_ASSERT_MSG(g_usbd_core[busid].descriptors->device_descriptor_callback != NULL,
                    "device_descriptor_callback is NULL\r\n");

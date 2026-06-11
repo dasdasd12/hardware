@@ -20,7 +20,7 @@ int usb_dc_ch32h417_usbhs_clear_stall(uint8_t busid, uint8_t ep);
 int usb_dc_ch32h417_usbhs_is_stalled(uint8_t busid, uint8_t ep, uint8_t *stalled);
 int usb_dc_ch32h417_usbhs_start_write(uint8_t busid, uint8_t ep, const uint8_t *data, uint32_t data_len);
 int usb_dc_ch32h417_usbhs_start_read(uint8_t busid, uint8_t ep, uint8_t *data, uint32_t data_len);
+void usb_dc_ch32h417_usbhs_dump_diag(void);
 void USBHS_IRQHandler(void);
 
 #endif /* USB_DC_CH32H417_USBHS_H */
-

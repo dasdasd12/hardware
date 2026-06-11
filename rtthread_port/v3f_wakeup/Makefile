@@ -25,13 +25,22 @@ LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs
 # EVT SDK root
 EVT_ROOT     := C:/program1/hardware/WCH/CH32H417/CH32H417EVT/EVT/EXAM
 SRC_ROOT     := $(EVT_ROOT)/SRC
+OFFICIAL_USBSS_ROOT := $(EVT_ROOT)/USBSS/DEVICE/CH372Device/Common
+
+V3F_USBSS_OFFICIAL_OWNER ?= 1
 
 # Defines
 DEFS := -DCore_V3F
+ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
+DEFS += -DV3F_USBSS_OFFICIAL_OWNER=1
+endif
 
 # Include paths
 INC := -I"$(PROJECT_ROOT)"
 INC += -I"$(SRC_ROOT)/Debug" -I"$(SRC_ROOT)/Core" -I"$(SRC_ROOT)/Peripheral/inc"
+ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
+INC += -I"$(OFFICIAL_USBSS_ROOT)"
+endif
 
 # Source files
 APP_SRC := $(PROJECT_ROOT)/main.c
@@ -39,8 +48,21 @@ APP_SRC += $(PROJECT_ROOT)/system_ch32h417.c
 APP_SRC += $(PROJECT_ROOT)/adc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_pwr.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_flash.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_gpio.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_dbgmcu.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_adc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_dma.c
+
+ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
+APP_SRC += $(SRC_ROOT)/Debug/debug.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_tim.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_usart.c
+APP_SRC += $(OFFICIAL_USBSS_ROOT)/ch32h417_usbss_device.c
+APP_SRC += $(OFFICIAL_USBSS_ROOT)/ch32h417_usbss_it.c
+APP_SRC += $(OFFICIAL_USBSS_ROOT)/ch32h417_usbhs_device.c
+APP_SRC += $(OFFICIAL_USBSS_ROOT)/usb_desc.c
+endif
 
 # Startup and linker
 STARTUP := $(PROJECT_ROOT)/startup_ch32h417_v3f.S
