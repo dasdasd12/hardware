@@ -11,6 +11,14 @@
 # Build outputs
 build/
 **/build/
+build_*/
+**/build_*/
+obj/
+**/obj/
+Debug/
+**/Debug/
+Release/
+**/Release/
 *.o
 *.d
 *.elf
@@ -21,6 +29,9 @@ build/
 *.axf
 *.dis
 *.su
+*.out
+*.srec
+*.s19
 
 # Simulation / waveform outputs
 *.vvp
@@ -32,6 +43,15 @@ build/
 manual_openocd_*.txt
 openocd_*.txt
 ocd_*.txt
+
+# Local WCH/MounRiver automation state
+/rtthread_port/.wch-skill-logs/
+
+# Local USB CDC/USBHS capture logs
+/rtthread_port/.usbhs_logs/
+
+# Extracted manual text caches generated for local search
+/docs/user_manual/*.txt
 
 # Temporary dumps / preprocessed files
 *.tmp
