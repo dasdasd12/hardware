@@ -24,6 +24,14 @@
 #define CDC_HS_MPS 512U
 #define CDC_SS_MPS 1024U
 
+#ifndef APP_ENABLE_USB2_HS_CDC
+#define APP_ENABLE_USB2_HS_CDC 1
+#endif
+
+#ifndef APP_ENABLE_USB2_FS_CDC
+#define APP_ENABLE_USB2_FS_CDC 0
+#endif
+
 #define USB_CONFIG_SIZE_FS (9 + CDC_ACM_DESCRIPTOR_LEN)
 #define USB_CONFIG_SIZE_HS (9 + CDC_ACM_DESCRIPTOR_LEN)
 #define USB_CONFIG_SIZE_SS (9 + 8 + 9 + 5 + 5 + 4 + 5 + 7 + 6 + 9 + 7 + 6 + 7 + 6)
@@ -262,6 +270,7 @@ static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t cdc_tx_buffer[CONFIG_USBDE
 static uint8_t cdc_tx_busy[CONFIG_USBDEV_MAX_BUS];
 static uint8_t cdc_bus_registered[CONFIG_USBDEV_MAX_BUS];
 static uint8_t cdc_bus_initialized[CONFIG_USBDEV_MAX_BUS];
+static uint8_t cdc_bus_configured[CONFIG_USBDEV_MAX_BUS];
 
 static const char *cdc_bus_name(uint8_t busid)
 {
@@ -314,6 +323,11 @@ static void cdc_acm_data_recv(uint8_t busid, uint8_t ep, uint32_t nbytes)
         nbytes = cdc_bus_mps(busid);
     }
 
+    if (cdc_tx_busy[busid] != 0U) {
+        cdc_submit_read(busid);
+        return;
+    }
+
     memcpy(cdc_tx_buffer[busid], cdc_rx_buffer[busid], nbytes);
     cdc_tx_busy[busid] = 1U;
     if (usbd_ep_start_write(busid, CDC_IN_EP, cdc_tx_buffer[busid], nbytes) != 0) {
@@ -344,12 +358,14 @@ static void usb_event_handler(uint8_t busid, uint8_t event)
     switch (event) {
     case USBD_EVENT_CONFIGURED:
         cdc_tx_busy[busid] = 0U;
+        cdc_bus_configured[busid] = 1U;
         cdc_submit_read(busid);
         rt_kprintf("%s CDC configured\r\n", cdc_bus_name(busid));
         break;
     case USBD_EVENT_RESET:
     case USBD_EVENT_DISCONNECTED:
         cdc_tx_busy[busid] = 0U;
+        cdc_bus_configured[busid] = 0U;
         break;
     default:
         break;
@@ -429,6 +445,69 @@ int ch32h417_usbhs_cdc_init(void)
     return ret;
 }
 
+static int ch32h417_cdc_write(uint8_t busid, const void *data, uint32_t len)
+{
+    uint32_t mps;
+
+    if ((busid >= CONFIG_USBDEV_MAX_BUS) || (data == RT_NULL)) {
+        return -1;
+    }
+
+    if (len == 0U) {
+        return 0;
+    }
+
+    if ((cdc_bus_initialized[busid] == 0U) || (cdc_bus_configured[busid] == 0U)) {
+        return -2;
+    }
+
+    if (cdc_tx_busy[busid] != 0U) {
+        return -3;
+    }
+
+    mps = cdc_bus_mps(busid);
+    if (len > mps) {
+        len = mps;
+    }
+
+    memcpy(cdc_tx_buffer[busid], data, len);
+    cdc_tx_busy[busid] = 1U;
+    if (usbd_ep_start_write(busid, CDC_IN_EP, cdc_tx_buffer[busid], len) != 0) {
+        cdc_tx_busy[busid] = 0U;
+        return -4;
+    }
+
+    return (int)len;
+}
+
+int ch32h417_usbfs_cdc_write(const void *data, uint32_t len)
+{
+    return ch32h417_cdc_write(USB_CH32H417_BUS_FS, data, len);
+}
+
+int ch32h417_usbhs_cdc_write(const void *data, uint32_t len)
+{
+    return ch32h417_cdc_write(USB_CH32H417_BUS_HS, data, len);
+}
+
+int ch32h417_usb_cdc_write(const void *data, uint32_t len)
+{
+    int ret = -2;
+
+#if APP_ENABLE_USB2_HS_CDC
+    ret = ch32h417_usbhs_cdc_write(data, len);
+    if (ret > 0) {
+        return ret;
+    }
+#endif
+
+#if APP_ENABLE_USB2_FS_CDC
+    ret = ch32h417_usbfs_cdc_write(data, len);
+#endif
+
+    return ret;
+}
+
 void ch32h417_dual_cdc_poll(void)
 {
 #if defined(APP_USBSS_SKIP_FOR_V3F_OFFICIAL) && (APP_USBSS_SKIP_FOR_V3F_OFFICIAL != 0)
@@ -453,7 +532,8 @@ void ch32h417_dual_cdc_poll(void)
 
 int ch32h417_dual_cdc_init(void)
 {
-    int ret_fs;
+    int ret_fs = -1;
+    int ret_hs = -1;
     int ret_ss = -1;
 
 #if defined(APP_USBSS_SKIP_FOR_V3F_OFFICIAL) && (APP_USBSS_SKIP_FOR_V3F_OFFICIAL != 0)
@@ -461,7 +541,14 @@ int ch32h417_dual_cdc_init(void)
 #else
     ret_ss = ch32h417_usbss_cdc_init();
 #endif
-    ret_fs = ch32h417_usbfs_cdc_init();
 
-    return ((ret_ss == 0) || (ret_fs == 0)) ? 0 : -1;
+#if APP_ENABLE_USB2_HS_CDC
+    ret_hs = ch32h417_usbhs_cdc_init();
+#endif
+
+#if APP_ENABLE_USB2_FS_CDC
+    ret_fs = ch32h417_usbfs_cdc_init();
+#endif
+
+    return ((ret_ss == 0) || (ret_hs == 0) || (ret_fs == 0)) ? 0 : -1;
 }
