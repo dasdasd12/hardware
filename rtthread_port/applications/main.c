@@ -66,6 +66,14 @@
 #endif
 
 
+#ifndef APP_USB_CDC_WRITE_WAIT_RETRIES
+#define APP_USB_CDC_WRITE_WAIT_RETRIES 20
+#endif
+
+#ifndef APP_USB_CDC_WRITE_RETRY_DELAY_MS
+#define APP_USB_CDC_WRITE_RETRY_DELAY_MS 1
+#endif
+
 #ifndef APP_ENABLE_SERIAL_HEARTBEAT
 #define APP_ENABLE_SERIAL_HEARTBEAT 1
 #endif
@@ -79,6 +87,51 @@ extern int ch32h417_usb_cdc_write(const void *data, rt_uint32_t len);
 
 /* Eval board: PB1 = LED */
 #define LED_PIN  rt_pin_get("PB.1")
+
+#if APP_ENABLE_USB_TEST
+static int usb_cdc_write_full(const char *data, rt_size_t len)
+{
+    rt_size_t offset = 0U;
+    rt_uint32_t retries = 0U;
+
+    if (data == RT_NULL)
+    {
+        return -1;
+    }
+
+    while (offset < len)
+    {
+        int wrote = ch32h417_usb_cdc_write(&data[offset], (rt_uint32_t)(len - offset));
+
+        if (wrote > 0)
+        {
+            offset += (rt_size_t)wrote;
+            retries = 0U;
+            continue;
+        }
+
+        if ((wrote == -2) || (retries >= APP_USB_CDC_WRITE_WAIT_RETRIES))
+        {
+            return (offset > 0U) ? (int)offset : wrote;
+        }
+
+        retries++;
+        rt_thread_mdelay(APP_USB_CDC_WRITE_RETRY_DELAY_MS);
+    }
+
+    return (int)offset;
+}
+
+static int usb_cdc_write_line(const char *line, int len)
+{
+    if (len <= 0)
+    {
+        return len;
+    }
+
+    return usb_cdc_write_full(line, (rt_size_t)len);
+}
+#endif
 
 #if APP_ENABLE_USB_TEST && APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SCAN_REPORT
 static void usb_scan_report_poll(rt_uint32_t heartbeat)
@@ -122,7 +175,7 @@ static void usb_scan_report_poll(rt_uint32_t heartbeat)
     line[used++] = '\n';
     line[used] = '\0';
 
-    if (ch32h417_usb_cdc_write(line, (rt_uint32_t)used) > 0) {
+    if (usb_cdc_write_line(line, used) == used) {
         report_index += sent_values;
         if (report_index >= CH585_SCAN_TOTAL_KEYS) {
             report_index = 0;
@@ -139,7 +192,7 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
     const ch585_scan_source_stats_t *src1;
     const uint16_t *raw;
     uint32_t sck_x10;
-    char line[224];
+    char line[96];
     int used;
 
     if ((heartbeat % APP_USB_SCAN_STATUS_REPORT_PERIOD_LOOPS) != 1U) {
@@ -155,12 +208,19 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
     }
 
     used = rt_snprintf(line, sizeof(line),
-                       "SS hb=%u s0ok=%u s0fetch=%u s0crc=%u s0seq=%u sck=%u.%u p=%04x h=%u c=%u tr=%u/%u/%u s1ok=%u raw0=%u raw1=%u raw63=%u raw64=%u\r\n",
+                       "SS hb=%u ok=%u fetch=%u crc=%u seq=%u s1ok=%u\r\n",
                        (unsigned int)heartbeat,
                        (unsigned int)src0->frames_ok,
                        (unsigned int)src0->fetch_errors,
                        (unsigned int)src0->crc_errors,
                        (unsigned int)src0->seq_drops,
+                       (unsigned int)src1->frames_ok);
+    if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
+        (void)usb_cdc_write_line(line, used);
+    }
+
+    used = rt_snprintf(line, sizeof(line),
+                       "SP sck=%u.%u p=%04x h=%u c=%u tr=%u/%u/%u\r\n",
                        (unsigned int)(sck_x10 / 10U),
                        (unsigned int)(sck_x10 % 10U),
                        (unsigned int)ch585_spi_scan_source0_prescaler(),
@@ -168,14 +228,19 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
                        (unsigned int)ch585_spi_scan_source0_cpha_edges(),
                        (unsigned int)ch585_spi_scan_source0_train_done(),
                        (unsigned int)ch585_spi_scan_source0_train_errors(),
-                       (unsigned int)ch585_spi_scan_source0_train_frames(),
-                       (unsigned int)src1->frames_ok,
+                       (unsigned int)ch585_spi_scan_source0_train_frames());
+    if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
+        (void)usb_cdc_write_line(line, used);
+    }
+
+    used = rt_snprintf(line, sizeof(line),
+                       "SR r0=%u r1=%u r63=%u r64=%u\r\n",
                        (unsigned int)raw[0],
                        (unsigned int)raw[1],
                        (unsigned int)raw[63],
                        (unsigned int)raw[64]);
     if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
-        (void)ch32h417_usb_cdc_write(line, (rt_uint32_t)used);
+        (void)usb_cdc_write_line(line, used);
     }
 }
 #endif
@@ -230,7 +295,7 @@ static void usb_spi_train_report_poll(rt_uint32_t heartbeat)
                        (unsigned int)bad_errors,
                        (unsigned int)seq_errors);
     if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
-        if (ch32h417_usb_cdc_write(line, (rt_uint32_t)used) > 0) {
+        if (usb_cdc_write_line(line, used) == used) {
             report_index++;
         }
     }
