@@ -33,15 +33,10 @@ RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
 # Defines (only board-specific ones; RT-Thread config macros are in rtconfig.h)
 DEFS := -DCore_V5F -DBSP_USING_UART8 -D__RT_KERNEL_SOURCE__ -D__RT_IPC_SOURCE__ -DCONFIG_CHERRYUSB
 DEFS += -DAPP_USBSS_SKIP_FOR_V3F_OFFICIAL=1
-DEFS += -DAPP_ENABLE_USB_TEST=1
-APP_ENABLE_USB2_HS_CDC ?= 1
-APP_ENABLE_USB2_FS_CDC ?= 0
-DEFS += -DAPP_ENABLE_USB2_HS_CDC=$(APP_ENABLE_USB2_HS_CDC)
-DEFS += -DAPP_ENABLE_USB2_FS_CDC=$(APP_ENABLE_USB2_FS_CDC)
+DEFS += -DAPP_ENABLE_USB_TEST=0
 
 # Include paths
 INC := -I"$(PROJECT_ROOT)" -I"$(PROJECT_ROOT)/bsp" -I"$(PROJECT_ROOT)/drivers" -I"$(PROJECT_ROOT)/libcpu"
-INC += -I"$(PROJECT_ROOT)/applications"
 INC += -I"$(RTT_ROOT)/include" -I"$(RTT_ROOT)/components/drivers/include"
 INC += -I"$(RTT_ROOT)/components/libc/compilers/common/include"
 INC += -I"$(RTT_ROOT)/components/libc/compilers/newlib"
@@ -110,8 +105,6 @@ DRV_SRC += $(PROJECT_ROOT)/drivers/drv_gpio.c
 
 # Application
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
-APP_SRC += $(PROJECT_ROOT)/applications/ch585_spi_scan.c
-APP_SRC += $(PROJECT_ROOT)/applications/keyboard_engine.c
 APP_SRC += $(PROJECT_ROOT)/applications/usb_cdc_dual.c
 
 # CherryUSB stack
