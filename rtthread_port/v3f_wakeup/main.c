@@ -34,6 +34,10 @@
 #define V3F_ENABLE_ADC_INIT 0
 #endif
 
+#ifndef V3F_ENABLE_USBFS_CLOCK_INIT
+#define V3F_ENABLE_USBFS_CLOCK_INIT 0
+#endif
+
 enum
 {
     V3F_STAGE_ENTER_MAIN = 1,
@@ -47,6 +51,7 @@ enum
     V3F_STAGE_USBSS_PLL_TIMEOUT,
     V3F_STAGE_USBFS_CLOCK_DONE,
     V3F_STAGE_USBFS_CLOCK_TIMEOUT,
+    V3F_STAGE_USBFS_CLOCK_SKIPPED,
     V3F_STAGE_IDLE_LOOP,
     V3F_STAGE_USBSS_LINK_PROBE_DONE,
     V3F_STAGE_USBSS_SWJ_DISABLED,
@@ -288,28 +293,17 @@ int main(void)
     *V3F_USBSS_FLAG_ADDR = 0;
     V3F_BootTrace(V3F_STAGE_ENTER_MAIN);
 
-    /* Configure the system clock from the 25 MHz HSE before waking V5F. */
+    /* Minimal boot-core path: keep V3F boring until V5F UART logs are proven.
+       USBSS ownership, SWJ remap and ADC scan setup will be reintroduced after
+       the dual-core boot path is stable on the real board. */
     SystemInit();
     V3F_BootTrace(V3F_STAGE_SYSTEM_INIT_DONE);
 
-    /* Enable PWR clock so STOP mode can be entered correctly */
     RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE);
     V3F_BootTrace(V3F_STAGE_PWR_CLOCK_DONE);
 
-    /* Keep V5F stopped until USBSS PLL/link probing is complete. This tests
-       whether V5F-side RT-Thread/RCC activity is disturbing the USBSS PLL. */
-    V3F_USBSS_SWJ_DownloadWindow();
-
-#if defined(V3F_USBSS_OFFICIAL_OWNER) && (V3F_USBSS_OFFICIAL_OWNER != 0)
-    /* In official-owner diagnostic mode V5F is only UART heartbeat. Wake it
-       before the official USBSS stack so a PLL/link wait cannot hide progress. */
-    NVIC_WakeUp_V5F(V5F_START_ADDR);
-    V3F_BootTrace(V3F_STAGE_V5F_WAKE_DONE);
-
-    NVIC->SCTLR |= 1 << 4;
-    V3F_BootTrace(V3F_STAGE_SCTLR_DEBUG_DONE);
-#else
-    if (V3F_USBFS_Clock_Init())
+#if V3F_ENABLE_USBFS_CLOCK_INIT
+    if (V3F_USBFS_Clock_Init() != 0)
     {
         V3F_BootTrace(V3F_STAGE_USBFS_CLOCK_DONE);
     }
@@ -317,73 +311,23 @@ int main(void)
     {
         V3F_BootTrace(V3F_STAGE_USBFS_CLOCK_TIMEOUT);
     }
-#endif
-
-    V3F_USBSS_Disable_SWJ();
-
-#if defined(V3F_USBSS_OFFICIAL_OWNER) && (V3F_USBSS_OFFICIAL_OWNER != 0)
-    Delay_Init();
-    Chip = ((DBGMCU_GetCHIPID() >> 4) & 0x0FU);
-    V3F_BOOT_TRACE_BASE[19] = Chip;
-
-    USB_Timer_Init();
-    USBSS_Device_Init(ENABLE);
-    *V3F_USBSS_FLAG_ADDR = V3F_USBSS_READY;
-    V3F_BOOT_TRACE_BASE[11] = USBSSD->LINK_CFG;
-    V3F_BOOT_TRACE_BASE[12] = USBSSD->LINK_CTRL;
-    V3F_BOOT_TRACE_BASE[13] = USBSSD->LINK_STATUS;
-    V3F_BOOT_TRACE_BASE[15] = USBSSD->LINK_INT_FLAG;
-    V3F_BOOT_TRACE_BASE[16] = USBSSD->LINK_LPM_CR;
-    V3F_BOOT_TRACE_BASE[17] = USBSSD->USB_CONTROL;
-    V3F_BOOT_TRACE_BASE[18] = USBSSD->USB_STATUS;
-    V3F_BootTrace(V3F_STAGE_USBSS_OFFICIAL_OWNER_DONE);
 #else
-    V3F_BootTrace(V3F_STAGE_USBSS_PLL_BEGIN);
-    if (V3F_USBSS_PLL_Init())
-    {
-        V3F_USBSS_LinkProbe();
-        *V3F_USBSS_FLAG_ADDR = V3F_USBSS_READY;
-        V3F_BootTrace(V3F_STAGE_USBSS_PLL_DONE);
-    }
-    else
-    {
-        *V3F_USBSS_FLAG_ADDR = V3F_USBSS_FAILED;
-        V3F_BootTrace(V3F_STAGE_USBSS_PLL_TIMEOUT);
-    }
+    V3F_BOOT_TRACE_BASE[5] = RCC->CFGR2;
+    V3F_BOOT_TRACE_BASE[6] = RCC->CTLR;
+    V3F_BOOT_TRACE_BASE[7] = RCC->HBPCENR;
+    V3F_BootTrace(V3F_STAGE_USBFS_CLOCK_SKIPPED);
 #endif
 
-#if !defined(V3F_USBSS_OFFICIAL_OWNER) || (V3F_USBSS_OFFICIAL_OWNER == 0)
-    /* Wake V5F core only after the USBSS ready/failed flag is stable. */
     NVIC_WakeUp_V5F(V5F_START_ADDR);
     V3F_BootTrace(V3F_STAGE_V5F_WAKE_DONE);
 
-    /* EVT examples set SCTLR bit 4 after wake-up; required for V5F
-       debug module activation and proper dual-core hand-off. */
     NVIC->SCTLR |= 1 << 4;
     V3F_BootTrace(V3F_STAGE_SCTLR_DEBUG_DONE);
-#endif
 
-#if V3F_ENABLE_ADC_INIT
-    /* Initialize ADC1 for magnetic axis hall sensor acquisition.
-       This is the low-level foundation; continuous matrix scan
-       will replace the idle loop below in the next iteration. */
-    ADC_Hall_Init();
-    V3F_BootTrace(V3F_STAGE_ADC_DONE);
-#endif
-
-    /* TODO: Magnetic axis scan engine
-       - Configure MUX GPIOs
-       - Set up DMA ring buffer in RAM_SHARED (0x20178000)
-       - 1 kHz scan loop: select row -> ADC burst -> store frame -> IPC notify V5F
-       Temporary root-cause verification test: keep V3F awake while checking
-       whether V3F sleep causes USBSS PLL lock timeout. */
     while (1)
     {
         V3F_BOOT_TRACE_BASE[1] = V3F_STAGE_IDLE_LOOP;
         V3F_BOOT_TRACE_BASE[4]++;
-#if defined(V3F_USBSS_OFFICIAL_OWNER) && (V3F_USBSS_OFFICIAL_OWNER != 0)
-        V3F_USBSS_OfficialService();
-#endif
         __NOP();
     }
 
