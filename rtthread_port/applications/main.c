@@ -15,7 +15,6 @@
 #include <rtdevice.h>
 #include "board.h"
 #include "ch585_spi_scan.h"
-#include "keyboard_engine.h"
 
 #ifndef APP_ENABLE_USB_TEST
 #define APP_ENABLE_USB_TEST 1
@@ -49,13 +48,6 @@
 #define APP_ENABLE_USB_SPI_TRAIN_REPORT 1
 #endif
 
-#ifndef APP_ENABLE_KEYBOARD_ENGINE
-#define APP_ENABLE_KEYBOARD_ENGINE 0
-#endif
-
-#ifndef APP_ENABLE_USB_KEY_ENGINE_REPORT
-#define APP_ENABLE_USB_KEY_ENGINE_REPORT 0
-#endif
 
 #ifndef APP_USB_SCAN_REPORT_VALUES_PER_LINE
 #define APP_USB_SCAN_REPORT_VALUES_PER_LINE 8
@@ -73,13 +65,6 @@
 #define APP_USB_SPI_TRAIN_REPORT_PERIOD_LOOPS 4
 #endif
 
-#ifndef APP_USB_KEY_ENGINE_REPORT_PERIOD_LOOPS
-#define APP_USB_KEY_ENGINE_REPORT_PERIOD_LOOPS 1
-#endif
-
-#ifndef APP_USB_KEY_ENGINE_TRACKED_KEYS
-#define APP_USB_KEY_ENGINE_TRACKED_KEYS 4
-#endif
 
 #ifndef APP_ENABLE_SERIAL_HEARTBEAT
 #define APP_ENABLE_SERIAL_HEARTBEAT 1
@@ -252,62 +237,6 @@ static void usb_spi_train_report_poll(rt_uint32_t heartbeat)
 }
 #endif
 
-#if APP_ENABLE_USB_TEST && APP_ENABLE_KEYBOARD_ENGINE && APP_ENABLE_USB_KEY_ENGINE_REPORT
-static void usb_keyboard_engine_report_poll(rt_uint32_t heartbeat)
-{
-    keyboard_engine_event_t events[KEYBOARD_ENGINE_EVENT_CAPACITY];
-    char line[104];
-    rt_uint16_t count;
-    rt_uint16_t i;
-
-    count = keyboard_engine_drain_events(events, KEYBOARD_ENGINE_EVENT_CAPACITY);
-    for (i = 0U; i < count; i++)
-    {
-        int used = rt_snprintf(line, sizeof(line),
-                               "EV f=%u k=%u down=%u pos=%u raw=%u filt=%u\r\n",
-                               (unsigned int)keyboard_engine_frame_count(),
-                               (unsigned int)events[i].key_id,
-                               (unsigned int)events[i].is_down,
-                               (unsigned int)events[i].position_pm,
-                               (unsigned int)events[i].raw_adc,
-                               (unsigned int)events[i].filtered_adc);
-        if ((used > 0) && ((rt_size_t)used < sizeof(line)))
-        {
-            (void)ch32h417_usb_cdc_write(line, (rt_uint32_t)used);
-        }
-    }
-
-    if ((heartbeat % APP_USB_KEY_ENGINE_REPORT_PERIOD_LOOPS) != 0U)
-    {
-        return;
-    }
-
-    for (i = 0U; i < APP_USB_KEY_ENGINE_TRACKED_KEYS; i++)
-    {
-        const keyboard_engine_key_state_t *state = keyboard_engine_key_state(i);
-        int used;
-
-        if (state == RT_NULL)
-        {
-            continue;
-        }
-
-        used = rt_snprintf(line, sizeof(line),
-                           "KE f=%u k=%u raw=%u filt=%u pos=%u down=%u\r\n",
-                           (unsigned int)keyboard_engine_frame_count(),
-                           (unsigned int)i,
-                           (unsigned int)state->raw_adc,
-                           (unsigned int)state->filtered_adc,
-                           (unsigned int)state->position_pm,
-                           (unsigned int)state->is_down);
-        if ((used > 0) && ((rt_size_t)used < sizeof(line)))
-        {
-            (void)ch32h417_usb_cdc_write(line, (rt_uint32_t)used);
-        }
-    }
-}
-#endif
-
 int main(void)
 {
     rt_base_t led_pin = LED_PIN;
@@ -318,9 +247,6 @@ int main(void)
 
 #if APP_ENABLE_CH585_SPI_SCAN
     ch585_spi_scan_init();
-#endif
-#if APP_ENABLE_KEYBOARD_ENGINE
-    keyboard_engine_init();
 #endif
 
 #if APP_ENABLE_USB_TEST
@@ -356,9 +282,7 @@ int main(void)
         {
             ch585_spi_scan_poll_once();
         }
-#if APP_ENABLE_KEYBOARD_ENGINE
-        keyboard_engine_update(ch585_spi_scan_raw());
-#endif
+
 #endif
 #if APP_ENABLE_USB_TEST
         ch32h417_dual_cdc_poll();
@@ -368,9 +292,7 @@ int main(void)
 #if APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SPI_TRAIN_REPORT
         usb_spi_train_report_poll(heartbeat);
 #endif
-#if APP_ENABLE_KEYBOARD_ENGINE && APP_ENABLE_USB_KEY_ENGINE_REPORT
-        usb_keyboard_engine_report_poll(heartbeat);
-#endif
+
 #if APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SCAN_REPORT
         usb_scan_report_poll(heartbeat);
 #endif

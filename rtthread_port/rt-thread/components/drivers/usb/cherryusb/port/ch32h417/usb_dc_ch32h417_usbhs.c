@@ -492,6 +492,7 @@ static void usbhs_handle_ep_out_xfer_complete(uint8_t busid, uint8_t ep_idx)
 
     if ((ep->xfer_len == 0U) || (rx_len < ep->ep_mps)) {
         ep->xfer_len = 0U;
+        ep->ep_toggle ^= 1U;
         g_ch32h417_usbhs_diag.ep_out++;
         usbd_event_ep_out_complete_handler(busid, ep_idx, ep->actual_xfer_len);
     } else {

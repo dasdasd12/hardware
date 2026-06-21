@@ -19,6 +19,12 @@
 
 #include "ch585_spi_scan.h"
 
+#if defined(__GNUC__)
+#define CH585_MAYBE_UNUSED __attribute__((unused))
+#else
+#define CH585_MAYBE_UNUSED
+#endif
+
 extern uint32_t SystemCoreClock;
 extern uint32_t HCLKClock;
 
@@ -1345,7 +1351,7 @@ static void ch585_hw_spi2_prepare_cmd(void)
                              (uint16_t)offsetof(ch585_scan_cmd_v1_t, crc16));
 }
 
-static void ch585_hw_spi2_prepare_pipeline_tx(void)
+static void CH585_MAYBE_UNUSED ch585_hw_spi2_prepare_pipeline_tx(void)
 {
     memset(g_source0_spi2_tx, 0xFF, sizeof(g_source0_spi2_tx));
     ch585_hw_spi2_prepare_cmd();
@@ -1778,7 +1784,7 @@ static int ch585_scan_fetch_source0_hw_spi2_request_only(ch585_scan_frame_v1_t *
 }
 #endif
 
-static int ch585_scan_fetch_source0_hw_spi2(ch585_scan_frame_v1_t *frame)
+static int CH585_MAYBE_UNUSED ch585_scan_fetch_source0_hw_spi2(ch585_scan_frame_v1_t *frame)
 {
     DMA_InitTypeDef dma_tx = {0};
     DMA_InitTypeDef dma_rx = {0};

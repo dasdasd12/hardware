@@ -4,6 +4,12 @@
 #include "debug.h"
 #include "adc.h"
 
+#if defined(__GNUC__)
+#define V3F_MAYBE_UNUSED __attribute__((unused))
+#else
+#define V3F_MAYBE_UNUSED
+#endif
+
 #if defined(V3F_USBSS_OFFICIAL_OWNER) && (V3F_USBSS_OFFICIAL_OWNER != 0)
 #include "ch32h417_usbss_device.h"
 #include "ch32h417_usbhs_device.h"
@@ -85,7 +91,7 @@ static void V3F_ClearUsbTrace(void)
    Mirrors Common/ch32h417_usbss_device.c::USBSS_RCC_Init(ENABLE). The PLL
    refer clock (25 MHz HSE) was already programmed by SystemInit() via
    RCC->PLLCFGR2 |= 0x20. Returns 1 on PLL lock, 0 on timeout. */
-static int V3F_USBSS_PLL_Init(void)
+static int V3F_MAYBE_UNUSED V3F_USBSS_PLL_Init(void)
 {
     uint32_t timeout;
 
@@ -136,14 +142,14 @@ static void V3F_USBSS_CFG_MOD(void)
     V3F_BOOT_TRACE_BASE[10] = *((__IO uint32_t *)0x5003C018U);
 }
 
-static void V3F_USBSS_Disable_SWJ(void)
+static void V3F_MAYBE_UNUSED V3F_USBSS_Disable_SWJ(void)
 {
     RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO | RCC_HB2Periph_GPIOB, ENABLE);
     GPIO_PinRemapConfig(GPIO_Remap_SWJ_Disable, ENABLE);
     V3F_BootTrace(V3F_STAGE_USBSS_SWJ_DISABLED);
 }
 
-static void V3F_USBSS_LinkProbe(void)
+static void V3F_MAYBE_UNUSED V3F_USBSS_LinkProbe(void)
 {
     uint32_t delay;
     uint32_t chip;
@@ -194,7 +200,7 @@ static void V3F_USBSS_LinkProbe(void)
     V3F_BootTrace(V3F_STAGE_USBSS_LINK_PROBE_DONE);
 }
 
-static int V3F_USBFS_Clock_Init(void)
+static int V3F_MAYBE_UNUSED V3F_USBFS_Clock_Init(void)
 {
     uint32_t timeout;
 
@@ -233,7 +239,7 @@ static void V3F_Delay(uint32_t cycles)
     }
 }
 
-static void V3F_USBSS_SWJ_DownloadWindow(void)
+static void V3F_MAYBE_UNUSED V3F_USBSS_SWJ_DownloadWindow(void)
 {
     uint32_t i;
 
