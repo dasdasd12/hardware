@@ -1,7 +1,0 @@
-﻿{
-    "createdAt":  "2026-06-10T13:17:12.5212501+08:00",
-    "reason":  "MRS flash preflight failed: mrs-link[dump-link-status] failed with exit code 1",
-    "sessionLog":  "C:\\program1\\Program\\AI_keyb_wch\\hardware\\rtthread_port\\.wch-skill-logs\\session-20260610-131709-538-14136.log",
-    "mrsTrace":  "C:\\program1\\Program\\AI_keyb_wch\\hardware\\rtthread_port\\.wch-skill-logs\\mrs-trace-20260610-131709-538-14136.log",
-    "nextStep":  "Run detect -Diagnose and ask the user before running recover. Do not retry normal flash blindly."
-}
