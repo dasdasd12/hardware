@@ -33,12 +33,6 @@ manual_openocd_*.txt
 openocd_*.txt
 ocd_*.txt
 
-# Local WCH/MounRiver automation state
-/rtthread_port/.wch-skill-logs/
-
-# Extracted manual text caches generated for local search
-/docs/user_manual/*.txt
-
 # Temporary dumps / preprocessed files
 *.tmp
 *.bak
