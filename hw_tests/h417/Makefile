@@ -1,0 +1,95 @@
+# Standalone CH32H417 board bring-up tests.
+
+PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
+HW_TEST ?= h417_gpio_status
+PROJECT_ROOT ?= ../..
+BUILD_ROOT ?= build
+EVT_ROOT ?= $(PROJECT_ROOT)/third_party/wch_ch32h417_evt
+
+CC := $(PREFIX)gcc
+AS := $(PREFIX)gcc -x assembler-with-cpp
+LD := $(PREFIX)gcc
+OBJCOPY := $(PREFIX)objcopy
+OBJDUMP := $(PREFIX)objdump
+SIZE := $(PREFIX)size
+
+ARCH_FLAGS := -march=rv32imafc_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
+COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -g -fmessage-length=0 -fsigned-char
+COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized -std=gnu99
+ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
+LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
+
+SRC_ROOT := $(EVT_ROOT)/SRC
+INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -Isrc
+DEFS := -DCore_V5F -DHW_TEST_NAME=\"$(HW_TEST)\"
+
+COMMON_SRC := src/system_ch32h417.c src/h417_common.c src/h417_test_main.c
+
+ifeq ($(HW_TEST),h417_gpio_status)
+TEST_SRC := src/h417_gpio_status.c
+DEFS += -DHW_TEST_FUNC=h417_gpio_status_run -DHW_TEST_ID=1
+else ifeq ($(HW_TEST),h417_ws2812)
+TEST_SRC := src/h417_ws2812.c
+DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=2
+else ifeq ($(HW_TEST),h417_lcd_signal)
+TEST_SRC := src/h417_lcd_signal.c
+DEFS += -DHW_TEST_FUNC=h417_lcd_signal_run -DHW_TEST_ID=3
+else
+$(error Unknown HW_TEST '$(HW_TEST)')
+endif
+
+SDK_SRC := $(SRC_ROOT)/Peripheral/src/ch32h417_gpio.c
+SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
+
+STARTUP := startup_h417_v5f.S
+LDSCRIPT := Link_h417_v5f.ld
+
+C_SOURCES := $(COMMON_SRC) $(TEST_SRC) $(SDK_SRC)
+ASM_SOURCES := $(STARTUP)
+
+BUILD := $(BUILD_ROOT)/$(HW_TEST)
+ELF := $(BUILD)/$(HW_TEST).elf
+OBJS := $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SOURCES)))
+OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
+VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
+DEPS := $(OBJS:.o=.d)
+
+.PHONY: all clean size
+
+all: $(ELF) $(BUILD)/$(HW_TEST).hex $(BUILD)/$(HW_TEST).bin $(BUILD)/$(HW_TEST).lst
+	@$(SIZE) "$(ELF)"
+
+$(BUILD)/%.o: %.c | $(BUILD)
+	@echo "CC  $(notdir $<)"
+	@$(CC) -c $(COMMON_FLAGS) $(DEFS) $(INC) -MMD -MP -MF"$(@:.o=.d)" $< -o $@
+
+$(BUILD)/%.o: %.S | $(BUILD)
+	@echo "AS  $(notdir $<)"
+	@$(AS) -c $(ASFLAGS) $(DEFS) $(INC) $< -o $@
+
+$(ELF): $(OBJS) $(LDSCRIPT)
+	@echo "LD  $(notdir $@)"
+	@$(LD) $(OBJS) $(LDFLAGS) -T"$(LDSCRIPT)" -Wl,-Map,"$(BUILD)/$(HW_TEST).map" -lm -o $@
+
+$(BUILD)/%.hex: $(ELF)
+	@echo "HEX $(notdir $@)"
+	@$(OBJCOPY) -O ihex "$<" "$@"
+
+$(BUILD)/%.bin: $(ELF)
+	@echo "BIN $(notdir $@)"
+	@$(OBJCOPY) -O binary "$<" "$@"
+
+$(BUILD)/%.lst: $(ELF)
+	@echo "LST $(notdir $@)"
+	@$(OBJDUMP) --all-headers --demangle --disassemble -M xw "$<" > "$@"
+
+$(BUILD):
+	@mkdir -p "$@"
+
+size: $(ELF)
+	@$(SIZE) "$(ELF)"
+
+clean:
+	rm -rf "$(BUILD_ROOT)"
+
+-include $(DEPS)
