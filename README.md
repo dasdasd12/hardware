@@ -1,237 +1,222 @@
-# CH32H417 键盘 AI 终端
+# AI_keyb_wch Hardware
 
-一个基于沁恒 CH32H417 双核 RISC-V MCU 的桌面 AI Agent 监控伴侣。它将 2.4 寸全彩大屏、三模磁轴键盘与 AI Agent 控制界面融为一体，让开发者无需切换窗口即可实时监控 Claude Code、Codex CLI 等 AI 编程助手的执行状态、审批权限请求、查看终端日志。
+本仓库保存硬件侧资料、CH32H417/CH585 固件、单项硬件测试、底层库和本地自动化脚本。
 
-> **状态**: Phase 1 早期开发中 —— RT-Thread 已移植，USB3.0 HID 复合设备已跑通
+README 只描述仓库维护规则和当前文件结构。产品方案、协议和长期架构设计放在 `docs/architecture/`、`docs/development_plan.md` 和 `docs/pre_design_report/` 中维护。
 
----
+## 提交规范
 
-## 硬件架构
+### 分支
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        系统拓扑图                            │
-├──────────────────────┬──────────────────────────────────────┤
-│     CH32H417         │          CH585（无线协处理器）         │
-│  ┌────────────────┐  │    ┌──────────────────────────────┐  │
-│  │ V5F@400MHz     │  │    │ RISC-V3C 78MHz               │  │
-│  │ V3F@150MHz     │  │    │ 512KB Flash / 128KB SRAM     │  │
-│  │ 896KB SRAM     │  │    │ BLE 5.4 + 2.4G(8K)           │  │
-│  │ 64MB SDRAM     │  │    └──────────────────────────────┘  │
-│  ├────────────────┤  │                     │                │
-│  │ USB3.0 Device  │──┼──USB3.0──► PC（默认8K，32K待开发验证） │
-│  │ 450MB/s        │  │                     │                │
-│  ├────────────────┤  │              ┌──────┴──────┐         │
-│  │ USB2.0 HS Host │──┼─USB HS 480Mbps         BT射频         │
-│  │ （连接CH585）   │  │                     │                │
-│  ├────────────────┤  │              ▼              ▼        │
-│  │ 百兆以太网      │──┼─► PC/局域网桥接服务器 ─► AI Agent服务 │
-│  ├────────────────┤  │                                      │
-│  │ LTDC 800x480   │──┼─► 2.4寸 RGB屏幕（可竖向安装）          │
-│  ├────────────────┤  │                                      │
-│  │ ADC + MUX      │──┼─◄ 磁轴矩阵 / EC11旋钮 / 摇杆          │
-│  ├────────────────┤  │                                      │
-│  │ GPIO + SPI     │──┼─► WS2812 RGB灯                       │
-│  ├────────────────┤  │                                      │
-│  │ QSPI Flash     │  │ ≥1Gbit，容量待定                      │
-│  ├────────────────┤  │                                      │
-│  │ FMC 64MB SDRAM │  │                                      │
-│  └────────────────┘  │                                      │
-└──────────────────────┴──────────────────────────────────────┘
+- 日常硬件验证和结构整理先提交到本地 `hardware-test`，再推送到远端 `test`。
+- 不在同一个提交里混入无关改动。比如 README 更新、V3F 文件树调整、WS2812 驱动修改应分别提交。
+- 提交前先看 `git status --short`，确认没有误带本地日志、构建产物或别人的未完成改动。
+- 构建入口以各子目录 Makefile 为准，不再维护根目录通用 Makefile。
+
+### 提交信息
+
+使用简短英文提交信息，推荐格式：
+
+```text
+type(scope): summary
 ```
 
-### 关键参数
+常用类型：
 
-| 组件 | 规格 |
-|:---|:---|
-| 主控 | CH32H417QEU6, V5F 乱序双发射 400MHz + V3F 顺序单发 150MHz |
-| 算力 | 2292 CoreMark @400MHz (5.73 CoreMark/MHz) |
-| 内存 | 128KB ITCM + 256KB DTCM + 512KB 共享 SRAM + 64MB 外接 SDRAM |
-| 显示 | 2.4" 800x480 RGB LCD, LTDC + GPHA 2D 加速 |
-| 有线连接 | USB3.0 OTG (450MB/s) + 百兆以太网 MAC+内置 PHY |
-| 无线连接 | CH585 协处理器: BLE 5.4 + 2.4G 私有协议 |
-| 键盘 | 磁轴矩阵，支持 RT / DKS / SpeedTap / SOCD / 模拟输入 |
-| 扩展 | EC11 旋钮、摇杆、WS2812 灯带、温湿度/光照/IMU 传感器 |
+- `feat`: 新增硬件测试、驱动能力或固件功能。
+- `fix`: 修复编译、刷写、波形、引脚或路径问题。
+- `chore`: 文件树整理、构建脚本调整、依赖位置调整。
+- `docs`: README、架构说明、测试记录等文档更新。
 
----
+示例：
 
-## 软件架构
-
-```
-┌────────────────────────────────────────┐
-│ 应用层：AI终端界面 / 本地命令行          │  ← V5F
-├────────────────────────────────────────┤
-│ 路由层：HID输出 / 无线发送 / 本地分发     │  ← V5F
-├────────────────────────────────────────┤
-│ 逻辑层：键值映射 / 层切换 / 宏 / DKS    │  ← V5F
-├────────────────────────────────────────┤
-│ 磁轴引擎：RT / 触发花样 / 模拟输入       │  ← V5F
-├────────────────────────────────────────┤
-│ IPC Mailbox ←── 共享SRAM ──►           │
-├────────────────────────────────────────┤
-│ 采集层：MUX扫描 / ADC / DMA / 校准      │  ← V3F
-├────────────────────────────────────────┤
-│ 设备层：GPIO / USB3.0 OTG / USB HS Host │  ← V3F/V5F
-├────────────────────────────────────────┤
-│ 扩展层：EC11 / 摇杆ADC / WS2812 / I2C   │  ← V3F
-└────────────────────────────────────────┘
+```text
+chore(h417-v3f): organize firmware layout
+fix(hw-tests): build ws2812 from v3f pioc driver
+docs: update hardware repository structure
 ```
 
-### 技术栈
+### 提交前检查
 
-| 层级 | 选型 | 说明 |
-|:---|:---|:---|
-| RTOS | RT-Thread Standard (V5F) + Nano/裸机 (V3F) | 官方 BSP 支持，最强 GUI 生态 |
-| 图形 | LVGL v9 | 预估 800x480 下 45-60 FPS |
-| 网络 | lwIP + mbedtls | 百兆以太网，TLS 1.2/1.3 |
-| AI 通信 | WebSocket + JSON Lines | 连接桥接服务器 |
-| USB 栈 | CherryUSB | HID+CDC 复合设备 |
-| 配置软件 | WebHID 网页驱动 | 免安装、跨平台 |
-| 脚本生态 | MicroPython / Lua | 利用 64MB SDRAM 承载运行时 |
-
----
-
-## 当前进展
-
-- [x] RT-Thread Standard 移植到 CH32H417 V5F
-- [x] 自定义启动代码、链接脚本、RISC-V 上下文切换与中断处理
-- [x] UART8 串口驱动（调试控制台）与 GPIO 驱动
-- [x] CherryUSB 集成：USB3.0 HID + CDC 复合设备
-- [x] 评估板验证：按键触发 HID 键盘报告发送，LED 心跳指示
-- [ ] V3F 核启动与 AMP 双核分工验证
-- [ ] SDRAM 初始化与帧缓冲配置
-- [ ] 终端模拟器引擎
-- [ ] lwIP 网络协议栈
-- [ ] WebSocket 客户端
-- [ ] 桥接服务器原型
-- [ ] LVGL 图形界面
-- [ ] 磁轴引擎与键盘矩阵扫描
-
----
-
-## 快速开始
-
-### 环境准备
-
-1. **工具链**: 沁恒 RISC-V 工具链 `riscv-wch-elf-gcc`
-   - 默认路径: `/c/riscv-wch-toolchain/bin/`
-   - 或安装 [MounRiver Studio 2](http://www.mounriver.com/)
-
-2. **WCH 底层库**: 仓库内已保留主固件使用的 CH32H417 EVT 底层，路径为 `basic/ch32h417/wch/SRC`
-
-3. **烧录工具**: WCH-Link + OpenOCD，或 MounRiver Studio 内置下载
-
-### 编译
+按改动范围选择最小必要验证：
 
 ```bash
-# 编译 H417 双核固件（V3F + V5F）
-cd firmware/h417
-make
+# H417 双核固件
+make -B -C firmware/h417
 
-# 或使用顶层 Makefile（支持 CH32H417 / CH585 双芯片）
-cd ../..
-make CHIP=CH32H417
+# H417 单核目标
+make -B -C firmware/h417 v3f
+make -B -C firmware/h417 v5f
+
+# H417 单项硬件测试
+make -B -C hw_tests/h417 HW_TEST=h417_ws2812
+make -B -C hw_tests/h417 HW_TEST=h417_lcd_signal
+
+# CH585 单项硬件测试
+make -B -C hw_tests/ch585 HALF=u2 TEST=ch585_u2_eeprom_i2c
+make -B -C hw_tests/ch585 HALF=u3 TEST=ch585_u3_max17048_i2c
+
+# 仓库级边界检查
+python tools/check_hw_tests.py
 ```
 
-### 烧录
+构建产物、OpenOCD 日志、MounRiver 临时文件、本地 PDF 文本缓存不提交。
 
-```bash
-# OpenOCD + WCH-Link
-cd firmware/h417
-make flash
+## 当前文件树
 
-# 或使用 WCH 官方工具
-wchisp -f build/V5F/rtthread_ch32h417_V5F.bin
-```
-
-### 验证
-
-连接串口（默认 UART8，115200 8N1），上电后应看到：
-
-```
-Hello, RT-Thread on CH32H417 V5F!
-Initializing USB3.0 HID+CDC Composite Device...
-USB device initialized.
-```
-
-按评估板按键 PB0，USB HID 将发送按键 'a'，同时 LED（PB1）闪烁。
-
----
-
-## 项目结构
-
-```
-.
-├── docs/
-│   ├── pre_design_report/          # 三份深度预研报告
-│   │   ├── report_1_hardware_architecture.md
-│   │   ├── report_2_network_ai_integration.md
-│   │   └── report_3_software_product.md
-│   ├── user_manual/                # 原厂数据手册 PDF
-│   │   ├── CH32H417DS0.PDF         # 数据手册
-│   │   ├── CH32H417RM.PDF          # 参考手册
-│   │   └── KD024WVFPD102A SPEC V1.0.pdf  # 屏幕规格书
-│   └── development_plan.md         # 产品开发计划
-│
+```text
+hardware/
 ├── basic/
 │   └── ch32h417/
-│       └── wch/SRC                 # CH32H417 WCH EVT 底层库
+│       └── wch/SRC/                         # CH32H417 WCH EVT 底层库
+│
+├── docs/
+│   ├── architecture/                         # 架构和协议设计文档
+│   ├── pre_design_report/                    # 早期调研报告和图片
+│   ├── user_manual/                          # 芯片、屏幕等原厂资料
+│   └── development_plan.md                   # 开发计划
 │
 ├── firmware/
-│   └── h417/                       # CH32H417 双核固件总目录
-│       ├── v3f/                    # V3F 固件入口、采集和协同任务
-│       │   ├── applications/       # V3F 应用入口
-│       │   ├── bsp/                # V3F 启动、系统初始化、链接脚本
-│       │   └── drivers/            # V3F 固件侧驱动
-│       │       └── rgb1w_pioc/     # PIOC RGB 1-wire/WS2812 驱动
-│       ├── v5f_rtthread/           # V5F RT-Thread 主固件
-│       ├── build/                  # V3F/V5F 构建产物
-│       ├── flash_dualcore.ps1      # 双核烧录脚本
-│       └── Makefile                # 双核统一构建入口
+│   └── h417/
+│       ├── Makefile                          # H417 双核统一构建入口
+│       ├── flash_dualcore.ps1                # H417 双核烧录脚本
+│       ├── unlock.tcl                        # OpenOCD 辅助脚本
+│       ├── wch-dual-core.cfg                 # 双核 OpenOCD 配置
+│       ├── wch-v5f-only.cfg                  # V5F OpenOCD 配置
+│       ├── v3f/
+│       │   ├── Makefile                      # V3F 固件构建入口
+│       │   ├── applications/                 # V3F 应用入口
+│       │   ├── bsp/                          # 启动文件、系统初始化、链接脚本
+│       │   └── drivers/                      # V3F 固件侧驱动
+│       │       └── rgb1w_pioc/               # PIOC RGB 1-wire / WS2812 驱动
+│       └── v5f_rtthread/
+│           ├── Makefile                      # V5F RT-Thread 构建入口
+│           ├── applications/                 # V5F 应用入口
+│           ├── bsp/                          # V5F 板级支持
+│           ├── drivers/                      # RT-Thread 设备驱动适配
+│           ├── libcpu/                       # RISC-V CPU 适配
+│           ├── rt-thread/                    # RT-Thread 源码
+│           └── tools/                        # V5F 相关检查/读取脚本
 │
 ├── hw_tests/
-│   ├── h417/                       # CH32H417 单项硬件测试
-│   └── ch585/                      # CH585 单项硬件测试
+│   ├── h417/
+│   │   ├── Makefile                          # H417 单项硬件测试构建入口
+│   │   ├── Link_h417_v3f.ld                  # H417 测试链接脚本
+│   │   └── src/                              # H417 测试源码
+│   └── ch585/
+│       ├── Makefile                          # CH585 单项硬件测试构建入口
+│       └── src/                              # CH585 测试源码
 │
-├── tools/                          # 跨工程检查脚本
-├── skills/                         # 本仓库自动化技能/脚本
+├── skills/
+│   ├── pdf-reader/                           # 本地 PDF 读取辅助 skill
+│   └── wch-mrs-automation/                   # WCH/MounRiver 自动化脚本和说明
 │
-├── Makefile                        # 顶层 Makefile
-└── README.md                       # 本文件
+├── tools/
+│   └── check_hw_tests.py                     # 硬件测试边界检查
+│
+├── read_serial.ps1                           # 本地串口读取辅助脚本
+└── README.md
 ```
 
----
+`build/`、`.wch-skill-logs/`、`.tmp_pdf_text/`、OpenOCD 日志和临时 dump 文件由 `.gitignore` 忽略，不属于仓库结构。
 
-## 文档索引
+## 目录职责
 
-| 文档 | 内容 |
-|:---|:---|
-| [docs/pre_design_report/report_1_hardware_architecture.md](docs/pre_design_report/report_1_hardware_architecture.md) | 硬件平台深度解析、RTOS 选型对比、性能瓶颈分析 |
-| [docs/pre_design_report/report_2_network_ai_integration.md](docs/pre_design_report/report_2_network_ai_integration.md) | 网络架构、TLS/mbedTLS、AI Agent 协议栈、桥接服务器方案 |
-| [docs/pre_design_report/report_3_software_product.md](docs/pre_design_report/report_3_software_product.md) | 键盘固件架构、磁轴引擎、配置软件调研、AI 功能嵌入、传感器扩展 |
-| [docs/development_plan.md](docs/development_plan.md) | 分阶段实施路径、里程碑、风险登记册、资源需求 |
+### `basic/`
 
----
+只放底层硬件库。当前保留 `basic/ch32h417/wch/SRC`，作为 H417 V3F、V5F 和硬件测试共同引用的 WCH EVT 底层库。
 
-## 产品路线
+不要把板级业务驱动放回 `basic/`。例如 WS2812 使用的 PIOC RGB1W 驱动属于当前 H417 V3F 固件侧驱动，放在 `firmware/h417/v3f/drivers/rgb1w_pioc/`。
 
-| 阶段 | 周期 | 核心目标 |
-|:---|:---|:---|
-| **Phase 1: MVP 验证** | 第 1-3 月 | 终端模拟器 + WebSocket + 桥接服务器，验证"AI Agent 硬件监控"假设 |
-| **Phase 2: GUI + AI 控制** | 第 4-5 月 | LVGL 图形化界面 + 13 状态 FSM + AI Agent 快捷操作 |
-| **Phase 3: 生态 + 扩展** | 第 6-7 月 | MicroPython 脚本 + 传感器扩展 + 社区功能 |
+### `firmware/h417/`
 
-详见 [docs/development_plan.md](docs/development_plan.md)。
+CH32H417 双核固件主目录。
 
----
+- `firmware/h417/Makefile` 是统一入口，负责转调 V3F 和 V5F。
+- `v3f/` 表示 V3F 固件职责，不再用 `wakeup` 这类只描述启动片段的目录名。
+- `v5f_rtthread/` 表示 V5F 的 RT-Thread 主固件。
+- `build/V3F` 和 `build/V5F` 是构建产物目录，不提交。
 
-## 许可
+V3F 子目录约定：
 
-- 本项目固件代码采用 [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) 许可证（与 RT-Thread 一致）。
-- CH32H417 原厂 SDK 和驱动遵循沁恒微电子相关许可条款。
+- `applications/`: V3F 应用入口和任务流程。
+- `bsp/`: V3F 启动文件、系统初始化、链接脚本、芯片配置头。
+- `drivers/`: V3F 独占或 V3F 首先验证的固件侧驱动。
 
-## 致谢
+V5F 子目录约定：
 
-- [RT-Thread](https://www.rt-thread.io/) — 优秀的国产开源实时操作系统
-- [沁恒微电子 (WCH)](https://www.wch.cn/) — CH32H417 及 RISC-V 工具链
-- [CherryUSB](https://github.com/cherry-embedded/CherryUSB) — 轻量级 USB 协议栈
+- `applications/`: V5F 应用和 bring-up 入口。
+- `bsp/`: V5F 板级初始化、启动文件、链接脚本。
+- `drivers/`: RT-Thread 设备驱动适配。
+- `rt-thread/`: RT-Thread 源码，不做无关格式化或大范围重排。
+
+### `hw_tests/`
+
+硬件单项测试目录。每个测试应能单独构建、单独刷写、单独运行，避免为了测一个外设拉起整套系统。
+
+H417 测试当前走 V3F 裸机构建，结果主要通过 SWD、示波器/逻辑分析仪、屏幕或灯效确认。CH585 测试通过 `TX1 PA9 / RX1 PA8` 串口输出状态。
+
+测试边界：
+
+- 不测 H417-CH585 SPI。
+- 不测 ADS7948、CH585 内部 ADC。
+- 不测 USB 上报。
+- 不测蓝牙/2.4G 无线功能。
+- 不测 SDRAM。
+
+### `docs/`
+
+文档按用途放置：
+
+- `docs/architecture/`: 架构、协议、设备模型和工程设计。
+- `docs/user_manual/`: 原厂资料和手册。
+- `docs/pre_design_report/`: 早期调研报告。
+- `docs/development_plan.md`: 阶段计划。
+
+README 不再承载完整产品架构设计，只作为仓库入口和维护规范。
+
+### `skills/` 和 `tools/`
+
+`skills/` 放本仓库专用自动化能力和参考资料。`tools/` 放可直接运行的检查脚本。
+
+脚本更新后应同步运行对应验证：
+
+```bash
+python tools/check_hw_tests.py
+powershell -ExecutionPolicy Bypass -File skills/wch-mrs-automation/tests/verify-wch-skill.ps1
+```
+
+## 常用命令
+
+```bash
+# H417 双核固件
+make -C firmware/h417
+make -C firmware/h417 v3f
+make -C firmware/h417 v5f
+make -C firmware/h417 clean
+
+# H417 烧录
+make -C firmware/h417 flash
+
+# H417 单项测试
+make -C hw_tests/h417 HW_TEST=h417_ws2812
+make -C hw_tests/h417 HW_TEST=h417_ws2812_breath
+make -C hw_tests/h417 HW_TEST=h417_ws2812_chase
+make -C hw_tests/h417 HW_TEST=h417_ws2812_rainbow_band
+make -C hw_tests/h417 HW_TEST=h417_lcd_signal
+
+# CH585 单项测试
+make -C hw_tests/ch585 HALF=u2 TEST=ch585_u2_eeprom_i2c
+make -C hw_tests/ch585 HALF=u2 TEST=ch585_u2_controls_gpio
+make -C hw_tests/ch585 HALF=u3 TEST=ch585_u3_max17048_i2c
+make -C hw_tests/ch585 HALF=u3 TEST=ch585_u3_charge_gpio
+make -C hw_tests/ch585 HALF=u3 TEST=ch585_u3_ec11_gpio
+```
+
+## 维护原则
+
+- 新驱动优先放到实际拥有它的固件或测试目录；只有芯片原厂底层库放 `basic/`。
+- 单项硬件测试不要依赖完整产品固件，不要引入无关外设。
+- 移动文件时同步更新 README、Makefile、检查脚本和自动化脚本。
+- 不提交构建产物、日志、临时 dump、工具缓存。
+- 修改 RT-Thread 或 WCH EVT 底层库前先确认是否确实需要改 vendor 代码。
