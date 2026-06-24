@@ -34,7 +34,16 @@ TEST_SRC := src/h417_pf13_probe.c
 DEFS += -DHW_TEST_FUNC=h417_pf13_probe_run -DHW_TEST_ID=20
 else ifeq ($(HW_TEST),h417_ws2812)
 TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
-DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=2
+DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=2 -DWS2812_EFFECT=WS2812_EFFECT_SOLID
+else ifeq ($(HW_TEST),h417_ws2812_breath)
+TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
+DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=22 -DWS2812_EFFECT=WS2812_EFFECT_BREATH
+else ifeq ($(HW_TEST),h417_ws2812_chase)
+TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
+DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=23 -DWS2812_EFFECT=WS2812_EFFECT_CHASE
+else ifeq ($(HW_TEST),h417_ws2812_rainbow_band)
+TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
+DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=24 -DWS2812_EFFECT=WS2812_EFFECT_RAINBOW_BAND
 else ifeq ($(HW_TEST),h417_lcd_signal)
 TEST_SRC := src/h417_lcd_signal.c
 DEFS += -DHW_TEST_FUNC=h417_lcd_signal_run -DHW_TEST_ID=3

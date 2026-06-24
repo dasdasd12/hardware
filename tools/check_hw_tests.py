@@ -77,6 +77,22 @@ def main():
         r"ch32h417_pioc_rgb1w_send_ram\(",
         "basic PIOC RGB1W RAM-mode full-frame sender",
     )
+    for effect in ("breath", "chase", "rainbow_band"):
+        assert_contains(
+            h417_makefile,
+            r"h417_ws2812_{0}".format(effect),
+            "separate WS2812 {0} build".format(effect),
+        )
+        assert_contains(
+            os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+            r"ws_effect_{0}\(".format(effect),
+            "WS2812 {0} effect implementation".format(effect),
+        )
+        assert_contains(
+            os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+            r"WS2812_EFFECT_{0}".format(effect.upper()),
+            "WS2812 {0} effect selector".format(effect),
+        )
     assert_contains(
         os.path.join(BASIC_H417_ROOT, "include", "ch32h417_pioc_rgb1w.h"),
         r"ch32h417_pioc_rgb1w_pin_pf13",
