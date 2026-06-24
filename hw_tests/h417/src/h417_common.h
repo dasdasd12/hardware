@@ -43,5 +43,8 @@ void h417_gpio_status_run(void);
 void h417_pf13_probe_run(void);
 void h417_ws2812_run(void);
 void h417_lcd_signal_run(void);
+void h417_lcd_backlight_run(void);
+void h417_ltdc_run(void);
+void h417_flash_image_run(void);
 
 #endif

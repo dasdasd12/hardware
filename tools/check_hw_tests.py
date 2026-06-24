@@ -7,9 +7,11 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 H417_ROOT = os.path.join(ROOT, "hw_tests", "h417")
 CH585_ROOT = os.path.join(ROOT, "hw_tests", "ch585")
-BASIC_H417_ROOT = os.path.join(ROOT, "basic", "ch32h417")
-H417_WCH_ROOT = os.path.join(BASIC_H417_ROOT, "wch", "SRC")
-H417_V3F_DRIVER_ROOT = os.path.join(ROOT, "firmware", "h417", "v3f", "drivers")
+H417_FIRMWARE_ROOT = os.path.join(ROOT, "firmware", "h417")
+CH585_FIRMWARE_ROOT = os.path.join(ROOT, "firmware", "ch585")
+H417_WCH_ROOT = os.path.join(H417_FIRMWARE_ROOT, "basic", "wch", "SRC")
+CH585_WCH_ROOT = os.path.join(CH585_FIRMWARE_ROOT, "basic", "wch", "SRC")
+H417_V3F_DRIVER_ROOT = os.path.join(H417_FIRMWARE_ROOT, "v3f", "drivers")
 H417_RGB1W_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "rgb1w_pioc")
 
 
@@ -64,13 +66,29 @@ def main():
     ch585_makefile = os.path.join(CH585_ROOT, "Makefile")
 
     assert_contains(h417_makefile, r"\bHW_TEST\s*\?=", "HW_TEST selection")
-    assert_contains(h417_makefile, r"basic/ch32h417", "shared CH32H417 basic hardware library")
-    assert_contains(h417_makefile, r"WCH_H417_SRC_ROOT\s*:=\s*\$\(BASIC_H417_ROOT\)/wch/SRC", "basic-local CH32H417 WCH source tree")
-    assert_contains(h417_makefile, r"V3F_DRIVER_ROOT\s*:=\s*\$\(PROJECT_ROOT\)/firmware/h417/v3f/drivers", "V3F driver root")
+    assert_contains(h417_makefile, r"firmware/h417", "H417 firmware-owned dependency root")
+    assert_contains(h417_makefile, r"WCH_H417_SRC_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/basic/wch/SRC", "H417-local WCH source tree")
+    assert_contains(h417_makefile, r"V3F_DRIVER_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/v3f/drivers", "V3F driver root")
     assert_contains(h417_makefile, r"RGB1W_PIOC_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/rgb1w_pioc", "V3F RGB1W PIOC driver tree")
+    assert_contains(h417_makefile, r"FLASH_NAND_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/gd5f1g_spi_nand", "V3F-local GD5F1G driver tree")
     assert_not_contains(h417_makefile, r"third_party|EVT_ROOT", "external third_party EVT dependency")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
     assert_contains(ch585_makefile, r"\bHALF\s*\?=", "HALF selection")
+    assert_contains(ch585_makefile, r"firmware/ch585", "CH585 firmware-owned dependency root")
+    assert_contains(ch585_makefile, r"WCH_CH585_SRC_ROOT\s*:=\s*\$\(CH585_FIRMWARE_ROOT\)/basic/wch/SRC", "CH585-local WCH source tree")
+    assert_not_contains(ch585_makefile, r"CH585_EVT_ROOT|EVT/EXAM|C:/program1/hardware", "external CH585 EVT dependency")
+    for path, description in (
+        (os.path.join(CH585_WCH_ROOT, "RVMSIS", "core_riscv.h"), "CH585 RVMSIS core header"),
+        (os.path.join(CH585_WCH_ROOT, "StdPeriphDriver", "inc", "CH585SFR.h"), "CH585 SFR header"),
+        (os.path.join(CH585_WCH_ROOT, "StdPeriphDriver", "CH58x_clk.c"), "CH585 clock driver"),
+        (os.path.join(CH585_WCH_ROOT, "StdPeriphDriver", "CH58x_gpio.c"), "CH585 GPIO driver"),
+        (os.path.join(CH585_WCH_ROOT, "StdPeriphDriver", "CH58x_sys.c"), "CH585 system driver"),
+        (os.path.join(CH585_WCH_ROOT, "StdPeriphDriver", "CH58x_uart1.c"), "CH585 UART1 driver"),
+        (os.path.join(CH585_WCH_ROOT, "StdPeriphDriver", "libISP585.a"), "CH585 ISP support library"),
+        (os.path.join(CH585_WCH_ROOT, "Startup", "startup_CH585.S"), "CH585 startup"),
+        (os.path.join(CH585_WCH_ROOT, "Ld", "Link.ld"), "CH585 linker script"),
+    ):
+        assert_exists(path, description)
     assert_contains(h417_makefile, r"Core_V3F", "H417 V3F-only build define")
     assert_contains(h417_makefile, r"startup_ch32h417_v3f\.S", "official H417 V3F startup")
     assert_not_contains(h417_makefile, r"_dual\.hex|Core_V5F|startup_h417_v5f|Link_h417_v5f", "H417 V5F or dual-core test flow")
@@ -130,6 +148,31 @@ def main():
         r"SystemCoreClock\s*=\s*100000000u",
         "100 MHz V3F clock for WCH PIOC RGB1W timing",
     )
+    assert_contains(
+        h417_makefile,
+        r"h417_flash_image",
+        "separate GD5F1G image write/read build",
+    )
+    assert_contains(
+        os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand", "include", "gd5f1g_spi_nand.h"),
+        r"GD5F1G_PAGE_SIZE\s+2048u",
+        "GD5F1G SPI-NAND geometry",
+    )
+    assert_contains(
+        os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand", "src", "ch32h417_gd5f1g_spi1.c"),
+        r"GPIO_PinSource7,\s*GPIO_AF3",
+        "PF7 SPI1 clock mapping",
+    )
+    assert_contains(
+        os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand", "src", "ch32h417_gd5f1g_spi1.c"),
+        r"GPIO_PinSource8,\s*GPIO_AF3",
+        "PF8 SPI1 data-out mapping",
+    )
+    assert_contains(
+        os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand", "src", "ch32h417_gd5f1g_spi1.c"),
+        r"GPIO_PinSource9,\s*GPIO_AF3",
+        "PF9 SPI1 data-in mapping",
+    )
 
     h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
     pioc_driver_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"))
@@ -138,11 +181,10 @@ def main():
 
     forbidden_h417 = {
         r"\bUSART\b|\bUART\b|USART_|UART_": "H417 UART/USART use",
-        r"\bSPI\b|SPI_": "H417 SPI use",
         r"\bADC\b|ADC_": "H417 ADC use",
         r"\bUSB\b|USBHS|USBFS|OTG": "H417 USB use",
         r"rtthread|RT-Thread|\brt_[a-z0-9_]*": "RT-Thread dependency",
-        r"PB4": "H417 PB4/MISO0 use",
+        r"\bPB3\b|\bPB4\b|\bPB5\b|SCK0|MOSI0|MISO0": "H417-CH585 reserved SPI nets",
     }
     for pattern, description in forbidden_h417.items():
         flags = 0 if description == "RT-Thread dependency" else re.IGNORECASE
@@ -160,6 +202,9 @@ def main():
         "h417_gpio_status",
         "h417_ws2812",
         "h417_lcd_signal",
+        "h417_lcd_backlight",
+        "h417_ltdc",
+        "h417_flash_image",
     )
     for name in required_h417_tests:
         if name not in h417_text:
@@ -190,7 +235,7 @@ def main():
         if re.search(pattern, ch585_text, flags=re.IGNORECASE):
             fail("ch585 sources contain forbidden {0}".format(description))
 
-    print("PASS: hardware test projects stay inside the non-SPI/ADC/USB/wireless boundary")
+    print("PASS: hardware test projects stay inside the reserved-interface boundary")
 
 
 if __name__ == "__main__":

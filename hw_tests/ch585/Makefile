@@ -1,11 +1,13 @@
 # Standalone CH585 board bring-up tests.
 
 PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
-CH585_EVT_ROOT ?= C:/program1/hardware/WCH/CH585EVT/EVT/EXAM
 HALF ?= u2
 TEST ?= ch585_u2_eeprom_i2c
+PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
 ALLOW_EEPROM_WRITE ?= 0
+CH585_FIRMWARE_ROOT ?= $(PROJECT_ROOT)/firmware/ch585
+WCH_CH585_SRC_ROOT := $(CH585_FIRMWARE_ROOT)/basic/wch/SRC
 
 CC := $(PREFIX)gcc
 AS := $(PREFIX)gcc -x assembler-with-cpp
@@ -20,7 +22,7 @@ COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wunini
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
-SRC_ROOT := $(CH585_EVT_ROOT)/SRC
+SRC_ROOT := $(WCH_CH585_SRC_ROOT)
 DRIVER_ROOT := $(SRC_ROOT)/StdPeriphDriver
 INC := -I$(SRC_ROOT)/RVMSIS -I$(DRIVER_ROOT)/inc -Isrc
 DEFS := -DTEST_NAME=\"$(TEST)\" -DCH585_HALF_NAME=\"$(HALF)\"

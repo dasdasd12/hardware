@@ -22,8 +22,8 @@ COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wunini
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
-# WCH EVT hardware library root
-WCH_H417_ROOT ?= ../../../basic/ch32h417/wch
+# H417-local WCH EVT hardware library root
+WCH_H417_ROOT ?= ../basic/wch
 SRC_ROOT      := $(WCH_H417_ROOT)/SRC
 
 # Optional official USBSS examples are not required by the default V3F firmware build.
@@ -50,14 +50,11 @@ endif
 # Source files
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_SRC += $(PROJECT_ROOT)/bsp/system_ch32h417.c
-APP_SRC += $(PROJECT_ROOT)/drivers/adc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_pwr.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_flash.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_gpio.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_dbgmcu.c
-APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_adc.c
-APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_dma.c
 
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 APP_SRC += $(SRC_ROOT)/Debug/debug.c

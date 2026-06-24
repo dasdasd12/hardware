@@ -11,8 +11,8 @@ FIRMWARE_ROOT = "firmware/h417/v5f_rtthread"
 
 
 REQUIRED_PATHS = [
-    "basic/ch32h417/wch/SRC/Core/core_riscv.h",
-    "basic/ch32h417/wch/SRC/Peripheral/inc/ch32h417.h",
+    "firmware/h417/basic/wch/SRC/Core/core_riscv.h",
+    "firmware/h417/basic/wch/SRC/Peripheral/inc/ch32h417.h",
     FIRMWARE_ROOT + "/applications/ch585_spi_scan.c",
     FIRMWARE_ROOT + "/applications/ch585_spi_scan.h",
     FIRMWARE_ROOT + "/applications/usb_cdc_dual.c",

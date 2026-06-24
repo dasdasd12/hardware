@@ -17,6 +17,8 @@ obj/
 **/obj/
 Debug/
 **/Debug/
+!firmware/h417/basic/wch/SRC/Debug/
+!firmware/h417/basic/wch/SRC/Debug/*
 Release/
 **/Release/
 *.o

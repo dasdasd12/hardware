@@ -4,10 +4,11 @@ PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 HW_TEST ?= h417_gpio_status
 PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
-BASIC_H417_ROOT ?= $(PROJECT_ROOT)/basic/ch32h417
-WCH_H417_SRC_ROOT := $(BASIC_H417_ROOT)/wch/SRC
-V3F_DRIVER_ROOT := $(PROJECT_ROOT)/firmware/h417/v3f/drivers
+H417_FIRMWARE_ROOT ?= $(PROJECT_ROOT)/firmware/h417
+WCH_H417_SRC_ROOT := $(H417_FIRMWARE_ROOT)/basic/wch/SRC
+V3F_DRIVER_ROOT := $(H417_FIRMWARE_ROOT)/v3f/drivers
 RGB1W_PIOC_ROOT := $(V3F_DRIVER_ROOT)/rgb1w_pioc
+FLASH_NAND_ROOT := $(V3F_DRIVER_ROOT)/gd5f1g_spi_nand
 
 CC := $(PREFIX)gcc
 AS := $(PREFIX)gcc -x assembler-with-cpp
@@ -23,10 +24,11 @@ ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 SRC_ROOT := $(WCH_H417_SRC_ROOT)
-INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -I$(RGB1W_PIOC_ROOT)/include -Isrc
+INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -I$(RGB1W_PIOC_ROOT)/include -I$(FLASH_NAND_ROOT)/include -Isrc
 DEFS := -DCore_V3F -DHW_TEST_NAME=\"$(HW_TEST)\"
 
 COMMON_SRC := src/system_ch32h417.c src/h417_common.c src/h417_test_main.c
+EXTRA_SDK_SRC :=
 
 ifeq ($(HW_TEST),h417_gpio_status)
 TEST_SRC := src/h417_gpio_status.c
@@ -49,6 +51,20 @@ DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=24 -DWS2812_EFFECT=WS2812_EF
 else ifeq ($(HW_TEST),h417_lcd_signal)
 TEST_SRC := src/h417_lcd_signal.c
 DEFS += -DHW_TEST_FUNC=h417_lcd_signal_run -DHW_TEST_ID=3
+else ifeq ($(HW_TEST),h417_lcd_backlight)
+TEST_SRC := src/h417_lcd_backlight.c src/h417_lcd_control.c
+DEFS += -DHW_TEST_FUNC=h417_lcd_backlight_run -DHW_TEST_ID=5
+else ifeq ($(HW_TEST),h417_ltdc)
+TEST_SRC := src/h417_ltdc.c src/h417_lcd_control.c
+DEFS += -DHW_TEST_FUNC=h417_ltdc_run -DHW_TEST_ID=4
+EXTRA_SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_ltdc.c
+else ifeq ($(HW_TEST),h417_flash_image)
+TEST_SRC := src/h417_flash_image.c src/h417_lcd_control.c
+TEST_SRC += $(FLASH_NAND_ROOT)/src/gd5f1g_spi_nand.c
+TEST_SRC += $(FLASH_NAND_ROOT)/src/ch32h417_gd5f1g_spi1.c
+DEFS += -DHW_TEST_FUNC=h417_flash_image_run -DHW_TEST_ID=6
+EXTRA_SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_ltdc.c
+EXTRA_SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_spi.c
 else
 $(error Unknown HW_TEST '$(HW_TEST)')
 endif
@@ -56,6 +72,7 @@ endif
 SDK_SRC := $(SRC_ROOT)/Peripheral/src/ch32h417_gpio.c
 SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_pwr.c
 SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
+SDK_SRC += $(EXTRA_SDK_SRC)
 
 STARTUP := $(SRC_ROOT)/Startup/startup_ch32h417_v3f.S
 LDSCRIPT := Link_h417_v3f.ld
