@@ -7,27 +7,57 @@ enum
 
 static const h417_pin_t ws_pin = {GPIOF, GPIO_Pin_13, H417_ITEM_WS2812};
 
-static void ws_wait(uint32_t cycles)
+#define WS2812_TEST_LEVEL 0x08u
+#define WS2812_TEST_CORE_HZ 25000000u
+#define WS2812_NS_TO_CYCLES(ns) \
+    ((uint32_t)((((uint64_t)WS2812_TEST_CORE_HZ) * (uint64_t)(ns) + 999999999ull) / 1000000000ull))
+
+enum
 {
-    h417_delay_cycles(cycles);
+    WS2812_T0H_CYCLES = WS2812_NS_TO_CYCLES(300u),
+    WS2812_T1H_CYCLES = WS2812_NS_TO_CYCLES(800u),
+    WS2812_BIT_CYCLES = WS2812_NS_TO_CYCLES(1250u),
+    WS2812_RESET_CYCLES = WS2812_NS_TO_CYCLES(90000u)
+};
+
+static inline uint32_t ws_cycle_now(void)
+{
+    uint32_t cycles;
+    __asm__ volatile("csrr %0, mcycle" : "=r"(cycles));
+    return cycles;
+}
+
+static inline void ws_wait_from(uint32_t start, uint32_t cycles)
+{
+    while((uint32_t)(ws_cycle_now() - start) < cycles)
+    {
+    }
+}
+
+static inline void ws_wait(uint32_t cycles)
+{
+    ws_wait_from(ws_cycle_now(), cycles);
+}
+
+static inline void ws_drive_high(void)
+{
+    ws_pin.port->BSHR = ws_pin.pin;
+}
+
+static inline void ws_drive_low(void)
+{
+    ws_pin.port->BCR = ws_pin.pin;
 }
 
 static void ws_send_bit(uint8_t bit)
 {
-    if(bit)
-    {
-        h417_pin_set(&ws_pin, 1);
-        ws_wait(46u);
-        h417_pin_set(&ws_pin, 0);
-        ws_wait(24u);
-    }
-    else
-    {
-        h417_pin_set(&ws_pin, 1);
-        ws_wait(18u);
-        h417_pin_set(&ws_pin, 0);
-        ws_wait(52u);
-    }
+    uint32_t start = ws_cycle_now();
+    uint32_t high_cycles = bit ? WS2812_T1H_CYCLES : WS2812_T0H_CYCLES;
+
+    ws_drive_high();
+    ws_wait_from(start, high_cycles);
+    ws_drive_low();
+    ws_wait_from(start, WS2812_BIT_CYCLES);
 }
 
 static void ws_send_byte(uint8_t value)
@@ -48,23 +78,23 @@ static void ws_send_color(uint8_t red, uint8_t green, uint8_t blue, uint16_t cou
         ws_send_byte(red);
         ws_send_byte(blue);
     }
-    h417_pin_set(&ws_pin, 0);
-    h417_delay_cycles(9000u);
+    ws_drive_low();
+    ws_wait(WS2812_RESET_CYCLES);
 }
 
 void h417_ws2812_run(void)
 {
     h417_pin_output(&ws_pin);
-    h417_pin_set(&ws_pin, 0);
+    ws_drive_low();
 
     while(1)
     {
         h417_status_phase(20, H417_ITEM_WS2812);
-        ws_send_color(0x20u, 0x00u, 0x00u, 32u);
+        ws_send_color(WS2812_TEST_LEVEL, 0x00u, 0x00u, 32u);
         h417_delay_cycles(2000000u);
-        ws_send_color(0x00u, 0x20u, 0x00u, 32u);
+        ws_send_color(0x00u, WS2812_TEST_LEVEL, 0x00u, 32u);
         h417_delay_cycles(2000000u);
-        ws_send_color(0x00u, 0x00u, 0x20u, 32u);
+        ws_send_color(0x00u, 0x00u, WS2812_TEST_LEVEL, 32u);
         h417_delay_cycles(2000000u);
         ws_send_color(0x00u, 0x00u, 0x00u, 32u);
         h417_status_pass(H417_ITEM_WS2812);
