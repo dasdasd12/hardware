@@ -1,10 +1,10 @@
-# Minimal V3F baremetal wake-up program for CH32H417
-# Wakes V5F core and enters idle loop
+# CH32H417 V3F firmware
+# Owns the reset-time V3F flow and starts V5F when the shared setup is ready.
 
 PREFIX       ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
-PROJECT_NAME ?= v3f_wakeup
+PROJECT_NAME ?= h417_V3F
 PROJECT_ROOT ?= .
-BUILD_ROOT   ?= build
+BUILD_ROOT   ?= ../build/V3F
 
 CC      := $(PREFIX)gcc
 AS      := $(PREFIX)gcc -x assembler-with-cpp
@@ -26,7 +26,7 @@ LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs
 WCH_H417_ROOT ?= ../../../basic/ch32h417/wch
 SRC_ROOT      := $(WCH_H417_ROOT)/SRC
 
-# Optional official USBSS examples are not required by the default V3F wakeup build.
+# Optional official USBSS examples are not required by the default V3F firmware build.
 OFFICIAL_USBSS_ROOT ?= C:/program1/hardware/WCH/CH32H417/CH32H417EVT/EVT/EXAM/USBSS/DEVICE/CH372Device/Common
 
 V3F_USBSS_OFFICIAL_OWNER ?= 0

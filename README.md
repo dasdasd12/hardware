@@ -141,7 +141,7 @@ cd firmware/h417_rtthread
 make flash
 
 # 或使用 WCH 官方工具
-wchisp -f build/v5f/rtthread_ch32h417_v5f.bin
+wchisp -f build/V5F/rtthread_ch32h417_V5F.bin
 ```
 
 ### 验证
@@ -186,7 +186,7 @@ USB device initialized.
 │       ├── drivers/                # RT-Thread 设备驱动适配
 │       ├── libcpu/                 # RISC-V CPU 架构适配
 │       ├── rt-thread/              # RT-Thread 源码（子模块或拷贝）
-│       ├── v3f_wakeup/             # V3F 裸机唤醒/协同验证程序
+│       ├── v3f/                    # V3F 固件入口、采集和协同任务
 │       └── Makefile
 │
 ├── hw_tests/

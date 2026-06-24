@@ -5,7 +5,7 @@ PREFIX       ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 PROJECT_NAME ?= rtthread_ch32h417
 PROJECT_ROOT ?= .
 BUILD_ROOT   ?= build
-CORE         ?= v5f
+CORE         ?= V5F
 
 CC      := $(PREFIX)gcc
 AS      := $(PREFIX)gcc -x assembler-with-cpp
@@ -152,10 +152,13 @@ VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 # Dependency files
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean size
+.PHONY: all clean size v3f V3F
 
 all: $(ELF) $(BUILD)/$(PROJECT_NAME)_$(CORE).hex $(BUILD)/$(PROJECT_NAME)_$(CORE).bin $(BUILD)/$(PROJECT_NAME)_$(CORE).lst
 	@$(SIZE) "$(ELF)"
+
+v3f V3F:
+	@$(MAKE) -C v3f BUILD_ROOT=../$(BUILD_ROOT)/V3F
 
 $(BUILD)/%.o: %.c | $(BUILD)
 	@echo "CC  $(notdir $<)"

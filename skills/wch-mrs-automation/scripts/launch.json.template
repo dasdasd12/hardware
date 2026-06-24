@@ -14,8 +14,8 @@
           "armSemihosting": false
         },
         "loadedFiles": {
-          "symbolFile": "${workspaceFolder}/build/v3f/${workspaceFolderBasename}_V3F.elf",
-          "executableFile": "${workspaceFolder}/build/v3f/${workspaceFolderBasename}_V3F.elf"
+          "symbolFile": "${workspaceFolder}/build/V3F/${workspaceFolderBasename}_V3F.elf",
+          "executableFile": "${workspaceFolder}/build/V3F/${workspaceFolderBasename}_V3F.elf"
         },
         "runCommands": {
           "runReset": true,
@@ -71,8 +71,8 @@
           "armSemihosting": false
         },
         "loadedFiles": {
-          "symbolFile": "${workspaceFolder}/build/v5f/${workspaceFolderBasename}_V5F.elf",
-          "executableFile": "${workspaceFolder}/build/v5f/${workspaceFolderBasename}_V5F.elf"
+          "symbolFile": "${workspaceFolder}/build/V5F/${workspaceFolderBasename}_V5F.elf",
+          "executableFile": "${workspaceFolder}/build/V5F/${workspaceFolderBasename}_V5F.elf"
         },
         "runCommands": {
           "runReset": true,

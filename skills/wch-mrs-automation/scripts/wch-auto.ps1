@@ -522,12 +522,14 @@ function Find-ElfFile {
     $patterns = New-Object System.Collections.Generic.List[string]
 
     if ($CoreName -eq "v3f") {
+        [void]$patterns.Add((Join-Path $root "build\V3F\*.elf"))
         [void]$patterns.Add((Join-Path $root "build\v3f\*.elf"))
         [void]$patterns.Add((Join-Path $root "V3F\obj\*V3F*.elf"))
         [void]$patterns.Add((Join-Path $root "V3F\obj\*.elf"))
         [void]$patterns.Add((Join-Path $root "*v3f*\build\*.elf"))
         [void]$patterns.Add((Join-Path $root "*V3F*\build\*.elf"))
     } elseif ($CoreName -eq "v5f") {
+        [void]$patterns.Add((Join-Path $root "build\V5F\*.elf"))
         [void]$patterns.Add((Join-Path $root "build\v5f\*.elf"))
         [void]$patterns.Add((Join-Path $root "V5F\obj\*V5F*.elf"))
         [void]$patterns.Add((Join-Path $root "V5F\obj\*.elf"))
@@ -556,12 +558,14 @@ function Find-ImageFile {
 
     foreach ($ext in $extensions) {
         if ($CoreName -eq "v3f") {
+            [void]$patterns.Add((Join-Path $root "build\V3F\$ext"))
             [void]$patterns.Add((Join-Path $root "build\v3f\$ext"))
             [void]$patterns.Add((Join-Path $root "V3F\obj\*V3F*$($ext.Substring(1))"))
             [void]$patterns.Add((Join-Path $root "V3F\obj\$ext"))
             [void]$patterns.Add((Join-Path $root "*v3f*\build\$ext"))
             [void]$patterns.Add((Join-Path $root "*V3F*\build\$ext"))
         } elseif ($CoreName -eq "v5f") {
+            [void]$patterns.Add((Join-Path $root "build\V5F\$ext"))
             [void]$patterns.Add((Join-Path $root "build\v5f\$ext"))
             [void]$patterns.Add((Join-Path $root "V5F\obj\*V5F*$($ext.Substring(1))"))
             [void]$patterns.Add((Join-Path $root "V5F\obj\$ext"))
@@ -794,7 +798,7 @@ function Invoke-Build {
 
         # Non-standard dual-core layout: build V3F and V5F in separate directories
         if ($resolvedCore -eq "both" -and -not (Test-H417DualLayout $root)) {
-            $v3fDirs = @("v3f_wakeup", "V3F", "v3f")
+            $v3fDirs = @("v3f", "V3F")
             $v3fDir = $null
             foreach ($d in $v3fDirs) {
                 $candidate = Join-Path $root $d
@@ -804,7 +808,7 @@ function Invoke-Build {
                 throw "Both-core build requested but no V3F Makefile found in $($v3fDirs -join ', ') under $root"
             }
             Write-Info "Building V5F in $root"
-            Invoke-MakeAt -Toolchain $Toolchain -Dir $root -MakeArgs @("-j", "CHIP=$TargetChip", "CORE=v5f", "PREFIX=$prefixFull")
+            Invoke-MakeAt -Toolchain $Toolchain -Dir $root -MakeArgs @("-j", "CHIP=$TargetChip", "CORE=V5F", "PREFIX=$prefixFull")
             Write-Info "Building V3F in $v3fDir"
             Invoke-MakeAt -Toolchain $Toolchain -Dir $v3fDir -MakeArgs @("-j", "CHIP=$TargetChip", "CORE=v3f", "PREFIX=$prefixFull")
             Write-Ok "Dual-core build finished"
