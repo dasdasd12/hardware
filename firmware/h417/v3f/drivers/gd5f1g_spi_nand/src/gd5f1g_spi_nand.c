@@ -371,3 +371,21 @@ int gd5f1g_read_page(const gd5f1g_spi_bus_t *bus,
 
     return GD5F1G_OK;
 }
+
+int gd5f1g_read_bad_block_marker(const gd5f1g_spi_bus_t *bus,
+                                 uint32_t block,
+                                 uint8_t *marker,
+                                 uint8_t *status_out)
+{
+    if((marker == 0) || (block >= GD5F1G_BLOCK_COUNT))
+    {
+        return GD5F1G_ERR_PARAM;
+    }
+
+    return gd5f1g_read_page(bus,
+                            gd5f1g_block_to_row(block),
+                            GD5F1G_BAD_BLOCK_MARK_COLUMN,
+                            marker,
+                            1u,
+                            status_out);
+}

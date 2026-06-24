@@ -9,6 +9,9 @@ WCH_H417_SRC_ROOT := $(H417_FIRMWARE_ROOT)/basic/wch/SRC
 V3F_DRIVER_ROOT := $(H417_FIRMWARE_ROOT)/v3f/drivers
 RGB1W_PIOC_ROOT := $(V3F_DRIVER_ROOT)/rgb1w_pioc
 FLASH_NAND_ROOT := $(V3F_DRIVER_ROOT)/gd5f1g_spi_nand
+LTDC_RGB_ROOT := $(V3F_DRIVER_ROOT)/ltdc_rgb
+LTDC_RGB_CONTROL_SRC := $(LTDC_RGB_ROOT)/src/ch32h417_lcd_rgb_control.c
+LTDC_RGB_LTDC_SRC := $(LTDC_RGB_ROOT)/src/ch32h417_ltdc_rgb.c
 
 CC := $(PREFIX)gcc
 AS := $(PREFIX)gcc -x assembler-with-cpp
@@ -24,7 +27,7 @@ ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 SRC_ROOT := $(WCH_H417_SRC_ROOT)
-INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -I$(RGB1W_PIOC_ROOT)/include -I$(FLASH_NAND_ROOT)/include -Isrc
+INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -I$(RGB1W_PIOC_ROOT)/include -I$(FLASH_NAND_ROOT)/include -I$(LTDC_RGB_ROOT)/include -Isrc
 DEFS := -DCore_V3F -DHW_TEST_NAME=\"$(HW_TEST)\"
 
 COMMON_SRC := src/system_ch32h417.c src/h417_common.c src/h417_test_main.c
@@ -52,14 +55,17 @@ else ifeq ($(HW_TEST),h417_lcd_signal)
 TEST_SRC := src/h417_lcd_signal.c
 DEFS += -DHW_TEST_FUNC=h417_lcd_signal_run -DHW_TEST_ID=3
 else ifeq ($(HW_TEST),h417_lcd_backlight)
-TEST_SRC := src/h417_lcd_backlight.c src/h417_lcd_control.c
+TEST_SRC := src/h417_lcd_backlight.c $(LTDC_RGB_CONTROL_SRC)
 DEFS += -DHW_TEST_FUNC=h417_lcd_backlight_run -DHW_TEST_ID=5
 else ifeq ($(HW_TEST),h417_ltdc)
-TEST_SRC := src/h417_ltdc.c src/h417_lcd_control.c
+TEST_SRC := src/h417_ltdc.c $(LTDC_RGB_CONTROL_SRC) $(LTDC_RGB_LTDC_SRC)
 DEFS += -DHW_TEST_FUNC=h417_ltdc_run -DHW_TEST_ID=4
 EXTRA_SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_ltdc.c
+else ifeq ($(HW_TEST),h417_flash_mosi_probe)
+TEST_SRC := src/h417_flash_mosi_probe.c
+DEFS += -DHW_TEST_FUNC=h417_flash_mosi_probe_run -DHW_TEST_ID=7
 else ifeq ($(HW_TEST),h417_flash_image)
-TEST_SRC := src/h417_flash_image.c src/h417_lcd_control.c
+TEST_SRC := src/h417_flash_image.c $(LTDC_RGB_CONTROL_SRC) $(LTDC_RGB_LTDC_SRC)
 TEST_SRC += $(FLASH_NAND_ROOT)/src/gd5f1g_spi_nand.c
 TEST_SRC += $(FLASH_NAND_ROOT)/src/ch32h417_gd5f1g_spi1.c
 DEFS += -DHW_TEST_FUNC=h417_flash_image_run -DHW_TEST_ID=6

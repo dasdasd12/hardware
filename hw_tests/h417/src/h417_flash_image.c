@@ -1,32 +1,18 @@
 #include "h417_common.h"
-#include "h417_lcd_control.h"
 #include "ch32h417_gd5f1g_spi1.h"
-#include "ch32h417_ltdc.h"
+#include "ch32h417_ltdc_rgb.h"
 
-#define LCD_WIDTH              800u
-#define LCD_HEIGHT             480u
-#define LCD_HSYNC              8u
-#define LCD_HBP                10u
-#define LCD_HFP                50u
-#define LCD_VSYNC              4u
-#define LCD_VBP                20u
-#define LCD_VFP                16u
-
-#define IMAGE_WIDTH            160u
-#define IMAGE_HEIGHT           120u
+#define IMAGE_WIDTH            480u
+#define IMAGE_HEIGHT           272u
 #define IMAGE_BYTES            (IMAGE_WIDTH * IMAGE_HEIGHT * 2u)
 #define IMAGE_PAGES            ((IMAGE_BYTES + GD5F1G_PAGE_SIZE - 1u) / GD5F1G_PAGE_SIZE)
+#define IMAGE_BLOCKS           ((IMAGE_PAGES + GD5F1G_PAGES_PER_BLOCK - 1u) / GD5F1G_PAGES_PER_BLOCK)
 #define IMAGE_TEST_START_BLOCK (GD5F1G_BLOCK_COUNT - 1u)
 #define IMAGE_TEST_SCAN_BLOCKS 32u
-#define BAD_BLOCK_MARK_COLUMN  2048u
 
 #define LTDC_BYTES_PER_PIXEL   2u
-#define LTDC_ACTIVE_START_X    (LCD_HSYNC + LCD_HBP)
-#define LTDC_ACTIVE_START_Y    (LCD_VSYNC + LCD_VBP)
-#define LTDC_LAYER_OFFSET_X    ((LCD_WIDTH - IMAGE_WIDTH) / 2u)
-#define LTDC_LAYER_OFFSET_Y    ((LCD_HEIGHT - IMAGE_HEIGHT) / 2u)
-#define LTDC_PIXEL_CLOCK_HZ    26666666u
-#define LTDC_PLL_DIV_REGISTER  15u
+#define LTDC_LAYER_OFFSET_X    ((CH32H417_LCD_RGB_WIDTH - IMAGE_WIDTH) / 2u)
+#define LTDC_LAYER_OFFSET_Y    ((CH32H417_LCD_RGB_HEIGHT - IMAGE_HEIGHT) / 2u)
 
 #define LCD_DISP_TO_SIGNAL_DELAY  55000000u
 #define LCD_SIGNAL_TO_BL_DELAY    1000000u
@@ -48,11 +34,15 @@ enum
 
 typedef struct
 {
-    GPIO_TypeDef *port;
-    uint16_t pin;
-    uint8_t source;
-    uint8_t alternate_function;
-} lcd_pin_af_t;
+    int16_t x;
+    int16_t y;
+} image_point_t;
+
+typedef struct
+{
+    image_point_t point[4];
+    uint16_t color;
+} image_quad_t;
 
 typedef struct
 {
@@ -79,6 +69,7 @@ typedef struct
     volatile uint32_t bad_block_marker;
     volatile uint32_t image_bytes;
     volatile uint32_t image_pages;
+    volatile uint32_t image_blocks;
     volatile uint32_t expected_crc;
     volatile uint32_t read_crc;
     volatile uint32_t verify_errors;
@@ -94,49 +85,34 @@ typedef struct
     volatile uint32_t layer_cfblr;
 } h417_flash_image_debug_t;
 
-static const lcd_pin_af_t lcd_ltdc_pins[] = {
-    {GPIOA, GPIO_Pin_0, GPIO_PinSource0, GPIO_AF14},
-    {GPIOA, GPIO_Pin_2, GPIO_PinSource2, GPIO_AF14},
-    {GPIOA, GPIO_Pin_1, GPIO_PinSource1, GPIO_AF14},
-    {GPIOB, GPIO_Pin_0, GPIO_PinSource0, GPIO_AF9},
-    {GPIOA, GPIO_Pin_5, GPIO_PinSource5, GPIO_AF14},
-    {GPIOC, GPIO_Pin_0, GPIO_PinSource0, GPIO_AF14},
-    {GPIOA, GPIO_Pin_8, GPIO_PinSource8, GPIO_AF14},
-    {GPIOC, GPIO_Pin_4, GPIO_PinSource4, GPIO_AF14},
-    {GPIOE, GPIO_Pin_5, GPIO_PinSource5, GPIO_AF14},
-    {GPIOE, GPIO_Pin_6, GPIO_PinSource6, GPIO_AF14},
-    {GPIOA, GPIO_Pin_6, GPIO_PinSource6, GPIO_AF14},
-    {GPIOF, GPIO_Pin_4, GPIO_PinSource4, GPIO_AF9},
-    {GPIOC, GPIO_Pin_8, GPIO_PinSource8, GPIO_AF14},
-    {GPIOC, GPIO_Pin_1, GPIO_PinSource1, GPIO_AF14},
-    {GPIOC, GPIO_Pin_7, GPIO_PinSource7, GPIO_AF14},
-    {GPIOD, GPIO_Pin_3, GPIO_PinSource3, GPIO_AF14},
-    {GPIOE, GPIO_Pin_4, GPIO_PinSource4, GPIO_AF14},
-    {GPIOC, GPIO_Pin_10, GPIO_PinSource10, GPIO_AF10},
-    {GPIOA, GPIO_Pin_3, GPIO_PinSource3, GPIO_AF9},
-    {GPIOD, GPIO_Pin_7, GPIO_PinSource7, GPIO_AF14},
-    {GPIOC, GPIO_Pin_11, GPIO_PinSource11, GPIO_AF14},
-    {GPIOD, GPIO_Pin_5, GPIO_PinSource5, GPIO_AF14},
-    {GPIOA, GPIO_Pin_14, GPIO_PinSource14, GPIO_AF14},
-    {GPIOD, GPIO_Pin_2, GPIO_PinSource2, GPIO_AF9},
-    {GPIOF, GPIO_Pin_1, GPIO_PinSource1, GPIO_AF14},
-    {GPIOC, GPIO_Pin_6, GPIO_PinSource6, GPIO_AF14},
-    {GPIOA, GPIO_Pin_4, GPIO_PinSource4, GPIO_AF14},
-    {GPIOF, GPIO_Pin_10, GPIO_PinSource10, GPIO_AF14},
-};
-
 static uint16_t s_lcd_layer[IMAGE_HEIGHT][IMAGE_WIDTH] __attribute__((aligned(64)));
 static uint8_t s_program_page[GD5F1G_PAGE_SIZE] __attribute__((aligned(4)));
 static uint8_t s_read_page[GD5F1G_PAGE_SIZE] __attribute__((aligned(4)));
 
 volatile h417_flash_image_debug_t g_h417_flash_image_debug;
 
-static uint16_t rgb565(uint8_t red, uint8_t green, uint8_t blue)
-{
-    return (uint16_t)((((uint16_t)red & 0xF8u) << 8) |
-                      (((uint16_t)green & 0xFCu) << 3) |
-                      ((uint16_t)blue >> 3));
-}
+#define IMAGE_COLOR_BG          0xFF7Bu
+#define IMAGE_COLOR_FRAME       0xFFFFu
+#define IMAGE_COLOR_SHADOW      0xF6D6u
+#define IMAGE_COLOR_ORANGE      0xE3A6u
+#define IMAGE_COLOR_ORANGE_DARK 0xD240u
+#define IMAGE_COLOR_YELLOW      0xFEC0u
+#define IMAGE_COLOR_CODE        0x3186u
+
+static const image_quad_t image_star_rays[] = {
+    {{{-12, -20}, {-4, -126}, {18, -120}, {12, -18}}, IMAGE_COLOR_ORANGE},
+    {{{8, -20}, {62, -112}, {82, -100}, {20, -10}}, IMAGE_COLOR_ORANGE_DARK},
+    {{{18, -10}, {142, -52}, {150, -34}, {24, 4}}, IMAGE_COLOR_ORANGE},
+    {{{24, 2}, {152, 8}, {150, 28}, {22, 18}}, IMAGE_COLOR_ORANGE_DARK},
+    {{{18, 16}, {106, 66}, {96, 84}, {10, 28}}, IMAGE_COLOR_ORANGE},
+    {{{8, 24}, {38, 126}, {16, 132}, {-2, 30}}, IMAGE_COLOR_ORANGE_DARK},
+    {{{-8, 22}, {-44, 124}, {-64, 116}, {-18, 20}}, IMAGE_COLOR_ORANGE},
+    {{{-20, 12}, {-122, 74}, {-136, 58}, {-24, 0}}, IMAGE_COLOR_ORANGE_DARK},
+    {{{-24, -2}, {-154, -4}, {-154, -24}, {-22, -14}}, IMAGE_COLOR_ORANGE},
+    {{{-18, -16}, {-118, -66}, {-106, -84}, {-8, -24}}, IMAGE_COLOR_ORANGE_DARK},
+    {{{-8, -24}, {-62, -122}, {-40, -130}, {4, -26}}, IMAGE_COLOR_ORANGE},
+    {{{14, 18}, {126, 92}, {110, 108}, {2, 28}}, IMAGE_COLOR_ORANGE_DARK},
+};
 
 static uint32_t checksum_update(uint32_t checksum, uint8_t value)
 {
@@ -145,37 +121,137 @@ static uint32_t checksum_update(uint32_t checksum, uint8_t value)
     return checksum;
 }
 
+static int32_t image_cross(const image_point_t *a,
+                           const image_point_t *b,
+                           int32_t x,
+                           int32_t y)
+{
+    return ((int32_t)b->x - a->x) * (y - a->y) -
+           ((int32_t)b->y - a->y) * (x - a->x);
+}
+
+static uint8_t image_point_in_quad(int32_t x,
+                                   int32_t y,
+                                   const image_quad_t *quad)
+{
+    uint8_t i;
+    uint8_t has_negative = 0u;
+    uint8_t has_positive = 0u;
+
+    for(i = 0u; i < 4u; ++i)
+    {
+        int32_t cross = image_cross(&quad->point[i],
+                                    &quad->point[(i + 1u) & 3u],
+                                    x,
+                                    y);
+        if(cross < 0)
+        {
+            has_negative = 1u;
+        }
+        else if(cross > 0)
+        {
+            has_positive = 1u;
+        }
+    }
+
+    return (uint8_t)((has_negative == 0u) || (has_positive == 0u));
+}
+
+static uint8_t image_inside_ellipse(int32_t x,
+                                    int32_t y,
+                                    int32_t rx,
+                                    int32_t ry)
+{
+    int32_t lhs = (x * x * ry * ry) + (y * y * rx * rx);
+    int32_t rhs = rx * rx * ry * ry;
+
+    return (uint8_t)(lhs <= rhs);
+}
+
+static uint8_t image_line_hit(int32_t x,
+                              int32_t y,
+                              int32_t x0,
+                              int32_t y0,
+                              int32_t x1,
+                              int32_t y1,
+                              int32_t width)
+{
+    int32_t dx = x1 - x0;
+    int32_t dy = y1 - y0;
+    int32_t px = x - x0;
+    int32_t py = y - y0;
+    int32_t seg_len2 = (dx * dx) + (dy * dy);
+    int32_t dot = (px * dx) + (py * dy);
+    int32_t cross = (px * dy) - (py * dx);
+
+    if(seg_len2 == 0)
+    {
+        return 0u;
+    }
+    if((dot < 0) || (dot > seg_len2))
+    {
+        return 0u;
+    }
+    if(cross < 0)
+    {
+        cross = -cross;
+    }
+
+    return (uint8_t)((cross * cross) <= (width * width * seg_len2));
+}
+
+static uint8_t image_code_mark(int32_t x, int32_t y)
+{
+    if(image_line_hit(x, y, -190, -38, -230, 0, 5) ||
+       image_line_hit(x, y, -230, 0, -190, 38, 5) ||
+       image_line_hit(x, y, 190, -38, 230, 0, 5) ||
+       image_line_hit(x, y, 230, 0, 190, 38, 5) ||
+       image_line_hit(x, y, 166, 56, 216, 56, 6))
+    {
+        return 1u;
+    }
+
+    return 0u;
+}
+
 static uint16_t image_pixel(unsigned int x, unsigned int y)
 {
-    uint8_t red = (uint8_t)((x * 255u) / (IMAGE_WIDTH - 1u));
-    uint8_t green = (uint8_t)((y * 255u) / (IMAGE_HEIGHT - 1u));
-    uint8_t blue = (uint8_t)((((x / 10u) ^ (y / 10u)) & 1u) ? 0xD0u : 0x28u);
-    uint16_t pixel = rgb565(red, green, blue);
+    int32_t cx = (int32_t)x - ((int32_t)IMAGE_WIDTH / 2);
+    int32_t cy = (int32_t)y - ((int32_t)IMAGE_HEIGHT / 2);
+    uint16_t pixel = IMAGE_COLOR_BG;
+    unsigned int i;
 
     if((x < 3u) || (y < 3u) ||
        (x >= (IMAGE_WIDTH - 3u)) ||
        (y >= (IMAGE_HEIGHT - 3u)))
     {
-        pixel = 0xFFFFu;
+        pixel = IMAGE_COLOR_FRAME;
     }
-    else if((x < 32u) && (y < 32u))
+    else
     {
-        if((x < 8u) && (y < 8u))
+        if(image_inside_ellipse(cx + 8, cy + 8, 152, 112))
         {
-            pixel = 0xFFFFu;
+            pixel = IMAGE_COLOR_SHADOW;
         }
-        else if(y < 7u)
+        for(i = 0u; i < (sizeof(image_star_rays) / sizeof(image_star_rays[0])); ++i)
         {
-            pixel = 0xF800u;
+            if(image_point_in_quad(cx, cy, &image_star_rays[i]) != 0u)
+            {
+                pixel = image_star_rays[i].color;
+            }
         }
-        else if(x < 7u)
+        if(image_inside_ellipse(cx, cy, 42, 36))
         {
-            pixel = 0x07E0u;
+            pixel = IMAGE_COLOR_ORANGE;
         }
-    }
-    else if((x == y) || ((x + 1u) == y) || (x == (y + 1u)))
-    {
-        pixel = 0xFFE0u;
+        if(image_inside_ellipse(cx - 10, cy + 8, 20, 14))
+        {
+            pixel = IMAGE_COLOR_YELLOW;
+        }
+        if(image_code_mark(cx, cy) != 0u)
+        {
+            pixel = IMAGE_COLOR_CODE;
+        }
     }
 
     return pixel;
@@ -450,7 +526,7 @@ static void flash_draw_diagnostic(uint32_t item_id, int result, uint8_t failed)
     {
         draw_id_debug_bits();
     }
-    LTDC_ReloadConfig(LTDC_IMReload);
+    ch32h417_ltdc_rgb_reload();
 }
 
 static void flash_show_progress(uint32_t item_id)
@@ -480,107 +556,71 @@ static void copy_read_page_to_layer(uint32_t page, uint32_t length)
     }
 }
 
-static void ltdc_gpio_af_init(void)
+static void flash_lcd_snapshot(void)
 {
-    GPIO_InitTypeDef init = {0};
-    unsigned int i;
+    ch32h417_ltdc_rgb_snapshot_t snapshot;
 
-    init.GPIO_Speed = GPIO_Speed_Very_High;
-    init.GPIO_Mode = GPIO_Mode_AF_PP;
+    ch32h417_ltdc_rgb_snapshot(&snapshot);
+    g_h417_flash_image_debug.layer_whpcr = snapshot.layer_whpcr;
+    g_h417_flash_image_debug.layer_wvpcr = snapshot.layer_wvpcr;
+    g_h417_flash_image_debug.layer_cfbar = snapshot.layer_cfbar;
+    g_h417_flash_image_debug.layer_cfblr = snapshot.layer_cfblr;
+}
 
-    for(i = 0u; i < (sizeof(lcd_ltdc_pins) / sizeof(lcd_ltdc_pins[0])); ++i)
+static int flash_lcd_layer_init(void)
+{
+    ch32h417_ltdc_rgb_layer_t layer;
+    int result;
+
+    layer.width = IMAGE_WIDTH;
+    layer.height = IMAGE_HEIGHT;
+    layer.offset_x = LTDC_LAYER_OFFSET_X;
+    layer.offset_y = LTDC_LAYER_OFFSET_Y;
+    layer.pixel_format = LTDC_Pixelformat_RGB565;
+    layer.framebuffer = (uint32_t)&s_lcd_layer[0][0];
+    layer.line_pitch = IMAGE_WIDTH * LTDC_BYTES_PER_PIXEL;
+
+    result = ch32h417_ltdc_rgb_layer1_config(&ch32h417_ltdc_rgb_panel_800x480, &layer);
+    if(result != CH32H417_LTDC_RGB_OK)
     {
-        init.GPIO_Pin = lcd_ltdc_pins[i].pin;
-        GPIO_PinAFConfig(lcd_ltdc_pins[i].port,
-                         lcd_ltdc_pins[i].source,
-                         lcd_ltdc_pins[i].alternate_function);
-        GPIO_Init(lcd_ltdc_pins[i].port, &init);
+        return result;
     }
+
+    ch32h417_ltdc_rgb_layer1_enable(1u);
+    ch32h417_ltdc_rgb_layer2_enable(0u);
+    ch32h417_ltdc_rgb_reload();
+    flash_lcd_snapshot();
+
+    return CH32H417_LTDC_RGB_OK;
 }
 
-static void ltdc_clock_init(void)
+static int flash_lcd_init(void)
 {
-    RCC_LTDCCLKConfig(RCC_LTDCClockSource_PLL);
-    RCC_LTDCClockSourceDivConfig(RCC_LTDCClockSource_Div15);
-    RCC_HB2PeriphClockCmd(RCC_HB2Periph_LTDC, ENABLE);
+    static const ch32h417_ltdc_rgb_color_t black = {0x00u, 0x00u, 0x00u};
+    int result;
 
-    (void)LTDC_PIXEL_CLOCK_HZ;
-    (void)LTDC_PLL_DIV_REGISTER;
-}
-
-static void ltdc_timing_init(void)
-{
-    LTDC_InitTypeDef init;
-
-    LTDC_StructInit(&init);
-    init.LTDC_HSPolarity = LTDC_HSPolarity_AH;
-    init.LTDC_VSPolarity = LTDC_VSPolarity_AL;
-    init.LTDC_DEPolarity = LTDC_DEPolarity_AH;
-    init.LTDC_PCPolarity = LTDC_PCPolarity_IIPC;
-    init.LTDC_HorizontalSync = LCD_HSYNC - 1u;
-    init.LTDC_VerticalSync = LCD_VSYNC - 1u;
-    init.LTDC_AccumulatedHBP = LCD_HSYNC + LCD_HBP - 1u;
-    init.LTDC_AccumulatedVBP = LCD_VSYNC + LCD_VBP - 1u;
-    init.LTDC_AccumulatedActiveW = LCD_HSYNC + LCD_HBP + LCD_WIDTH - 1u;
-    init.LTDC_AccumulatedActiveH = LCD_VSYNC + LCD_VBP + LCD_HEIGHT - 1u;
-    init.LTDC_TotalWidth = LCD_HSYNC + LCD_HBP + LCD_WIDTH + LCD_HFP - 1u;
-    init.LTDC_TotalHeigh = LCD_VSYNC + LCD_VBP + LCD_HEIGHT + LCD_VFP - 1u;
-    init.LTDC_BackgroundRedValue = 0x00u;
-    init.LTDC_BackgroundGreenValue = 0x00u;
-    init.LTDC_BackgroundBlueValue = 0x00u;
-    LTDC_Init(&init);
-}
-
-static void ltdc_layer_init(void)
-{
-    LTDC_Layer_InitTypeDef layer;
-    const uint32_t line_pitch = IMAGE_WIDTH * LTDC_BYTES_PER_PIXEL;
-
-    LTDC_LayerStructInit(&layer);
-    layer.LTDC_HorizontalStart = LTDC_ACTIVE_START_X + LTDC_LAYER_OFFSET_X;
-    layer.LTDC_HorizontalStop = layer.LTDC_HorizontalStart + IMAGE_WIDTH - 1u;
-    layer.LTDC_VerticalStart = LTDC_ACTIVE_START_Y + LTDC_LAYER_OFFSET_Y;
-    layer.LTDC_VerticalStop = layer.LTDC_VerticalStart + IMAGE_HEIGHT - 1u;
-    layer.LTDC_PixelFormat = LTDC_Pixelformat_RGB565;
-    layer.LTDC_ConstantAlpha = 0xFFu;
-    layer.LTDC_DefaultColorBlue = 0x00u;
-    layer.LTDC_DefaultColorGreen = 0x00u;
-    layer.LTDC_DefaultColorRed = 0x00u;
-    layer.LTDC_DefaultColorAlpha = 0x00u;
-    layer.LTDC_BlendingFactor_1 = LTDC_BlendingFactor1_CA;
-    layer.LTDC_BlendingFactor_2 = LTDC_BlendingFactor2_CA;
-    layer.LTDC_CFBStartAdress = (uint32_t)&s_lcd_layer[0][0];
-    layer.LTDC_CFBPitch = line_pitch;
-    layer.LTDC_CFBLineLength = line_pitch + 31u;
-    layer.LTDC_CFBLineNumber = IMAGE_HEIGHT;
-
-    LTDC_LayerInit(LTDC_Layer1, &layer);
-    LTDC_LayerCmd(LTDC_Layer1, ENABLE);
-    LTDC_LayerCmd(LTDC_Layer2, DISABLE);
-    LTDC_ReloadConfig(LTDC_IMReload);
-
-    g_h417_flash_image_debug.layer_whpcr = LTDC_Layer1->WHPCR;
-    g_h417_flash_image_debug.layer_wvpcr = LTDC_Layer1->WVPCR;
-    g_h417_flash_image_debug.layer_cfbar = LTDC_Layer1->CFBAR;
-    g_h417_flash_image_debug.layer_cfblr = LTDC_Layer1->CFBLR;
-}
-
-static void flash_lcd_init(void)
-{
-    h417_lcd_control_gpio_init();
-    h417_lcd_disp_enable(1u);
+    ch32h417_lcd_rgb_control_init();
+    ch32h417_lcd_rgb_disp_enable(1u);
     h417_delay_cycles(LCD_DISP_TO_SIGNAL_DELAY);
 
-    ltdc_gpio_af_init();
-    ltdc_clock_init();
-    LTDC_DeInit();
-    ltdc_timing_init();
-    ltdc_layer_init();
-    LTDC_Cmd(ENABLE);
-    LTDC_ReloadConfig(LTDC_IMReload);
+    result = ch32h417_ltdc_rgb_panel_init(&ch32h417_ltdc_rgb_panel_800x480, &black);
+    if(result != CH32H417_LTDC_RGB_OK)
+    {
+        return result;
+    }
+    result = flash_lcd_layer_init();
+    if(result != CH32H417_LTDC_RGB_OK)
+    {
+        return result;
+    }
+
+    ch32h417_ltdc_rgb_enable(1u);
+    ch32h417_ltdc_rgb_reload();
 
     h417_delay_cycles(LCD_SIGNAL_TO_BL_DELAY);
-    h417_lcd_backlight_enable(1u);
+    ch32h417_lcd_rgb_backlight_enable(1u);
+
+    return CH32H417_LTDC_RGB_OK;
 }
 
 static void debug_read_info(const gd5f1g_spi_bus_t *bus)
@@ -751,25 +791,44 @@ static int select_scratch_block(const gd5f1g_spi_bus_t *bus,
 
     for(i = 0u; i < IMAGE_TEST_SCAN_BLOCKS; ++i)
     {
-        uint32_t block = IMAGE_TEST_START_BLOCK - i;
-        uint32_t row = gd5f1g_block_to_row(block);
-        uint8_t status = 0u;
-        int result;
+        uint32_t last_block = IMAGE_TEST_START_BLOCK - i;
+        uint32_t first_block;
+        uint32_t block;
+        uint8_t range_ok = 1u;
 
-        result = gd5f1g_read_page(bus, row, BAD_BLOCK_MARK_COLUMN, s_read_page, 1u, &status);
-        g_h417_flash_image_debug.last_page = row;
-        g_h417_flash_image_debug.last_page_status = status;
-
-        if((result == GD5F1G_OK) && (s_read_page[0] == 0xFFu))
+        if(last_block < (IMAGE_BLOCKS - 1u))
         {
-            *block_out = block;
-            *row_out = row;
-            g_h417_flash_image_debug.bad_block_marker = s_read_page[0];
+            break;
+        }
+
+        first_block = last_block - (IMAGE_BLOCKS - 1u);
+        for(block = first_block; block <= last_block; ++block)
+        {
+            uint32_t row = gd5f1g_block_to_row(block);
+            uint8_t status = 0u;
+            uint8_t marker = 0u;
+            int result;
+
+            result = gd5f1g_read_bad_block_marker(bus, block, &marker, &status);
+            g_h417_flash_image_debug.last_page = row;
+            g_h417_flash_image_debug.last_page_status = status;
+            g_h417_flash_image_debug.bad_block_marker = marker;
+
+            if((result != GD5F1G_OK) || (marker != 0xFFu))
+            {
+                range_ok = 0u;
+                break;
+            }
+        }
+
+        if(range_ok != 0u)
+        {
+            *block_out = first_block;
+            *row_out = gd5f1g_block_to_row(first_block);
             return GD5F1G_OK;
         }
     }
 
-    g_h417_flash_image_debug.bad_block_marker = s_read_page[0];
     return GD5F1G_ERR_NO_SCRATCH_BLOCK;
 }
 
@@ -778,6 +837,7 @@ void h417_flash_image_run(void)
     gd5f1g_spi_bus_t bus;
     ch32h417_gd5f1g_spi1_context_t spi_context;
     uint32_t page;
+    uint32_t block;
     uint32_t read_checksum = 2166136261u;
     uint32_t verify_errors = 0u;
     uint32_t test_block = IMAGE_TEST_START_BLOCK;
@@ -787,7 +847,18 @@ void h417_flash_image_run(void)
     int result;
 
     clear_read_layer(0x001Fu);
-    flash_lcd_init();
+    result = flash_lcd_init();
+    if(result != CH32H417_LTDC_RGB_OK)
+    {
+        g_h417_flash_image_debug.state = H417_ITEM_FLASH_LCD;
+        g_h417_flash_image_debug.result = result;
+        h417_status_fail(H417_ITEM_FLASH_LCD);
+        while(1)
+        {
+            g_h417_status.cycle++;
+            h417_delay_cycles(200000u);
+        }
+    }
     h417_status_pass(H417_ITEM_FLASH_LCD);
 
     g_h417_flash_image_debug.state = H417_ITEM_FLASH_BUS;
@@ -795,6 +866,7 @@ void h417_flash_image_run(void)
     g_h417_flash_image_debug.base_row = base_row;
     g_h417_flash_image_debug.image_bytes = IMAGE_BYTES;
     g_h417_flash_image_debug.image_pages = IMAGE_PAGES;
+    g_h417_flash_image_debug.image_blocks = IMAGE_BLOCKS;
     g_h417_flash_image_debug.expected_crc = image_checksum();
     g_h417_flash_image_debug.first_bad_offset = 0xFFFFFFFFu;
     g_h417_flash_image_debug.id_mode = 0xFFFFFFFFu;
@@ -882,11 +954,15 @@ void h417_flash_image_run(void)
 
     flash_show_progress(H417_ITEM_FLASH_ERASE);
     g_h417_flash_image_debug.state = H417_ITEM_FLASH_ERASE;
-    result = gd5f1g_block_erase(&bus, test_block);
-    debug_read_info(&bus);
-    if(!record_step(result, H417_ITEM_FLASH_ERASE))
+    for(block = 0u; block < IMAGE_BLOCKS; ++block)
     {
-        flash_stop_failed(&bus, &spi_context, H417_ITEM_FLASH_ERASE, result);
+        result = gd5f1g_block_erase(&bus, test_block + block);
+        g_h417_flash_image_debug.last_page = gd5f1g_block_to_row(test_block + block);
+        debug_read_info(&bus);
+        if(!record_step(result, H417_ITEM_FLASH_ERASE))
+        {
+            flash_stop_failed(&bus, &spi_context, H417_ITEM_FLASH_ERASE, result);
+        }
     }
 
     flash_show_progress(H417_ITEM_FLASH_PROGRAM);
@@ -943,7 +1019,7 @@ void h417_flash_image_run(void)
         }
 
         copy_read_page_to_layer(page, length);
-        LTDC_ReloadConfig(LTDC_IMReload);
+        ch32h417_ltdc_rgb_reload();
     }
 
     g_h417_flash_image_debug.state = H417_ITEM_FLASH_VERIFY;

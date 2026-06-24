@@ -13,6 +13,7 @@ H417_WCH_ROOT = os.path.join(H417_FIRMWARE_ROOT, "basic", "wch", "SRC")
 CH585_WCH_ROOT = os.path.join(CH585_FIRMWARE_ROOT, "basic", "wch", "SRC")
 H417_V3F_DRIVER_ROOT = os.path.join(H417_FIRMWARE_ROOT, "v3f", "drivers")
 H417_RGB1W_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "rgb1w_pioc")
+H417_LTDC_RGB_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "ltdc_rgb")
 
 
 def fail(message):
@@ -71,6 +72,7 @@ def main():
     assert_contains(h417_makefile, r"V3F_DRIVER_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/v3f/drivers", "V3F driver root")
     assert_contains(h417_makefile, r"RGB1W_PIOC_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/rgb1w_pioc", "V3F RGB1W PIOC driver tree")
     assert_contains(h417_makefile, r"FLASH_NAND_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/gd5f1g_spi_nand", "V3F-local GD5F1G driver tree")
+    assert_contains(h417_makefile, r"LTDC_RGB_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/ltdc_rgb", "V3F-local LTDC RGB driver tree")
     assert_not_contains(h417_makefile, r"third_party|EVT_ROOT", "external third_party EVT dependency")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
     assert_contains(ch585_makefile, r"\bHALF\s*\?=", "HALF selection")
@@ -173,10 +175,31 @@ def main():
         r"GPIO_PinSource9,\s*GPIO_AF3",
         "PF9 SPI1 data-in mapping",
     )
+    assert_contains(
+        os.path.join(H417_LTDC_RGB_ROOT, "include", "ch32h417_ltdc_rgb.h"),
+        r"CH32H417_LCD_RGB_WIDTH\s+800u",
+        "H417 RGB LCD panel width",
+    )
+    assert_contains(
+        os.path.join(H417_LTDC_RGB_ROOT, "src", "ch32h417_lcd_rgb_control.c"),
+        r"GPIOA,\s*GPIO_Pin_9",
+        "LCD DISP PA9 control mapping",
+    )
+    assert_contains(
+        os.path.join(H417_LTDC_RGB_ROOT, "src", "ch32h417_lcd_rgb_control.c"),
+        r"GPIOA,\s*GPIO_Pin_10",
+        "LCD backlight CTRL PA10 control mapping",
+    )
+    assert_contains(
+        os.path.join(H417_LTDC_RGB_ROOT, "src", "ch32h417_ltdc_rgb.c"),
+        r"LTDC_Pixelformat_RGB565",
+        "RGB565 LTDC layer support",
+    )
 
     h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
     pioc_driver_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"))
-    combined_h417_text = h417_text + pioc_driver_text
+    ltdc_rgb_driver_text = scan_tree(H417_LTDC_RGB_ROOT, (".c", ".h"))
+    combined_h417_text = h417_text + pioc_driver_text + ltdc_rgb_driver_text
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
 
     forbidden_h417 = {

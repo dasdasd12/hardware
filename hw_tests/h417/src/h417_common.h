@@ -46,5 +46,6 @@ void h417_lcd_signal_run(void);
 void h417_lcd_backlight_run(void);
 void h417_ltdc_run(void);
 void h417_flash_image_run(void);
+void h417_flash_mosi_probe_run(void);
 
 #endif
