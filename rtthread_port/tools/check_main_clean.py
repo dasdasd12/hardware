@@ -10,6 +10,8 @@ REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir))
 
 
 REQUIRED_PATHS = [
+    "basic/ch32h417/wch/SRC/Core/core_riscv.h",
+    "basic/ch32h417/wch/SRC/Peripheral/inc/ch32h417.h",
     "rtthread_port/applications/ch585_spi_scan.c",
     "rtthread_port/applications/ch585_spi_scan.h",
     "rtthread_port/applications/usb_cdc_dual.c",
@@ -21,6 +23,7 @@ REQUIRED_PATHS = [
 
 
 BANNED_PATHS = [
+    "third_party/wch_ch32h417_evt",
     "ADS7948_MUX_MAGNETIC_AGENT_README.md",
     "H417_CH585_CURRENT_DEBUG_README.md",
     "H417_CH585_HW_SPI_GPIO_CS_README.md",

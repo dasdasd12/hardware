@@ -22,10 +22,12 @@ COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wunini
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
-# EVT SDK root
-EVT_ROOT     := C:/program1/hardware/WCH/CH32H417/CH32H417EVT/EVT/EXAM
-SRC_ROOT     := $(EVT_ROOT)/SRC
-OFFICIAL_USBSS_ROOT := $(EVT_ROOT)/USBSS/DEVICE/CH372Device/Common
+# WCH EVT hardware library root
+WCH_H417_ROOT ?= ../../basic/ch32h417/wch
+SRC_ROOT      := $(WCH_H417_ROOT)/SRC
+
+# Optional official USBSS examples are not required by the default V3F wakeup build.
+OFFICIAL_USBSS_ROOT ?= C:/program1/hardware/WCH/CH32H417/CH32H417EVT/EVT/EXAM/USBSS/DEVICE/CH372Device/Common
 
 V3F_USBSS_OFFICIAL_OWNER ?= 0
 V3F_ENABLE_USBFS_CLOCK_INIT ?= 0

@@ -117,7 +117,7 @@
    - 默认路径: `/c/riscv-wch-toolchain/bin/`
    - 或安装 [MounRiver Studio 2](http://www.mounriver.com/)
 
-2. **WCH 原厂 SDK**: 下载 CH32H417EVT 并解压到 `C:/program1/hardware/WCH/CH32H417/CH32H417EVT/`
+2. **WCH 底层库**: 仓库内已保留主固件使用的 CH32H417 EVT 底层，路径为 `basic/ch32h417/wch/SRC`
 
 3. **烧录工具**: WCH-Link + OpenOCD，或 MounRiver Studio 内置下载
 
@@ -172,6 +172,10 @@ USB device initialized.
 │   │   ├── CH32H417RM.PDF          # 参考手册
 │   │   └── KD024WVFPD102A SPEC V1.0.pdf  # 屏幕规格书
 │   └── development_plan.md         # 产品开发计划
+│
+├── basic/
+│   └── ch32h417/
+│       └── wch/SRC                 # CH32H417 WCH EVT 底层库
 │
 ├── rtthread_port/                  # RT-Thread 移植工程
 │   ├── applications/
