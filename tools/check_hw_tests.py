@@ -9,6 +9,7 @@ H417_ROOT = os.path.join(ROOT, "hw_tests", "h417")
 CH585_ROOT = os.path.join(ROOT, "hw_tests", "ch585")
 BASIC_H417_ROOT = os.path.join(ROOT, "basic", "ch32h417")
 H417_WCH_ROOT = os.path.join(BASIC_H417_ROOT, "wch", "SRC")
+H417_RGB1W_ROOT = os.path.join(BASIC_H417_ROOT, "drivers", "rgb1w_pioc")
 
 
 def fail(message):
@@ -64,6 +65,7 @@ def main():
     assert_contains(h417_makefile, r"\bHW_TEST\s*\?=", "HW_TEST selection")
     assert_contains(h417_makefile, r"basic/ch32h417", "shared CH32H417 basic hardware library")
     assert_contains(h417_makefile, r"WCH_H417_SRC_ROOT\s*:=\s*\$\(BASIC_H417_ROOT\)/wch/SRC", "basic-local CH32H417 WCH source tree")
+    assert_contains(h417_makefile, r"RGB1W_PIOC_ROOT\s*:=\s*\$\(BASIC_H417_ROOT\)/drivers/rgb1w_pioc", "basic RGB1W PIOC driver tree")
     assert_not_contains(h417_makefile, r"third_party|EVT_ROOT", "external third_party EVT dependency")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
     assert_contains(ch585_makefile, r"\bHALF\s*\?=", "HALF selection")
@@ -102,22 +104,22 @@ def main():
             "WS2812 {0} effect selector".format(effect),
         )
     assert_contains(
-        os.path.join(BASIC_H417_ROOT, "include", "ch32h417_pioc_rgb1w.h"),
+        os.path.join(H417_RGB1W_ROOT, "include", "ch32h417_pioc_rgb1w.h"),
         r"ch32h417_pioc_rgb1w_pin_pf13",
         "PF13 RGB1W pin descriptor",
     )
     assert_contains(
-        os.path.join(BASIC_H417_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
+        os.path.join(H417_RGB1W_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
         r"GPIOF,\s*RCC_HB2Periph_GPIOF,\s*GPIO_Pin_13,\s*GPIO_PinSource13,\s*GPIO_AF5",
         "PF13 PIOC AF5 descriptor",
     )
     assert_contains(
-        os.path.join(BASIC_H417_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
+        os.path.join(H417_RGB1W_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
         r"GPIO_PinAFConfig\(pin->port,\s*pin->pin_source,\s*pin->alternate_function\)",
         "descriptor-driven PIOC AF configuration",
     )
     assert_not_contains(
-        os.path.join(BASIC_H417_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
+        os.path.join(H417_RGB1W_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
         r"\bmemcpy\b",
         "libc memcpy dependency",
     )
@@ -128,8 +130,7 @@ def main():
     )
 
     h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
-    basic_h417_text = scan_tree(os.path.join(BASIC_H417_ROOT, "include"), (".c", ".h"))
-    basic_h417_text += scan_tree(os.path.join(BASIC_H417_ROOT, "src"), (".c", ".h"))
+    basic_h417_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"))
     combined_h417_text = h417_text + basic_h417_text
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
 

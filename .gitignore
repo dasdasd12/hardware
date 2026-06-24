@@ -45,10 +45,10 @@ openocd_*.txt
 ocd_*.txt
 
 # Local WCH/MounRiver automation state
-/rtthread_port/.wch-skill-logs/
+/firmware/h417_rtthread/.wch-skill-logs/
 
 # Local USB CDC/USBHS capture logs
-/rtthread_port/.usbhs_logs/
+/firmware/h417_rtthread/.usbhs_logs/
 
 # Extracted manual text caches generated for local search
 /docs/user_manual/*.txt
@@ -63,19 +63,19 @@ ocd_*.txt
 **/C*temp*.txt
 
 # Accidental shell artifacts
-/rtthread_port/-p/
-/rtthread_port/!
+/firmware/h417_rtthread/-p/
+/firmware/h417_rtthread/!
 
 # Local backup of RT-Thread's original nested Git metadata after vendoring.
-/rtthread_port/rt-thread/.git_vendor_backup/
+/firmware/h417_rtthread/rt-thread/.git_vendor_backup/
 
 # Local bring-up experiments
-/rtthread_port/test*.tcl
-/rtthread_port/test_rst*.ps1
-/rtthread_port/test_reset.ps1
+/firmware/h417_rtthread/test*.tcl
+/firmware/h417_rtthread/test_rst*.ps1
+/firmware/h417_rtthread/test_reset.ps1
 
 # Third-party checkout managed separately
-# /rtthread_port/rt-thread/
+# /firmware/h417_rtthread/rt-thread/
 
 # OS noise
 .DS_Store

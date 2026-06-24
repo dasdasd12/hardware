@@ -24,7 +24,7 @@ ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 # WCH EVT hardware library root
-WCH_H417_ROOT ?= ../basic/ch32h417/wch
+WCH_H417_ROOT ?= ../../basic/ch32h417/wch
 SRC_ROOT      := $(WCH_H417_ROOT)/SRC
 
 # RT-Thread root

@@ -125,11 +125,11 @@
 
 ```bash
 # 编译 RT-Thread 固件（V5F 核心）
-cd rtthread_port
+cd firmware/h417_rtthread
 make
 
 # 或使用顶层 Makefile（支持 CH32H417 / CH585 双芯片）
-cd ..
+cd ../..
 make CHIP=CH32H417
 ```
 
@@ -137,7 +137,7 @@ make CHIP=CH32H417
 
 ```bash
 # OpenOCD + WCH-Link
-cd rtthread_port
+cd firmware/h417_rtthread
 make flash
 
 # 或使用 WCH 官方工具
@@ -175,27 +175,26 @@ USB device initialized.
 │
 ├── basic/
 │   └── ch32h417/
+│       ├── drivers/
+│       │   └── rgb1w_pioc/         # PIOC RGB 1-wire/WS2812 可复用驱动
 │       └── wch/SRC                 # CH32H417 WCH EVT 底层库
 │
-├── rtthread_port/                  # RT-Thread 移植工程
-│   ├── applications/
-│   │   └── main.c                  # 主应用入口
-│   ├── bsp/
-│   │   ├── board.c / board.h       # 板级初始化
-│   │   ├── startup_ch32h417_v5f.S  # V5F 启动汇编
-│   │   ├── system_ch32h417.c       # 系统时钟配置
-│   │   └── linker_scripts/
-│   │       └── Link_v5f.ld         # V5F 链接脚本
-│   ├── drivers/
-│   │   ├── drv_usart.c / drv_usart.h
-│   │   └── drv_gpio.c
-│   ├── libcpu/
-│   │   ├── cpuport.c / cpuport.h   # CPU 架构适配
-│   │   ├── context_gcc.S           # 上下文切换
-│   │   ├── interrupt_gcc.S         # 中断入口
-│   │   └── trap_common.c           # 异常处理
-│   ├── rt-thread/                  # RT-Thread 源码（子模块或拷贝）
-│   └── Makefile
+├── firmware/
+│   └── h417_rtthread/              # CH32H417 V5F RT-Thread 主固件
+│       ├── applications/           # 主应用和板级功能入口
+│       ├── bsp/                    # 板级初始化、启动文件、链接脚本
+│       ├── drivers/                # RT-Thread 设备驱动适配
+│       ├── libcpu/                 # RISC-V CPU 架构适配
+│       ├── rt-thread/              # RT-Thread 源码（子模块或拷贝）
+│       ├── v3f_wakeup/             # V3F 裸机唤醒/协同验证程序
+│       └── Makefile
+│
+├── hw_tests/
+│   ├── h417/                       # CH32H417 单项硬件测试
+│   └── ch585/                      # CH585 单项硬件测试
+│
+├── tools/                          # 跨工程检查脚本
+├── skills/                         # 本仓库自动化技能/脚本
 │
 ├── Makefile                        # 顶层 Makefile
 └── README.md                       # 本文件

@@ -6,6 +6,7 @@ PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
 BASIC_H417_ROOT ?= $(PROJECT_ROOT)/basic/ch32h417
 WCH_H417_SRC_ROOT := $(BASIC_H417_ROOT)/wch/SRC
+RGB1W_PIOC_ROOT := $(BASIC_H417_ROOT)/drivers/rgb1w_pioc
 
 CC := $(PREFIX)gcc
 AS := $(PREFIX)gcc -x assembler-with-cpp
@@ -21,7 +22,7 @@ ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 SRC_ROOT := $(WCH_H417_SRC_ROOT)
-INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -I$(BASIC_H417_ROOT)/include -Isrc
+INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -I$(RGB1W_PIOC_ROOT)/include -Isrc
 DEFS := -DCore_V3F -DHW_TEST_NAME=\"$(HW_TEST)\"
 
 COMMON_SRC := src/system_ch32h417.c src/h417_common.c src/h417_test_main.c
@@ -33,16 +34,16 @@ else ifeq ($(HW_TEST),h417_pf13_probe)
 TEST_SRC := src/h417_pf13_probe.c
 DEFS += -DHW_TEST_FUNC=h417_pf13_probe_run -DHW_TEST_ID=20
 else ifeq ($(HW_TEST),h417_ws2812)
-TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
+TEST_SRC := src/h417_ws2812.c $(RGB1W_PIOC_ROOT)/src/ch32h417_pioc_rgb1w.c
 DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=2 -DWS2812_EFFECT=WS2812_EFFECT_SOLID
 else ifeq ($(HW_TEST),h417_ws2812_breath)
-TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
+TEST_SRC := src/h417_ws2812.c $(RGB1W_PIOC_ROOT)/src/ch32h417_pioc_rgb1w.c
 DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=22 -DWS2812_EFFECT=WS2812_EFFECT_BREATH
 else ifeq ($(HW_TEST),h417_ws2812_chase)
-TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
+TEST_SRC := src/h417_ws2812.c $(RGB1W_PIOC_ROOT)/src/ch32h417_pioc_rgb1w.c
 DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=23 -DWS2812_EFFECT=WS2812_EFFECT_CHASE
 else ifeq ($(HW_TEST),h417_ws2812_rainbow_band)
-TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
+TEST_SRC := src/h417_ws2812.c $(RGB1W_PIOC_ROOT)/src/ch32h417_pioc_rgb1w.c
 DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=24 -DWS2812_EFFECT=WS2812_EFFECT_RAINBOW_BAND
 else ifeq ($(HW_TEST),h417_lcd_signal)
 TEST_SRC := src/h417_lcd_signal.c
