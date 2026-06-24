@@ -15,6 +15,8 @@ static const h417_pin_t ws_pin = {GPIOF, GPIO_Pin_13, H417_ITEM_WS2812};
 
 enum
 {
+    WS2812_STARTUP_PROBE_PULSES = 64u,
+    WS2812_STARTUP_PROBE_DELAY = 20000u,
     WS2812_T0H_CYCLES = WS2812_NS_TO_CYCLES(300u),
     WS2812_T1H_CYCLES = WS2812_NS_TO_CYCLES(800u),
     WS2812_BIT_CYCLES = WS2812_NS_TO_CYCLES(1250u),
@@ -84,10 +86,27 @@ static void ws_send_color(uint8_t red, uint8_t green, uint8_t blue, uint16_t cou
     ws_wait(WS2812_RESET_CYCLES);
 }
 
+static void ws_startup_probe(void)
+{
+    uint32_t i;
+
+    h417_status_phase(10, H417_ITEM_WS2812);
+    for(i = 0; i < WS2812_STARTUP_PROBE_PULSES; ++i)
+    {
+        ws_drive_high();
+        h417_delay_cycles(WS2812_STARTUP_PROBE_DELAY);
+        ws_drive_low();
+        h417_delay_cycles(WS2812_STARTUP_PROBE_DELAY);
+    }
+
+    h417_delay_cycles(WS2812_STARTUP_PROBE_DELAY);
+}
+
 void h417_ws2812_run(void)
 {
     h417_pin_output(&ws_pin);
     ws_drive_low();
+    ws_startup_probe();
 
     while(1)
     {

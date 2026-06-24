@@ -38,6 +38,7 @@ void h417_pin_set(const h417_pin_t *pin, uint8_t high);
 void h417_pin_toggle(const h417_pin_t *pin);
 
 void h417_gpio_status_run(void);
+void h417_pf13_probe_run(void);
 void h417_ws2812_run(void);
 void h417_lcd_signal_run(void);
 
