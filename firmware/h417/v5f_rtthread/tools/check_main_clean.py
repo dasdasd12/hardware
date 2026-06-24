@@ -6,8 +6,8 @@ import sys
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir, os.pardir))
-FIRMWARE_ROOT = "firmware/h417_rtthread"
+REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir, os.pardir, os.pardir))
+FIRMWARE_ROOT = "firmware/h417/v5f_rtthread"
 
 
 REQUIRED_PATHS = [

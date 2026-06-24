@@ -4,7 +4,7 @@
 PREFIX       ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 PROJECT_NAME ?= rtthread_ch32h417
 PROJECT_ROOT ?= .
-BUILD_ROOT   ?= build
+BUILD_ROOT   ?= ../build
 CORE         ?= V5F
 
 CC      := $(PREFIX)gcc
@@ -24,7 +24,7 @@ ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 # WCH EVT hardware library root
-WCH_H417_ROOT ?= ../../basic/ch32h417/wch
+WCH_H417_ROOT ?= ../../../basic/ch32h417/wch
 SRC_ROOT      := $(WCH_H417_ROOT)/SRC
 
 # RT-Thread root
@@ -152,13 +152,10 @@ VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 # Dependency files
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean size v3f V3F
+.PHONY: all clean size
 
 all: $(ELF) $(BUILD)/$(PROJECT_NAME)_$(CORE).hex $(BUILD)/$(PROJECT_NAME)_$(CORE).bin $(BUILD)/$(PROJECT_NAME)_$(CORE).lst
 	@$(SIZE) "$(ELF)"
-
-v3f V3F:
-	@$(MAKE) -C v3f BUILD_ROOT=../$(BUILD_ROOT)/V3F
 
 $(BUILD)/%.o: %.c | $(BUILD)
 	@echo "CC  $(notdir $<)"
@@ -191,6 +188,6 @@ size: $(ELF)
 	@$(SIZE) "$(ELF)"
 
 clean:
-	rm -rf "$(BUILD_ROOT)"
+	rm -rf "$(BUILD)"
 
 -include $(DEPS)

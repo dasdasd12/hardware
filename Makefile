@@ -13,7 +13,7 @@ SIZE    := $(PREFIX)size
 TARGET    ?= firmware
 SRC_DIRS  := .
 BUILD_DIR := build
-LDSCRIPT  := ./firmware/h417_rtthread/bsp/linker_scripts/Link_v5f.ld
+LDSCRIPT  := ./firmware/h417/v5f_rtthread/bsp/linker_scripts/Link_v5f.ld
 
 ifeq ($(CHIP),CH32H417)
   ARCH_FLAGS := -march=rv32imac_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
@@ -90,4 +90,3 @@ clean:
 	rm -rf "$(BUILD_DIR)"
 
 -include $(wildcard $(BUILD_DIR)/*.d)
-

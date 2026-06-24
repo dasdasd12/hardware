@@ -193,7 +193,7 @@ For projects where V3F uses STOP mode, pass `-AllowMrsReset` on `debug-check` so
 
 ### OpenOCD cannot attach while user firmware runs at speed
 
-Confirmed on hardware 2026-05-26 with the `firmware/h417_rtthread` project (V3F firmware + V5F running RT-Thread at 400 MHz on PB8/PB9 SDI):
+Confirmed on hardware 2026-05-26 with the `firmware/h417` project (V3F firmware + V5F running RT-Thread at 400 MHz on PB8/PB9 SDI):
 
 - After `-Action flash -Core both`, the chip immediately runs the user firmware. V5F is at 400 MHz; V3F is in STOP after waking V5F.
 - `MRS DLL` calls still succeed: `OpenDevice` / `CompareVersion` / `MRSFunc_FlashOperationExB` (with the `0x40` clear-code-flash escalation) all return 0.

@@ -453,6 +453,13 @@ function Get-H417ProjectRoot {
     if (($leaf -ieq "V3F" -or $leaf -ieq "V5F") -and (Test-Path -LiteralPath (Join-Path (Split-Path $full -Parent) "Common"))) {
         return (Split-Path $full -Parent)
     }
+    if ($leaf -ieq "v3f" -or $leaf -ieq "v5f_rtthread" -or $leaf -ieq "v5f") {
+        $parent = Split-Path $full -Parent
+        if ((Test-Path -LiteralPath (Join-Path $parent "v3f\Makefile")) -and
+            (Test-Path -LiteralPath (Join-Path $parent "v5f_rtthread\Makefile"))) {
+            return $parent
+        }
+    }
     return $full
 }
 
@@ -462,6 +469,15 @@ function Test-H417DualLayout {
     return (
         (Test-Path -LiteralPath (Join-Path $root "V3F\User")) -and
         (Test-Path -LiteralPath (Join-Path $root "V5F\User"))
+    )
+}
+
+function Test-H417SplitLayout {
+    param([string]$Dir)
+    $root = Get-H417ProjectRoot $Dir
+    return (
+        (Test-Path -LiteralPath (Join-Path $root "v3f\Makefile")) -and
+        (Test-Path -LiteralPath (Join-Path $root "v5f_rtthread\Makefile"))
     )
 }
 
@@ -497,9 +513,10 @@ function Resolve-Core {
     if ($Elf -match "V3F|v3f") { return "v3f" }
 
     $leaf = Split-Path (Resolve-ExistingPath $Dir) -Leaf
-    if ($leaf -ieq "V3F") { return "v3f" }
-    if ($leaf -ieq "V5F") { return "v5f" }
+    if ($leaf -ieq "V3F" -or $leaf -ieq "v3f") { return "v3f" }
+    if ($leaf -ieq "V5F" -or $leaf -ieq "v5f" -or $leaf -ieq "v5f_rtthread") { return "v5f" }
     if (Test-H417DualLayout $Dir) { return "both" }
+    if (Test-H417SplitLayout $Dir) { return "both" }
     return "v3f"
 }
 
@@ -783,7 +800,8 @@ function Invoke-Build {
     if (-not $Toolchain) { throw "MRS toolchain not found." }
 
     $root = if ($TargetChip -eq "CH32H417") { Get-H417ProjectRoot $ProjectDir } else { Resolve-ExistingPath $ProjectDir }
-    $resolvedCore = Resolve-Core -Dir $root -RequestedCore $RequestedCore -CurrentChip $TargetChip -Elf $ElfPath
+    $coreProbeDir = if ($TargetChip -eq "CH32H417") { $ProjectDir } else { $root }
+    $resolvedCore = Resolve-Core -Dir $coreProbeDir -RequestedCore $RequestedCore -CurrentChip $TargetChip -Elf $ElfPath
 
     if (-not (Test-Path -LiteralPath (Join-Path $root "Makefile"))) {
         if (Test-MRSProjectStructure $root) {
@@ -796,19 +814,40 @@ function Invoke-Build {
     if (Test-Path -LiteralPath (Join-Path $root "Makefile")) {
         $prefixFull = if ($Toolchain.GCCBin) { (Convert-ToForwardPath (Get-ShortPath $Toolchain.GCCBin)) + "/" + $Toolchain.Prefix } else { $Toolchain.Prefix }
 
+        if ($TargetChip -eq "CH32H417" -and (Test-H417SplitLayout $root)) {
+            $makeArgs = @("-j", "CHIP=$TargetChip", "PREFIX=$prefixFull")
+            if ($resolvedCore -eq "v3f") {
+                $makeArgs = @("-j", "v3f", "CHIP=$TargetChip", "PREFIX=$prefixFull")
+            } elseif ($resolvedCore -eq "v5f") {
+                $makeArgs = @("-j", "v5f", "CHIP=$TargetChip", "PREFIX=$prefixFull")
+            }
+
+            $targetText = if ($resolvedCore -eq "both") { "all" } else { $resolvedCore }
+            Write-Info "make -j $targetText PREFIX=$prefixFull"
+            Invoke-MakeAt -Toolchain $Toolchain -Dir $root -MakeArgs $makeArgs
+            Write-Ok "Build finished"
+            return
+        }
+
         # Non-standard dual-core layout: build V3F and V5F in separate directories
         if ($resolvedCore -eq "both" -and -not (Test-H417DualLayout $root)) {
             $v3fDirs = @("v3f", "V3F")
+            $v5fDirs = @("v5f_rtthread", "V5F", "v5f")
             $v3fDir = $null
+            $v5fDir = $root
             foreach ($d in $v3fDirs) {
                 $candidate = Join-Path $root $d
                 if (Test-Path -LiteralPath (Join-Path $candidate "Makefile")) { $v3fDir = $candidate; break }
             }
+            foreach ($d in $v5fDirs) {
+                $candidate = Join-Path $root $d
+                if (Test-Path -LiteralPath (Join-Path $candidate "Makefile")) { $v5fDir = $candidate; break }
+            }
             if (-not $v3fDir) {
                 throw "Both-core build requested but no V3F Makefile found in $($v3fDirs -join ', ') under $root"
             }
-            Write-Info "Building V5F in $root"
-            Invoke-MakeAt -Toolchain $Toolchain -Dir $root -MakeArgs @("-j", "CHIP=$TargetChip", "CORE=V5F", "PREFIX=$prefixFull")
+            Write-Info "Building V5F in $v5fDir"
+            Invoke-MakeAt -Toolchain $Toolchain -Dir $v5fDir -MakeArgs @("-j", "CHIP=$TargetChip", "CORE=V5F", "PREFIX=$prefixFull")
             Write-Info "Building V3F in $v3fDir"
             Invoke-MakeAt -Toolchain $Toolchain -Dir $v3fDir -MakeArgs @("-j", "CHIP=$TargetChip", "CORE=v3f", "PREFIX=$prefixFull")
             Write-Ok "Dual-core build finished"

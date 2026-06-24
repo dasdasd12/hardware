@@ -124,8 +124,8 @@
 ### 编译
 
 ```bash
-# 编译 RT-Thread 固件（V5F 核心）
-cd firmware/h417_rtthread
+# 编译 H417 双核固件（V3F + V5F）
+cd firmware/h417
 make
 
 # 或使用顶层 Makefile（支持 CH32H417 / CH585 双芯片）
@@ -137,7 +137,7 @@ make CHIP=CH32H417
 
 ```bash
 # OpenOCD + WCH-Link
-cd firmware/h417_rtthread
+cd firmware/h417
 make flash
 
 # 或使用 WCH 官方工具
@@ -180,14 +180,12 @@ USB device initialized.
 │       └── wch/SRC                 # CH32H417 WCH EVT 底层库
 │
 ├── firmware/
-│   └── h417_rtthread/              # CH32H417 V5F RT-Thread 主固件
-│       ├── applications/           # 主应用和板级功能入口
-│       ├── bsp/                    # 板级初始化、启动文件、链接脚本
-│       ├── drivers/                # RT-Thread 设备驱动适配
-│       ├── libcpu/                 # RISC-V CPU 架构适配
-│       ├── rt-thread/              # RT-Thread 源码（子模块或拷贝）
+│   └── h417/                       # CH32H417 双核固件总目录
 │       ├── v3f/                    # V3F 固件入口、采集和协同任务
-│       └── Makefile
+│       ├── v5f_rtthread/           # V5F RT-Thread 主固件
+│       ├── build/                  # V3F/V5F 构建产物
+│       ├── flash_dualcore.ps1      # 双核烧录脚本
+│       └── Makefile                # 双核统一构建入口
 │
 ├── hw_tests/
 │   ├── h417/                       # CH32H417 单项硬件测试
