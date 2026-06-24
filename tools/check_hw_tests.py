@@ -7,6 +7,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 H417_ROOT = os.path.join(ROOT, "hw_tests", "h417")
 CH585_ROOT = os.path.join(ROOT, "hw_tests", "ch585")
+BASIC_H417_ROOT = os.path.join(ROOT, "basic", "ch32h417")
 
 
 def fail(message):
@@ -55,6 +56,7 @@ def main():
     ch585_makefile = os.path.join(CH585_ROOT, "Makefile")
 
     assert_contains(h417_makefile, r"\bHW_TEST\s*\?=", "HW_TEST selection")
+    assert_contains(h417_makefile, r"basic/ch32h417", "shared CH32H417 basic hardware library")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
     assert_contains(ch585_makefile, r"\bHALF\s*\?=", "HALF selection")
     assert_contains(h417_makefile, r"Core_V3F", "H417 V3F-only build define")
@@ -72,18 +74,28 @@ def main():
     )
     assert_contains(
         os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
-        r"RGB1W_SendRAM\(",
-        "PIOC RAM-mode WS2812 full-frame sender",
+        r"ch32h417_pioc_rgb1w_send_ram\(",
+        "basic PIOC RGB1W RAM-mode full-frame sender",
     )
     assert_contains(
-        os.path.join(H417_ROOT, "src", "h417_rgb1w_pioc.c"),
-        r"#define\s+PIOC_IO\s+PIOC_IO1_5",
-        "PIOC IO1 PF13 routing",
+        os.path.join(BASIC_H417_ROOT, "include", "ch32h417_pioc_rgb1w.h"),
+        r"ch32h417_pioc_rgb1w_pin_pf13",
+        "PF13 RGB1W pin descriptor",
     )
     assert_contains(
-        os.path.join(H417_ROOT, "src", "h417_rgb1w_pioc.c"),
-        r"GPIO_PinAFConfig\(GPIOF,\s*GPIO_PinSource13,\s*GPIO_AF5\)",
-        "PF13 PIOC AF5 configuration",
+        os.path.join(BASIC_H417_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
+        r"GPIOF,\s*RCC_HB2Periph_GPIOF,\s*GPIO_Pin_13,\s*GPIO_PinSource13,\s*GPIO_AF5",
+        "PF13 PIOC AF5 descriptor",
+    )
+    assert_contains(
+        os.path.join(BASIC_H417_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
+        r"GPIO_PinAFConfig\(pin->port,\s*pin->pin_source,\s*pin->alternate_function\)",
+        "descriptor-driven PIOC AF configuration",
+    )
+    assert_not_contains(
+        os.path.join(BASIC_H417_ROOT, "src", "ch32h417_pioc_rgb1w.c"),
+        r"\bmemcpy\b",
+        "libc memcpy dependency",
     )
     assert_contains(
         os.path.join(H417_ROOT, "src", "system_ch32h417.c"),
@@ -92,6 +104,8 @@ def main():
     )
 
     h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
+    basic_h417_text = scan_tree(BASIC_H417_ROOT, (".c", ".h"))
+    combined_h417_text = h417_text + basic_h417_text
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
 
     forbidden_h417 = {
@@ -104,8 +118,15 @@ def main():
     }
     for pattern, description in forbidden_h417.items():
         flags = 0 if description == "RT-Thread dependency" else re.IGNORECASE
-        if re.search(pattern, h417_text, flags=flags):
+        if re.search(pattern, combined_h417_text, flags=flags):
             fail("h417 sources contain forbidden {0}".format(description))
+
+    for pattern, description in {
+        r"Core_V5F|Core_V3F|Func_Run_V3F|Run_Core": "V3F/V5F core-selection dependency",
+        r"PIOC_IRQHandler|WCH-Interrupt-fast": "PIOC IRQ dependency",
+    }.items():
+        if re.search(pattern, basic_h417_text):
+            fail("basic h417 drivers contain forbidden {0}".format(description))
 
     required_h417_tests = (
         "h417_gpio_status",

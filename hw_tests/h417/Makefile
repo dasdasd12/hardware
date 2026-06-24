@@ -5,6 +5,7 @@ HW_TEST ?= h417_gpio_status
 PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
 EVT_ROOT ?= $(PROJECT_ROOT)/third_party/wch_ch32h417_evt
+BASIC_H417_ROOT ?= $(PROJECT_ROOT)/basic/ch32h417
 
 CC := $(PREFIX)gcc
 AS := $(PREFIX)gcc -x assembler-with-cpp
@@ -20,7 +21,7 @@ ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 SRC_ROOT := $(EVT_ROOT)/SRC
-INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -Isrc
+INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -I$(BASIC_H417_ROOT)/include -Isrc
 DEFS := -DCore_V3F -DHW_TEST_NAME=\"$(HW_TEST)\"
 
 COMMON_SRC := src/system_ch32h417.c src/h417_common.c src/h417_test_main.c
@@ -32,7 +33,7 @@ else ifeq ($(HW_TEST),h417_pf13_probe)
 TEST_SRC := src/h417_pf13_probe.c
 DEFS += -DHW_TEST_FUNC=h417_pf13_probe_run -DHW_TEST_ID=20
 else ifeq ($(HW_TEST),h417_ws2812)
-TEST_SRC := src/h417_ws2812.c src/h417_rgb1w_pioc.c
+TEST_SRC := src/h417_ws2812.c $(BASIC_H417_ROOT)/src/ch32h417_pioc_rgb1w.c
 DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=2
 else ifeq ($(HW_TEST),h417_lcd_signal)
 TEST_SRC := src/h417_lcd_signal.c

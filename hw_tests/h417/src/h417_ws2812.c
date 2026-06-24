@@ -1,5 +1,5 @@
 #include "h417_common.h"
-#include "h417_rgb1w_pioc.h"
+#include "ch32h417_pioc_rgb1w.h"
 
 enum
 {
@@ -39,42 +39,29 @@ static void ws_fill(uint8_t *buffer, uint16_t count, uint8_t red, uint8_t green,
     }
 }
 
-static uint8_t ws_pioc_wait(void)
-{
-    uint32_t timeout = WS2812_PIOC_TIMEOUT_LOOPS;
-
-    while((PIOC->D8_SYS_CFG & RB_INT_REQ) == 0u)
-    {
-        if(timeout == 0u)
-        {
-            RGB1W_Halt();
-            return 0xfeu;
-        }
-        timeout--;
-    }
-
-    return PIOC->D8_CTRL_RD;
-}
-
 static uint8_t ws_send_ram(uint8_t *buffer, uint16_t bytes)
 {
-    RGB1W_SendRAM(bytes, buffer, 1u);
-    return ws_pioc_wait();
+    return ch32h417_pioc_rgb1w_send_ram(&ch32h417_pioc_rgb1w_pin_pf13,
+                                        buffer,
+                                        bytes,
+                                        WS2812_PIOC_TIMEOUT_LOOPS);
 }
 
 static uint8_t ws_send_sfr(uint8_t *buffer, uint16_t bytes)
 {
-    RGB1W_SendSFR(bytes, buffer, 1u);
-    return ws_pioc_wait();
+    return ch32h417_pioc_rgb1w_send_sfr(&ch32h417_pioc_rgb1w_pin_pf13,
+                                        buffer,
+                                        bytes,
+                                        WS2812_PIOC_TIMEOUT_LOOPS);
 }
 
 static void ws_record_status(uint8_t status)
 {
-    if(status == RGB1W_ERR_OK)
+    if(status == CH32H417_PIOC_RGB1W_OK)
     {
         h417_status_pass(H417_ITEM_WS2812);
     }
-    else if(status == 0xfeu)
+    else if(status == CH32H417_PIOC_RGB1W_ERR_TIMEOUT)
     {
         h417_status_phase(WS2812_PHASE_PIOC_TIMEOUT, H417_ITEM_WS2812);
         h417_status_fail(H417_ITEM_WS2812);
@@ -93,11 +80,11 @@ static void ws_probe_color(uint8_t red, uint8_t green, uint8_t blue)
     ws_fill(ws_probe_frame, WS2812_PROBE_LED_COUNT, red, green, blue);
     status = ws_send_sfr(ws_probe_frame, sizeof(ws_probe_frame));
 
-    if(status != RGB1W_ERR_OK)
+    if(status != CH32H417_PIOC_RGB1W_OK)
     {
         h417_status_phase(WS2812_PHASE_PROBE_ERROR + status, H417_ITEM_WS2812);
         h417_status_fail(H417_ITEM_WS2812);
-        RGB1W_Init();
+        ch32h417_pioc_rgb1w_init(&ch32h417_pioc_rgb1w_pin_pf13);
     }
     else
     {
@@ -118,9 +105,9 @@ static void ws_repeat_color(uint8_t red, uint8_t green, uint8_t blue, uint16_t f
         status = ws_send_ram(ws_frame, sizeof(ws_frame));
         ws_record_status(status);
 
-        if(status != RGB1W_ERR_OK)
+        if(status != CH32H417_PIOC_RGB1W_OK)
         {
-            RGB1W_Init();
+            ch32h417_pioc_rgb1w_init(&ch32h417_pioc_rgb1w_pin_pf13);
             ws_probe_color(red, green, blue);
         }
 
@@ -130,7 +117,7 @@ static void ws_repeat_color(uint8_t red, uint8_t green, uint8_t blue, uint16_t f
 
 void h417_ws2812_run(void)
 {
-    RGB1W_Init();
+    ch32h417_pioc_rgb1w_init(&ch32h417_pioc_rgb1w_pin_pf13);
     h417_delay_cycles(100000u);
 
     while(1)
