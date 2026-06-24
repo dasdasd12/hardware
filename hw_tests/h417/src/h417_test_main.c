@@ -1,4 +1,5 @@
 #include "h417_common.h"
+#include "system_ch32h417.h"
 
 #ifndef HW_TEST_FUNC
 #define HW_TEST_FUNC h417_gpio_status_run
@@ -10,6 +11,8 @@
 
 int main(void)
 {
+    SystemInit();
+    SystemAndCoreClockUpdate();
     h417_board_clock_gpio_init();
     h417_status_begin(HW_TEST_ID);
     HW_TEST_FUNC();

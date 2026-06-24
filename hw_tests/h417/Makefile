@@ -32,7 +32,7 @@ else ifeq ($(HW_TEST),h417_pf13_probe)
 TEST_SRC := src/h417_pf13_probe.c
 DEFS += -DHW_TEST_FUNC=h417_pf13_probe_run -DHW_TEST_ID=20
 else ifeq ($(HW_TEST),h417_ws2812)
-TEST_SRC := src/h417_ws2812.c
+TEST_SRC := src/h417_ws2812.c src/h417_rgb1w_pioc.c
 DEFS += -DHW_TEST_FUNC=h417_ws2812_run -DHW_TEST_ID=2
 else ifeq ($(HW_TEST),h417_lcd_signal)
 TEST_SRC := src/h417_lcd_signal.c

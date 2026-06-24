@@ -67,8 +67,28 @@ def main():
     )
     assert_contains(
         os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
-        r"#define\s+WS2812_TEST_CORE_HZ\s+70000000u",
-        "WS2812 timing base for the official H417 V3F startup clock",
+        r"#define\s+WS2812_TEST_LEVEL\s+0x08u",
+        "low-brightness WS2812 test level",
+    )
+    assert_contains(
+        os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+        r"RGB1W_SendRAM\(",
+        "PIOC RAM-mode WS2812 full-frame sender",
+    )
+    assert_contains(
+        os.path.join(H417_ROOT, "src", "h417_rgb1w_pioc.c"),
+        r"#define\s+PIOC_IO\s+PIOC_IO1_5",
+        "PIOC IO1 PF13 routing",
+    )
+    assert_contains(
+        os.path.join(H417_ROOT, "src", "h417_rgb1w_pioc.c"),
+        r"GPIO_PinAFConfig\(GPIOF,\s*GPIO_PinSource13,\s*GPIO_AF5\)",
+        "PF13 PIOC AF5 configuration",
+    )
+    assert_contains(
+        os.path.join(H417_ROOT, "src", "system_ch32h417.c"),
+        r"SystemCoreClock\s*=\s*100000000u",
+        "100 MHz V3F clock for WCH PIOC RGB1W timing",
     )
 
     h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))

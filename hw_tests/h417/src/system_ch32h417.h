@@ -7,6 +7,7 @@ extern uint32_t SystemCoreClock;
 extern uint32_t SystemClock;
 extern uint32_t HCLKClock;
 
+void SystemInit(void);
 void SystemAndCoreClockUpdate(void);
 
 #endif
