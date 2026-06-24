@@ -23,8 +23,8 @@ COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wunini
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
-# WCH EVT hardware library root
-WCH_H417_ROOT ?= ../../../basic/ch32h417/wch
+# H417-local WCH EVT hardware library root
+WCH_H417_ROOT ?= ../basic/wch
 SRC_ROOT      := $(WCH_H417_ROOT)/SRC
 
 # RT-Thread root

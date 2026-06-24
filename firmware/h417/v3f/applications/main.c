@@ -2,7 +2,6 @@
 #include "ch32h417_usb.h"
 #include "ch32h417_dbgmcu.h"
 #include "debug.h"
-#include "adc.h"
 
 #if defined(__GNUC__)
 #define V3F_MAYBE_UNUSED __attribute__((unused))
@@ -36,10 +35,6 @@
 #define V3F_USBSS_SWJ_DELAY_LOOPS 16u
 #define V3F_USBSS_SWJ_DELAY_CYCLES 50000000u
 
-#ifndef V3F_ENABLE_ADC_INIT
-#define V3F_ENABLE_ADC_INIT 0
-#endif
-
 #ifndef V3F_ENABLE_USBFS_CLOCK_INIT
 #define V3F_ENABLE_USBFS_CLOCK_INIT 0
 #endif
@@ -51,7 +46,6 @@ enum
     V3F_STAGE_PWR_CLOCK_DONE,
     V3F_STAGE_V5F_WAKE_DONE,
     V3F_STAGE_SCTLR_DEBUG_DONE,
-    V3F_STAGE_ADC_DONE,
     V3F_STAGE_USBSS_PLL_BEGIN,
     V3F_STAGE_USBSS_PLL_DONE,
     V3F_STAGE_USBSS_PLL_TIMEOUT,
@@ -300,8 +294,8 @@ int main(void)
     V3F_TraceStage(V3F_STAGE_ENTER_MAIN);
 
     /* Current V3F runtime path: keep the task set narrow until V5F UART logs
-       are proven. USBSS ownership, SWJ remap and ADC scan setup will be
-       reintroduced after the dual-core startup flow is stable on hardware. */
+       are proven. USBSS ownership and SWJ remap will be reintroduced after
+       the dual-core startup flow is stable on hardware. */
     SystemInit();
     V3F_TraceStage(V3F_STAGE_SYSTEM_INIT_DONE);
 
