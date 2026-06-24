@@ -13,7 +13,7 @@ OBJCOPY := $(PREFIX)objcopy
 OBJDUMP := $(PREFIX)objdump
 SIZE := $(PREFIX)size
 
-ARCH_FLAGS := -march=rv32imafc_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
+ARCH_FLAGS := -march=rv32imac_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
 COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -g -fmessage-length=0 -fsigned-char
 COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized -std=gnu99
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
@@ -21,7 +21,7 @@ LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs
 
 SRC_ROOT := $(EVT_ROOT)/SRC
 INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -Isrc
-DEFS := -DCore_V5F -DHW_TEST_NAME=\"$(HW_TEST)\"
+DEFS := -DCore_V3F -DHW_TEST_NAME=\"$(HW_TEST)\"
 
 COMMON_SRC := src/system_ch32h417.c src/h417_common.c src/h417_test_main.c
 
@@ -41,8 +41,8 @@ endif
 SDK_SRC := $(SRC_ROOT)/Peripheral/src/ch32h417_gpio.c
 SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
 
-STARTUP := startup_h417_v5f.S
-LDSCRIPT := Link_h417_v5f.ld
+STARTUP := $(SRC_ROOT)/Startup/startup_ch32h417_v3f.S
+LDSCRIPT := Link_h417_v3f.ld
 
 C_SOURCES := $(COMMON_SRC) $(TEST_SRC) $(SDK_SRC)
 ASM_SOURCES := $(STARTUP)
@@ -51,6 +51,7 @@ BUILD := $(BUILD_ROOT)/$(HW_TEST)
 ELF := $(BUILD)/$(HW_TEST).elf
 OBJS := $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SOURCES)))
 OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
+
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 

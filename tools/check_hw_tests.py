@@ -57,6 +57,19 @@ def main():
     assert_contains(h417_makefile, r"\bHW_TEST\s*\?=", "HW_TEST selection")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
     assert_contains(ch585_makefile, r"\bHALF\s*\?=", "HALF selection")
+    assert_contains(h417_makefile, r"Core_V3F", "H417 V3F-only build define")
+    assert_contains(h417_makefile, r"startup_ch32h417_v3f\.S", "official H417 V3F startup")
+    assert_not_contains(h417_makefile, r"_dual\.hex|Core_V5F|startup_h417_v5f|Link_h417_v5f", "H417 V5F or dual-core test flow")
+    assert_contains(
+        os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+        r"#define\s+WS2812_LED_COUNT\s+77u",
+        "WS2812 per-key LED count",
+    )
+    assert_contains(
+        os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+        r"#define\s+WS2812_TEST_CORE_HZ\s+70000000u",
+        "WS2812 timing base for the official H417 V3F startup clock",
+    )
 
     h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
