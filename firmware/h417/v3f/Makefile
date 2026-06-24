@@ -40,16 +40,17 @@ DEFS += -DV3F_USBSS_OFFICIAL_OWNER=1
 endif
 
 # Include paths
-INC := -I"$(PROJECT_ROOT)"
+INC := -I"$(PROJECT_ROOT)/bsp"
+INC += -I"$(PROJECT_ROOT)/drivers"
 INC += -I"$(SRC_ROOT)/Debug" -I"$(SRC_ROOT)/Core" -I"$(SRC_ROOT)/Peripheral/inc"
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 INC += -I"$(OFFICIAL_USBSS_ROOT)"
 endif
 
 # Source files
-APP_SRC := $(PROJECT_ROOT)/main.c
-APP_SRC += $(PROJECT_ROOT)/system_ch32h417.c
-APP_SRC += $(PROJECT_ROOT)/adc.c
+APP_SRC := $(PROJECT_ROOT)/applications/main.c
+APP_SRC += $(PROJECT_ROOT)/bsp/system_ch32h417.c
+APP_SRC += $(PROJECT_ROOT)/drivers/adc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_pwr.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_flash.c
@@ -69,8 +70,8 @@ APP_SRC += $(OFFICIAL_USBSS_ROOT)/usb_desc.c
 endif
 
 # Startup and linker
-STARTUP := $(PROJECT_ROOT)/startup_ch32h417_v3f.S
-LDSCRIPT := $(PROJECT_ROOT)/Link_v3f.ld
+STARTUP := $(PROJECT_ROOT)/bsp/startup_ch32h417_v3f.S
+LDSCRIPT := $(PROJECT_ROOT)/bsp/linker_scripts/Link_v3f.ld
 
 # All sources
 C_SOURCES := $(APP_SRC)
