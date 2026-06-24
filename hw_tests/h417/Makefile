@@ -42,6 +42,7 @@ $(error Unknown HW_TEST '$(HW_TEST)')
 endif
 
 SDK_SRC := $(SRC_ROOT)/Peripheral/src/ch32h417_gpio.c
+SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_pwr.c
 SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
 
 STARTUP := $(SRC_ROOT)/Startup/startup_ch32h417_v3f.S

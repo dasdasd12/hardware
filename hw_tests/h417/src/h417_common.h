@@ -26,6 +26,8 @@ typedef struct
 } h417_pin_t;
 
 extern volatile h417_status_t g_h417_status;
+extern volatile uint32_t g_h417_vio18_initial_status;
+extern volatile uint32_t g_h417_vio18_ctlr_after_init;
 
 void h417_board_clock_gpio_init(void);
 void h417_status_begin(uint32_t test_id);

@@ -1,6 +1,9 @@
 #include "h417_common.h"
+#include "ch32h417_pwr.h"
 
 volatile h417_status_t g_h417_status;
+volatile uint32_t g_h417_vio18_initial_status;
+volatile uint32_t g_h417_vio18_ctlr_after_init;
 
 void h417_board_clock_gpio_init(void)
 {
@@ -11,6 +14,15 @@ void h417_board_clock_gpio_init(void)
                           RCC_HB2Periph_GPIOD |
                           RCC_HB2Periph_GPIOE |
                           RCC_HB2Periph_GPIOF, ENABLE);
+
+    RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE);
+    g_h417_vio18_initial_status = (uint32_t)PWR_GetVIO18InitialStatus();
+
+    /* EVT SEL_VIO18 uses MODE3 for software-selected 3.3V VIO18. */
+    PWR_VIO18ModeCfg(PWR_VIO18CFGMODE_SW);
+    PWR_VIO18LevelCfg(PWR_VIO18Level_MODE3);
+    h417_delay_cycles(10000u);
+    g_h417_vio18_ctlr_after_init = PWR->CTLR;
 }
 
 void h417_status_begin(uint32_t test_id)
