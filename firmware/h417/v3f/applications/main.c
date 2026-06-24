@@ -16,12 +16,12 @@
 #endif
 
 #define V5F_START_ADDR      0x00010000u
-#define V3F_BOOT_TRACE_BASE ((volatile uint32_t *)0x20178000u)
-#define V3F_BOOT_MAGIC      0x56334642u /* "V3FB" */
+#define V3F_TRACE_BASE ((volatile uint32_t *)0x20178000u)
+#define V3F_TRACE_MAGIC 0x56334646u /* "V3FF" */
 
 /* Shared-SRAM USBSS-PLL-ready flag polled by V5F before touching USBSSD.
-   Magic chosen to be obvious in `mdw 0x20178020 1`. Distinct from boot
-   trace block above. */
+   Magic chosen to be obvious in `mdw 0x20178020 1`. Distinct from the
+   V3F runtime trace block above. */
 #define V3F_USBSS_FLAG_ADDR ((volatile uint32_t *)0x20178020u)
 #define V3F_USBSS_READY     0xABCD1234u
 #define V3F_USBSS_FAILED    0xDEADBEEFu
@@ -69,12 +69,12 @@ enum
 volatile uint32_t WFE_MASK = 0;
 volatile uint32_t WFE_WkupSource = 0;
 
-static void V3F_BootTrace(uint32_t stage)
+static void V3F_TraceStage(uint32_t stage)
 {
-    V3F_BOOT_TRACE_BASE[0] = V3F_BOOT_MAGIC;
-    V3F_BOOT_TRACE_BASE[1] = stage;
-    V3F_BOOT_TRACE_BASE[2] = NVIC->WAKEIP[1];
-    V3F_BOOT_TRACE_BASE[3] = NVIC->SCTLR;
+    V3F_TRACE_BASE[0] = V3F_TRACE_MAGIC;
+    V3F_TRACE_BASE[1] = stage;
+    V3F_TRACE_BASE[2] = NVIC->WAKEIP[1];
+    V3F_TRACE_BASE[3] = NVIC->SCTLR;
 }
 
 static void V3F_ClearUsbTrace(void)
@@ -83,7 +83,7 @@ static void V3F_ClearUsbTrace(void)
 
     for (i = 5U; i <= 23U; i++)
     {
-        V3F_BOOT_TRACE_BASE[i] = 0U;
+        V3F_TRACE_BASE[i] = 0U;
     }
 }
 
@@ -138,15 +138,15 @@ static void V3F_USBSS_CFG_MOD(void)
     V3F_USBSS_PHY_Cfg(0U, 0x13U, 0x0010U);
     *((__IO uint32_t *)0x5003C018U) = 0xB0054000U;
 
-    V3F_BOOT_TRACE_BASE[9] = V3F_USBSS_PHY_CFG_DAT;
-    V3F_BOOT_TRACE_BASE[10] = *((__IO uint32_t *)0x5003C018U);
+    V3F_TRACE_BASE[9] = V3F_USBSS_PHY_CFG_DAT;
+    V3F_TRACE_BASE[10] = *((__IO uint32_t *)0x5003C018U);
 }
 
 static void V3F_MAYBE_UNUSED V3F_USBSS_Disable_SWJ(void)
 {
     RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO | RCC_HB2Periph_GPIOB, ENABLE);
     GPIO_PinRemapConfig(GPIO_Remap_SWJ_Disable, ENABLE);
-    V3F_BootTrace(V3F_STAGE_USBSS_SWJ_DISABLED);
+    V3F_TraceStage(V3F_STAGE_USBSS_SWJ_DISABLED);
 }
 
 static void V3F_MAYBE_UNUSED V3F_USBSS_LinkProbe(void)
@@ -160,18 +160,18 @@ static void V3F_MAYBE_UNUSED V3F_USBSS_LinkProbe(void)
                        LINK_TOUT_MODE;
     USBSSD->LINK_LPM_CR |= LINK_LPM_EN;
     chip = (DBGMCU_GetCHIPID() >> 4) & 0x0FU;
-    V3F_BOOT_TRACE_BASE[19] = chip;
-    V3F_BOOT_TRACE_BASE[20] = USBSSD->LINK_STATUS;
+    V3F_TRACE_BASE[19] = chip;
+    V3F_TRACE_BASE[20] = USBSSD->LINK_STATUS;
 
     USBSSD->LINK_CFG |= LINK_RX_TERM_EN;
-    V3F_BOOT_TRACE_BASE[21] = USBSSD->LINK_STATUS;
+    V3F_TRACE_BASE[21] = USBSSD->LINK_STATUS;
     USBSSD->LINK_INT_CTRL = LINK_IE_TX_LMP | LINK_IE_RX_LMP | LINK_IE_RX_LMP_TOUT |
                             LINK_IE_STATE_CHG | LINK_IE_WARM_RST | LINK_IE_TERM_PRES;
     if (chip >= 3U)
     {
         USBSSD->LINK_INT_CTRL |= LINK_IE_RX_SET_FC;
     }
-    V3F_BOOT_TRACE_BASE[23] = USBSSD->LINK_INT_CTRL;
+    V3F_TRACE_BASE[23] = USBSSD->LINK_INT_CTRL;
     USBSSD->LINK_CTRL = LINK_P2_MODE;
     USBSSD->LINK_U1_WKUP_TMR = 120U;
     USBSSD->LINK_U1_WKUP_FILTER = 50U;
@@ -183,21 +183,21 @@ static void V3F_MAYBE_UNUSED V3F_USBSS_LinkProbe(void)
                           USBSS_DMA_EN | USBSS_SETUP_FLOW;
     V3F_USBSS_CFG_MOD();
 
-    V3F_BOOT_TRACE_BASE[11] = USBSSD->LINK_CFG;
-    V3F_BOOT_TRACE_BASE[12] = USBSSD->LINK_CTRL;
-    V3F_BOOT_TRACE_BASE[13] = USBSSD->LINK_STATUS;
+    V3F_TRACE_BASE[11] = USBSSD->LINK_CFG;
+    V3F_TRACE_BASE[12] = USBSSD->LINK_CTRL;
+    V3F_TRACE_BASE[13] = USBSSD->LINK_STATUS;
 
     for (delay = 0U; delay < V3F_USBSS_LINK_PROBE_DELAY; delay++)
     {
         __NOP();
     }
 
-    V3F_BOOT_TRACE_BASE[14] = USBSSD->LINK_STATUS;
-    V3F_BOOT_TRACE_BASE[15] = USBSSD->LINK_INT_FLAG;
-    V3F_BOOT_TRACE_BASE[16] = USBSSD->LINK_LPM_CR;
-    V3F_BOOT_TRACE_BASE[17] = USBSSD->USB_CONTROL;
-    V3F_BOOT_TRACE_BASE[18] = USBSSD->USB_STATUS;
-    V3F_BootTrace(V3F_STAGE_USBSS_LINK_PROBE_DONE);
+    V3F_TRACE_BASE[14] = USBSSD->LINK_STATUS;
+    V3F_TRACE_BASE[15] = USBSSD->LINK_INT_FLAG;
+    V3F_TRACE_BASE[16] = USBSSD->LINK_LPM_CR;
+    V3F_TRACE_BASE[17] = USBSSD->USB_CONTROL;
+    V3F_TRACE_BASE[18] = USBSSD->USB_STATUS;
+    V3F_TraceStage(V3F_STAGE_USBSS_LINK_PROBE_DONE);
 }
 
 static int V3F_MAYBE_UNUSED V3F_USBFS_Clock_Init(void)
@@ -223,9 +223,9 @@ static int V3F_MAYBE_UNUSED V3F_USBFS_Clock_Init(void)
     RCC->CFGR2 = (RCC->CFGR2 & (uint32_t)~V3F_USBFS_CFGR2_MASK) | (uint32_t)V3F_USBFS_CFGR2_48M;
     RCC_HBPeriphClockCmd(RCC_HBPeriph_OTG_FS, ENABLE);
 
-    V3F_BOOT_TRACE_BASE[5] = RCC->CFGR2;
-    V3F_BOOT_TRACE_BASE[6] = RCC->CTLR;
-    V3F_BOOT_TRACE_BASE[7] = RCC->HBPCENR;
+    V3F_TRACE_BASE[5] = RCC->CFGR2;
+    V3F_TRACE_BASE[6] = RCC->CTLR;
+    V3F_TRACE_BASE[7] = RCC->HBPCENR;
     return ((RCC->CFGR2 & (uint32_t)V3F_USBFS_CFGR2_MASK) == (uint32_t)V3F_USBFS_CFGR2_48M);
 }
 
@@ -243,10 +243,10 @@ static void V3F_MAYBE_UNUSED V3F_USBSS_SWJ_DownloadWindow(void)
 {
     uint32_t i;
 
-    V3F_BootTrace(V3F_STAGE_USBSS_SWJ_DELAY);
+    V3F_TraceStage(V3F_STAGE_USBSS_SWJ_DELAY);
     for (i = 0U; i < V3F_USBSS_SWJ_DELAY_LOOPS; i++)
     {
-        V3F_BOOT_TRACE_BASE[22] = i + 1U;
+        V3F_TRACE_BASE[22] = i + 1U;
         V3F_Delay(V3F_USBSS_SWJ_DELAY_CYCLES);
     }
 }
@@ -294,46 +294,46 @@ static void V3F_USBSS_OfficialService(void)
 
 int main(void)
 {
-    V3F_BOOT_TRACE_BASE[4] = 0;
+    V3F_TRACE_BASE[4] = 0;
     V3F_ClearUsbTrace();
     *V3F_USBSS_FLAG_ADDR = 0;
-    V3F_BootTrace(V3F_STAGE_ENTER_MAIN);
+    V3F_TraceStage(V3F_STAGE_ENTER_MAIN);
 
-    /* Minimal boot-core path: keep V3F boring until V5F UART logs are proven.
-       USBSS ownership, SWJ remap and ADC scan setup will be reintroduced after
-       the dual-core boot path is stable on the real board. */
+    /* Current V3F runtime path: keep the task set narrow until V5F UART logs
+       are proven. USBSS ownership, SWJ remap and ADC scan setup will be
+       reintroduced after the dual-core startup flow is stable on hardware. */
     SystemInit();
-    V3F_BootTrace(V3F_STAGE_SYSTEM_INIT_DONE);
+    V3F_TraceStage(V3F_STAGE_SYSTEM_INIT_DONE);
 
     RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE);
-    V3F_BootTrace(V3F_STAGE_PWR_CLOCK_DONE);
+    V3F_TraceStage(V3F_STAGE_PWR_CLOCK_DONE);
 
 #if V3F_ENABLE_USBFS_CLOCK_INIT
     if (V3F_USBFS_Clock_Init() != 0)
     {
-        V3F_BootTrace(V3F_STAGE_USBFS_CLOCK_DONE);
+        V3F_TraceStage(V3F_STAGE_USBFS_CLOCK_DONE);
     }
     else
     {
-        V3F_BootTrace(V3F_STAGE_USBFS_CLOCK_TIMEOUT);
+        V3F_TraceStage(V3F_STAGE_USBFS_CLOCK_TIMEOUT);
     }
 #else
-    V3F_BOOT_TRACE_BASE[5] = RCC->CFGR2;
-    V3F_BOOT_TRACE_BASE[6] = RCC->CTLR;
-    V3F_BOOT_TRACE_BASE[7] = RCC->HBPCENR;
-    V3F_BootTrace(V3F_STAGE_USBFS_CLOCK_SKIPPED);
+    V3F_TRACE_BASE[5] = RCC->CFGR2;
+    V3F_TRACE_BASE[6] = RCC->CTLR;
+    V3F_TRACE_BASE[7] = RCC->HBPCENR;
+    V3F_TraceStage(V3F_STAGE_USBFS_CLOCK_SKIPPED);
 #endif
 
     NVIC_WakeUp_V5F(V5F_START_ADDR);
-    V3F_BootTrace(V3F_STAGE_V5F_WAKE_DONE);
+    V3F_TraceStage(V3F_STAGE_V5F_WAKE_DONE);
 
     NVIC->SCTLR |= 1 << 4;
-    V3F_BootTrace(V3F_STAGE_SCTLR_DEBUG_DONE);
+    V3F_TraceStage(V3F_STAGE_SCTLR_DEBUG_DONE);
 
     while (1)
     {
-        V3F_BOOT_TRACE_BASE[1] = V3F_STAGE_IDLE_LOOP;
-        V3F_BOOT_TRACE_BASE[4]++;
+        V3F_TRACE_BASE[1] = V3F_STAGE_IDLE_LOOP;
+        V3F_TRACE_BASE[4]++;
         __NOP();
     }
 

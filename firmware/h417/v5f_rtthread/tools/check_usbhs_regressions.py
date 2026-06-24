@@ -8,10 +8,11 @@ import re
 import sys
 
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-USBHS = os.path.join(ROOT, "rtthread_port/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbhs.c")
-V5F_MAKEFILE = os.path.join(ROOT, "rtthread_port/Makefile")
-DUAL_CDC = os.path.join(ROOT, "rtthread_port/applications/usb_cdc_dual.c")
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+FIRMWARE_ROOT = os.path.join(ROOT, "firmware", "h417", "v5f_rtthread")
+USBHS = os.path.join(FIRMWARE_ROOT, "rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbhs.c")
+V5F_MAKEFILE = os.path.join(FIRMWARE_ROOT, "Makefile")
+DUAL_CDC = os.path.join(FIRMWARE_ROOT, "applications/usb_cdc_dual.c")
 
 
 def read_text(path):

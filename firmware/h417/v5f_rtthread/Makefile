@@ -4,8 +4,8 @@
 PREFIX       ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 PROJECT_NAME ?= rtthread_ch32h417
 PROJECT_ROOT ?= .
-BUILD_ROOT   ?= build
-CORE         ?= v5f
+BUILD_ROOT   ?= ../build
+CORE         ?= V5F
 
 CC      := $(PREFIX)gcc
 AS      := $(PREFIX)gcc -x assembler-with-cpp
@@ -23,9 +23,9 @@ COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wunini
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
-# EVT SDK root
-EVT_ROOT     ?= ../third_party/wch_ch32h417_evt
-SRC_ROOT     := $(EVT_ROOT)/SRC
+# WCH EVT hardware library root
+WCH_H417_ROOT ?= ../../../basic/ch32h417/wch
+SRC_ROOT      := $(WCH_H417_ROOT)/SRC
 
 # RT-Thread root
 RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
@@ -188,6 +188,6 @@ size: $(ELF)
 	@$(SIZE) "$(ELF)"
 
 clean:
-	rm -rf "$(BUILD_ROOT)"
+	rm -rf "$(BUILD)"
 
 -include $(DEPS)

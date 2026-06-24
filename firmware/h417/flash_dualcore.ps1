@@ -2,8 +2,8 @@ $openocd = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\compone
 $ocdBin  = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\OpenOCD\OpenOCD\bin"
 $cfg     = "wch-dual-core.cfg"
 
-$v5fElf = "build\v5f\rtthread_ch32h417_v5f.elf"
-$v3fElf = "v3f_wakeup\build\v3f_wakeup.elf"
+$v5fElf = "build\V5F\rtthread_ch32h417_V5F.elf"
+$v3fElf = "build\V3F\h417_V3F.elf"
 
 Set-Location $PSScriptRoot
 
@@ -26,7 +26,7 @@ $v3fElfArg = $v3fElf.Replace("\", "/")
 $stdoutLog = "openocd_dual_flash.out.log"
 $stderrLog = "openocd_dual_flash.err.log"
 
-Write-Host "=== Flash V5F, flash V3F, then run V3F boot core ==="
+Write-Host "=== Flash V5F, flash V3F, then run V3F firmware ==="
 $openocdArgs = @(
     "-s", $ocdBin,
     "-f", $cfg,
@@ -60,5 +60,5 @@ if ($openocdExitCode -ne 0) {
     exit $openocdExitCode
 }
 
-Write-Host "Done. V3F should now be running and has woken V5F."
+Write-Host "Done. V3F firmware should now be running and has started V5F."
 Write-Host "Connect serial terminal to PB4 (USART8) at 115200-8-N-1 to see RT-Thread boot."

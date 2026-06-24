@@ -19,7 +19,7 @@
 extern uint32_t SystemCoreClock;
 extern int rt_hw_pin_init(void);
 
-/* Early bring-up UART: mirrors third_party/wch_ch32h417_evt/SRC/Debug/debug.c
+/* Early bring-up UART: mirrors basic/ch32h417/wch/SRC/Debug/debug.c
    USART_Printf_Init(DEBUG_UART8). Does not depend on RT-Thread device
    framework so it is visible the instant V5F runs. */
 static void bsp_early_uart_init(uint32_t baud)

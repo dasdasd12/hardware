@@ -6,21 +6,25 @@ import sys
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir))
+REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir, os.pardir, os.pardir))
+FIRMWARE_ROOT = "firmware/h417/v5f_rtthread"
 
 
 REQUIRED_PATHS = [
-    "rtthread_port/applications/ch585_spi_scan.c",
-    "rtthread_port/applications/ch585_spi_scan.h",
-    "rtthread_port/applications/usb_cdc_dual.c",
-    "rtthread_port/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbfs.c",
-    "rtthread_port/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbfs.h",
-    "rtthread_port/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbhs.c",
-    "rtthread_port/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbhs.h",
+    "basic/ch32h417/wch/SRC/Core/core_riscv.h",
+    "basic/ch32h417/wch/SRC/Peripheral/inc/ch32h417.h",
+    FIRMWARE_ROOT + "/applications/ch585_spi_scan.c",
+    FIRMWARE_ROOT + "/applications/ch585_spi_scan.h",
+    FIRMWARE_ROOT + "/applications/usb_cdc_dual.c",
+    FIRMWARE_ROOT + "/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbfs.c",
+    FIRMWARE_ROOT + "/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbfs.h",
+    FIRMWARE_ROOT + "/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbhs.c",
+    FIRMWARE_ROOT + "/rt-thread/components/drivers/usb/cherryusb/port/ch32h417/usb_dc_ch32h417_usbhs.h",
 ]
 
 
 BANNED_PATHS = [
+    "third_party/wch_ch32h417_evt",
     "ADS7948_MUX_MAGNETIC_AGENT_README.md",
     "H417_CH585_CURRENT_DEBUG_README.md",
     "H417_CH585_HW_SPI_GPIO_CS_README.md",
@@ -36,15 +40,15 @@ BANNED_PATHS = [
     "SPI_SPEED_DMA_DEBUG_README.md",
     "doc/usb3-init-failure-investigation.md",
     "docs/architecture/keyboard_engine_v3f.md",
-    "rtthread_port/doc/step4-v3f-usbss-pll-debug.md",
+    FIRMWARE_ROOT + "/doc/step4-v3f-usbss-pll-debug.md",
     "firmware/ch585_frontend/ads7948.c",
     "firmware/ch585_frontend/ads7948.h",
     "firmware/ch585_frontend/ch585_ads7948_mux_scan.c",
     "firmware/ch585_frontend/ch585_ads7948_mux_scan.h",
     "firmware/common/magnetic_key_engine.c",
     "firmware/common/magnetic_key_engine.h",
-    "rtthread_port/applications/keyboard_engine.c",
-    "rtthread_port/applications/keyboard_engine.h",
+    FIRMWARE_ROOT + "/applications/keyboard_engine.c",
+    FIRMWARE_ROOT + "/applications/keyboard_engine.h",
     "skills/wch-mrs-automation/failure-logs/usbss-flash-lockout-retry-20260609-131731/serial-capture-latest.txt",
     "skills/wch-mrs-automation/failure-logs/usbss-flash-lockout-retry-20260609-131731/flash-failure-lockout.json",
     "skills/wch-mrs-automation/failure-logs/20260609-170426-v5f-wrong-address/flash-failure-lockout.json",

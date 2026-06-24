@@ -103,7 +103,7 @@ info registers pc sp gp
 quit
 ```
 
-Check V3F and V5F sequentially, not in parallel, because both sessions share one WCH-Link and one OpenOCD server port set. A V3F check that uses `reset halt` can stop the boot core before it wakes V5F. To validate V5F after that, flash/run the board first so V3F can wake the secondary core, then connect to `localhost:3334` and use `monitor halt` instead of `monitor reset halt`.
+Check V3F and V5F sequentially, not in parallel, because both sessions share one WCH-Link and one OpenOCD server port set. A V3F check that uses `reset halt` can stop the V3F firmware before it starts V5F. To validate V5F after that, flash/run the board first so V3F can start the secondary core, then connect to `localhost:3334` and use `monitor halt` instead of `monitor reset halt`.
 
 ## MounRiver IDE Debug Options
 
@@ -193,7 +193,7 @@ For projects where V3F uses STOP mode, pass `-AllowMrsReset` on `debug-check` so
 
 ### OpenOCD cannot attach while user firmware runs at speed
 
-Confirmed on hardware 2026-05-26 with the `rtthread_port` project (V3F wakeup + V5F running RT-Thread at 400 MHz on PB8/PB9 SDI):
+Confirmed on hardware 2026-05-26 with the `firmware/h417` project (V3F firmware + V5F running RT-Thread at 400 MHz on PB8/PB9 SDI):
 
 - After `-Action flash -Core both`, the chip immediately runs the user firmware. V5F is at 400 MHz; V3F is in STOP after waking V5F.
 - `MRS DLL` calls still succeed: `OpenDevice` / `CompareVersion` / `MRSFunc_FlashOperationExB` (with the `0x40` clear-code-flash escalation) all return 0.
