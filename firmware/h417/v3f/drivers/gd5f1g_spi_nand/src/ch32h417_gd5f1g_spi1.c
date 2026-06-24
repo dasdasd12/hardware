@@ -9,6 +9,10 @@
 #define FLASH_MOSI_PIN     GPIO_Pin_8
 #define FLASH_MISO_PIN     GPIO_Pin_9
 
+#ifndef CH32H417_GD5F1G_SPI_BAUD_PRESCALER
+#define CH32H417_GD5F1G_SPI_BAUD_PRESCALER SPI_BaudRatePrescaler_Mode5
+#endif
+
 static void spi1_delay_us(void *context, uint32_t us);
 
 static void gpio_delay(void)
@@ -141,7 +145,7 @@ void ch32h417_gd5f1g_spi1_set_mode(ch32h417_gd5f1g_spi1_context_t *context,
         context->active_mode = CH32H417_GD5F1G_SPI_MODE3;
     }
     spi.SPI_NSS = SPI_NSS_Soft;
-    spi.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_Mode7;
+    spi.SPI_BaudRatePrescaler = CH32H417_GD5F1G_SPI_BAUD_PRESCALER;
     spi.SPI_FirstBit = SPI_FirstBit_MSB;
     spi.SPI_CRCPolynomial = 7u;
     SPI_Init(SPI1, &spi);

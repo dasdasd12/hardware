@@ -3,10 +3,18 @@
 
 #include <stdint.h>
 
+/*
+ * GD5F1G SPI-NAND core driver.
+ *
+ * This layer only depends on the gd5f1g_spi_bus_t callbacks below. It does not
+ * know about CH32H417 pins, RT-Thread, interrupts, or dynamic allocation.
+ */
+
 #define GD5F1G_MANUFACTURER_ID       0xC8u
 #define GD5F1G_DEVICE_ID_3V          0x91u
 #define GD5F1G_PAGE_SIZE             2048u
 #define GD5F1G_SPARE_SIZE_ECC_ON     64u
+#define GD5F1G_BAD_BLOCK_MARK_COLUMN 2048u
 #define GD5F1G_PAGES_PER_BLOCK       64u
 #define GD5F1G_BLOCK_COUNT           1024u
 #define GD5F1G_BLOCK_SIZE            (GD5F1G_PAGE_SIZE * GD5F1G_PAGES_PER_BLOCK)
@@ -73,6 +81,10 @@ int gd5f1g_read_page(const gd5f1g_spi_bus_t *bus,
                      uint8_t *data,
                      uint32_t length,
                      uint8_t *status_out);
+int gd5f1g_read_bad_block_marker(const gd5f1g_spi_bus_t *bus,
+                                 uint32_t block,
+                                 uint8_t *marker,
+                                 uint8_t *status_out);
 int gd5f1g_get_feature(const gd5f1g_spi_bus_t *bus, uint8_t address, uint8_t *value);
 int gd5f1g_set_feature(const gd5f1g_spi_bus_t *bus, uint8_t address, uint8_t value);
 uint32_t gd5f1g_block_to_row(uint32_t block);

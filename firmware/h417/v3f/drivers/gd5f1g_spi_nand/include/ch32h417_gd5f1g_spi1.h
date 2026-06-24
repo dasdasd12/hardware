@@ -4,6 +4,16 @@
 #include <stdint.h>
 #include "gd5f1g_spi_nand.h"
 
+/*
+ * CH32H417 board adapter for the GD5F1G SPI-NAND driver.
+ *
+ * Board wiring:
+ *   PF6 = CS, PF7 = SPI1 SCK, PF8 = SPI1 MOSI, PF9 = SPI1 MISO.
+ *
+ * The SPI baud prescaler is intentionally compile-time configurable from the
+ * build system. The source file keeps the board-tested Mode5 default.
+ */
+
 #define CH32H417_GD5F1G_SPI_MODE0 0u
 #define CH32H417_GD5F1G_SPI_MODE3 3u
 #define CH32H417_GD5F1G_SPI_GPIO  100u
