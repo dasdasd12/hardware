@@ -175,13 +175,15 @@ USB device initialized.
 │
 ├── basic/
 │   └── ch32h417/
-│       ├── drivers/
-│       │   └── rgb1w_pioc/         # PIOC RGB 1-wire/WS2812 可复用驱动
 │       └── wch/SRC                 # CH32H417 WCH EVT 底层库
 │
 ├── firmware/
 │   └── h417/                       # CH32H417 双核固件总目录
 │       ├── v3f/                    # V3F 固件入口、采集和协同任务
+│       │   ├── applications/       # V3F 应用入口
+│       │   ├── bsp/                # V3F 启动、系统初始化、链接脚本
+│       │   └── drivers/            # V3F 固件侧驱动
+│       │       └── rgb1w_pioc/     # PIOC RGB 1-wire/WS2812 驱动
 │       ├── v5f_rtthread/           # V5F RT-Thread 主固件
 │       ├── build/                  # V3F/V5F 构建产物
 │       ├── flash_dualcore.ps1      # 双核烧录脚本

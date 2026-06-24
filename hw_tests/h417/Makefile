@@ -6,7 +6,8 @@ PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
 BASIC_H417_ROOT ?= $(PROJECT_ROOT)/basic/ch32h417
 WCH_H417_SRC_ROOT := $(BASIC_H417_ROOT)/wch/SRC
-RGB1W_PIOC_ROOT := $(BASIC_H417_ROOT)/drivers/rgb1w_pioc
+V3F_DRIVER_ROOT := $(PROJECT_ROOT)/firmware/h417/v3f/drivers
+RGB1W_PIOC_ROOT := $(V3F_DRIVER_ROOT)/rgb1w_pioc
 
 CC := $(PREFIX)gcc
 AS := $(PREFIX)gcc -x assembler-with-cpp

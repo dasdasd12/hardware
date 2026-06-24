@@ -9,7 +9,8 @@ H417_ROOT = os.path.join(ROOT, "hw_tests", "h417")
 CH585_ROOT = os.path.join(ROOT, "hw_tests", "ch585")
 BASIC_H417_ROOT = os.path.join(ROOT, "basic", "ch32h417")
 H417_WCH_ROOT = os.path.join(BASIC_H417_ROOT, "wch", "SRC")
-H417_RGB1W_ROOT = os.path.join(BASIC_H417_ROOT, "drivers", "rgb1w_pioc")
+H417_V3F_DRIVER_ROOT = os.path.join(ROOT, "firmware", "h417", "v3f", "drivers")
+H417_RGB1W_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "rgb1w_pioc")
 
 
 def fail(message):
@@ -65,7 +66,8 @@ def main():
     assert_contains(h417_makefile, r"\bHW_TEST\s*\?=", "HW_TEST selection")
     assert_contains(h417_makefile, r"basic/ch32h417", "shared CH32H417 basic hardware library")
     assert_contains(h417_makefile, r"WCH_H417_SRC_ROOT\s*:=\s*\$\(BASIC_H417_ROOT\)/wch/SRC", "basic-local CH32H417 WCH source tree")
-    assert_contains(h417_makefile, r"RGB1W_PIOC_ROOT\s*:=\s*\$\(BASIC_H417_ROOT\)/drivers/rgb1w_pioc", "basic RGB1W PIOC driver tree")
+    assert_contains(h417_makefile, r"V3F_DRIVER_ROOT\s*:=\s*\$\(PROJECT_ROOT\)/firmware/h417/v3f/drivers", "V3F driver root")
+    assert_contains(h417_makefile, r"RGB1W_PIOC_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/rgb1w_pioc", "V3F RGB1W PIOC driver tree")
     assert_not_contains(h417_makefile, r"third_party|EVT_ROOT", "external third_party EVT dependency")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
     assert_contains(ch585_makefile, r"\bHALF\s*\?=", "HALF selection")
@@ -85,7 +87,7 @@ def main():
     assert_contains(
         os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
         r"ch32h417_pioc_rgb1w_send_ram\(",
-        "basic PIOC RGB1W RAM-mode full-frame sender",
+        "V3F PIOC RGB1W RAM-mode full-frame sender",
     )
     for effect in ("breath", "chase", "rainbow_band"):
         assert_contains(
@@ -130,8 +132,8 @@ def main():
     )
 
     h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
-    basic_h417_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"))
-    combined_h417_text = h417_text + basic_h417_text
+    pioc_driver_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"))
+    combined_h417_text = h417_text + pioc_driver_text
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
 
     forbidden_h417 = {
@@ -151,8 +153,8 @@ def main():
         r"Core_V5F|Core_V3F|Func_Run_V3F|Run_Core": "V3F/V5F core-selection dependency",
         r"PIOC_IRQHandler|WCH-Interrupt-fast": "PIOC IRQ dependency",
     }.items():
-        if re.search(pattern, basic_h417_text):
-            fail("basic h417 drivers contain forbidden {0}".format(description))
+        if re.search(pattern, pioc_driver_text):
+            fail("V3F PIOC driver contains forbidden {0}".format(description))
 
     required_h417_tests = (
         "h417_gpio_status",
