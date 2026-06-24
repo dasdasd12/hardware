@@ -8,6 +8,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 H417_ROOT = os.path.join(ROOT, "hw_tests", "h417")
 CH585_ROOT = os.path.join(ROOT, "hw_tests", "ch585")
 BASIC_H417_ROOT = os.path.join(ROOT, "basic", "ch32h417")
+H417_WCH_ROOT = os.path.join(BASIC_H417_ROOT, "wch", "SRC")
 
 
 def fail(message):
@@ -34,6 +35,11 @@ def assert_not_contains(path, pattern, description):
         fail("{0} contains forbidden {1}".format(os.path.relpath(path, ROOT), description))
 
 
+def assert_exists(path, description):
+    if not os.path.exists(path):
+        fail("missing {0}: {1}".format(os.path.relpath(path, ROOT), description))
+
+
 def scan_tree(path, suffixes):
     if not os.path.exists(path):
         fail("missing {0}".format(os.path.relpath(path, ROOT)))
@@ -57,6 +63,8 @@ def main():
 
     assert_contains(h417_makefile, r"\bHW_TEST\s*\?=", "HW_TEST selection")
     assert_contains(h417_makefile, r"basic/ch32h417", "shared CH32H417 basic hardware library")
+    assert_contains(h417_makefile, r"WCH_H417_SRC_ROOT\s*:=\s*\$\(BASIC_H417_ROOT\)/wch/SRC", "basic-local CH32H417 WCH source tree")
+    assert_not_contains(h417_makefile, r"third_party|EVT_ROOT", "external third_party EVT dependency")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
     assert_contains(ch585_makefile, r"\bHALF\s*\?=", "HALF selection")
     assert_contains(h417_makefile, r"Core_V3F", "H417 V3F-only build define")
@@ -120,7 +128,8 @@ def main():
     )
 
     h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
-    basic_h417_text = scan_tree(BASIC_H417_ROOT, (".c", ".h"))
+    basic_h417_text = scan_tree(os.path.join(BASIC_H417_ROOT, "include"), (".c", ".h"))
+    basic_h417_text += scan_tree(os.path.join(BASIC_H417_ROOT, "src"), (".c", ".h"))
     combined_h417_text = h417_text + basic_h417_text
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
 

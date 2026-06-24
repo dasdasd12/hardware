@@ -4,8 +4,8 @@ PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 HW_TEST ?= h417_gpio_status
 PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
-EVT_ROOT ?= $(PROJECT_ROOT)/third_party/wch_ch32h417_evt
 BASIC_H417_ROOT ?= $(PROJECT_ROOT)/basic/ch32h417
+WCH_H417_SRC_ROOT := $(BASIC_H417_ROOT)/wch/SRC
 
 CC := $(PREFIX)gcc
 AS := $(PREFIX)gcc -x assembler-with-cpp
@@ -20,7 +20,7 @@ COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wunini
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
-SRC_ROOT := $(EVT_ROOT)/SRC
+SRC_ROOT := $(WCH_H417_SRC_ROOT)
 INC := -I$(SRC_ROOT)/Core -I$(SRC_ROOT)/Peripheral/inc -I$(BASIC_H417_ROOT)/include -Isrc
 DEFS := -DCore_V3F -DHW_TEST_NAME=\"$(HW_TEST)\"
 
