@@ -76,8 +76,9 @@ hardware/
 │       │       │   └── StdPeriphDriver/
 │       │       │       └── inc/
 │       │       └── LIB/                      # CH585 BLE/RF 相关 WCH 二进制库和头文件
-│       ├── common/                           # CH585 侧通用磁轴算法
-│       ├── frontend/                         # CH585 前端采样、ADS7948 和 MUX 代码
+│       ├── bsp/                              # CH585 板级支持预留目录
+│       ├── app/                              # CH585 应用层和磁轴算法
+│       ├── drivers/                          # CH585 ADS7948、MUX 和硬件前端驱动
 │       ├── legacy/                           # CH585 BLE/RF/USB 历史源码快照，不携带重复 SDK
 │       └── tools/                            # CH585 本地调试工具
 │
