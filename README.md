@@ -67,20 +67,14 @@ hardware/
 │   │       ├── rtconfig.h                    # RT-Thread 配置
 │   │       └── usb_config.h                  # USB 配置
 │   └── ch585/
-│       ├── basic/
-│       │   └── wch/
-│       │       ├── SRC/                      # CH585 本地依赖的 WCH 底层库
-│       │       │   ├── Ld/
-│       │       │   ├── RVMSIS/
-│       │       │   ├── Startup/
-│       │       │   └── StdPeriphDriver/
-│       │       │       └── inc/
-│       │       └── LIB/                      # CH585 BLE/RF 相关 WCH 二进制库和头文件
-│       ├── common/                           # CH585 侧通用磁轴算法
-│       ├── frontend/                         # CH585 前端采样、ADS7948 和 MUX 代码
-│       ├── spi_slave_test/                   # CH585 SPI slave bring-up 固件目标
-│       ├── legacy/                           # CH585 BLE/RF/USB 历史源码快照，不携带重复 SDK
-│       └── tools/                            # CH585 本地调试工具
+│       └── basic/
+│           └── wch/
+│               └── SRC/                      # CH585 固件/测试本地依赖的 WCH 底层库
+│                   ├── Ld/
+│                   ├── RVMSIS/
+│                   ├── Startup/
+│                   └── StdPeriphDriver/
+│                       └── inc/
 │
 ├── skills/
 │   ├── pdf-reader/                           # 本地 PDF 读取辅助 skill
@@ -106,8 +100,6 @@ make -C firmware/h417 clean
 # H417 烧录
 make -C firmware/h417 flash
 
-# CH585 SPI slave bring-up
-make -B -C firmware/ch585/spi_slave_test
 ```
 
 ## 维护规则
@@ -115,7 +107,6 @@ make -B -C firmware/ch585/spi_slave_test
 - 新芯片进入仓库时先建立 `firmware/<chip>/` 边界，再放该芯片自己的 `basic/`、固件目标、烧录脚本和工具。
 - 新驱动优先放到实际拥有它的固件或测试目录；不要放回顶层 `basic/`。
 - 单项硬件测试留在 `hardware-test` / `origin/test` 分支，不合入 `main`。
-- CH585 legacy 目录只保留手写历史源码；不要在 legacy 内重复放 WCH SDK 或 MounRiver 元数据。
 - 移动文件时同步更新 README、Makefile 和自动化脚本。
 - 不提交构建产物、日志、临时 dump、工具缓存、规格书 PDF 和本地手册归档。
 - 修改 RT-Thread 或 WCH 底层库前先确认是否确实需要改 vendor 代码。
