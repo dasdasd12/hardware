@@ -8,7 +8,7 @@
  *******************************************************************************/
 
 #include "rf_test.h"
-#include "hal.h"
+#include "HAL.h"
 
 #define RF_CHANNEL          16
 #define RF_SYNC_WORD        0xA55A1234UL

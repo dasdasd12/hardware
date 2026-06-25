@@ -17,6 +17,7 @@ REQUIRED_PATHS = [
     "firmware/ch585/applications/magnetic_key_engine.h",
     "firmware/ch585/applications/ble_kvm/main.c",
     "firmware/ch585/applications/rf_basic/main.c",
+    "firmware/ch585/Makefile",
     "firmware/ch585/bsp/hal/MCU.c",
     "firmware/ch585/bsp/hal/include/HAL.h",
     "firmware/ch585/drivers/ads7948.c",
