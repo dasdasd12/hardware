@@ -76,10 +76,9 @@ hardware/
 │       │       │   └── StdPeriphDriver/
 │       │       │       └── inc/
 │       │       └── LIB/                      # CH585 BLE/RF 相关 WCH 二进制库和头文件
-│       ├── bsp/                              # CH585 板级支持预留目录
-│       ├── app/                              # CH585 应用层和磁轴算法
-│       ├── drivers/                          # CH585 ADS7948、MUX 和硬件前端驱动
-│       ├── legacy/                           # CH585 BLE/RF/USB 历史源码快照，不携带重复 SDK
+│       ├── applications/                     # CH585 应用入口、磁轴算法和 BLE/RF 实验入口
+│       ├── bsp/                              # CH585 板级支持和 HAL 适配
+│       ├── drivers/                          # CH585 ADS7948、MUX、BLE、RF 和 USB 驱动
 │       └── tools/                            # CH585 本地调试工具
 │
 ├── skills/
@@ -112,7 +111,7 @@ make -C firmware/h417 flash
 - 新芯片进入仓库时先建立 `firmware/<chip>/` 边界，再放该芯片自己的 `basic/`、固件目标、烧录脚本和工具。
 - 新驱动优先放到实际拥有它的固件或测试目录；不要放回顶层 `basic/`。
 - 单项硬件测试留在 `hardware-test` / `origin/test` 分支，不合入 `main`。
-- CH585 legacy 目录只保留手写历史源码；不要在 legacy 内重复放 WCH SDK 或 MounRiver 元数据。
+- CH585 不保留 `legacy/` 堆叠目录；历史可用代码必须拆到 `applications/`、`bsp/`、`drivers/` 或 `tools/`。
 - 移动文件时同步更新 README、Makefile 和自动化脚本。
 - 不提交构建产物、日志、临时 dump、工具缓存、规格书 PDF 和本地手册归档。
 - 修改 RT-Thread 或 WCH 底层库前先确认是否确实需要改 vendor 代码。

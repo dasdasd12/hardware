@@ -10,8 +10,8 @@
 #include "CONFIG.h"
 #include "HAL.h"
 #include "rf_receiver.h"
-#include "USB/ch585_usbhs_kbd.h"
-#include "USB/usb_hid.h"
+#include "ch585_usbhs_kbd.h"
+#include "usb_hid.h"
 
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 

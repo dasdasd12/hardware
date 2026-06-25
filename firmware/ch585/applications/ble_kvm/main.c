@@ -5,10 +5,10 @@
 
 #include "CONFIG.h"
 #include "HAL.h"
-#include "BLE/ble_hid.h"
-#include "BLE/hiddev.h"
-#include "KVM/kvm_control.h"
-#include "USB/usb_cdc_debug.h"
+#include "ble_hid.h"
+#include "hiddev.h"
+#include "kvm_control.h"
+#include "usb_cdc_debug.h"
 
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 
