@@ -1,12 +1,12 @@
-TOOLCHAIN_BIN ?= F:/MountRiver/MounRiver_Studio2/resources/app/resources/win32/components/WCH/Toolchain/RISC-V Embedded GCC12/bin
+PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 SDK_ROOT      ?= ../basic/wch/SRC
 PROJECT       := ch585m_spi_slave_test
 BUILD         := build
 
-CC      := $(TOOLCHAIN_BIN)/riscv-wch-elf-gcc.exe
-AS      := $(TOOLCHAIN_BIN)/riscv-wch-elf-gcc.exe
-OBJCOPY := $(TOOLCHAIN_BIN)/riscv-wch-elf-objcopy.exe
-SIZE    := $(TOOLCHAIN_BIN)/riscv-wch-elf-size.exe
+CC      := $(PREFIX)gcc
+AS      := $(PREFIX)gcc
+OBJCOPY := $(PREFIX)objcopy
+SIZE    := $(PREFIX)size
 
 ARCH_FLAGS := -march=rv32imc_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
 COMMON_FLAGS := $(ARCH_FLAGS) -Os -g -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common -Wall -std=gnu99

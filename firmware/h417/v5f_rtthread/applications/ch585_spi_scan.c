@@ -134,6 +134,10 @@ extern uint32_t HCLKClock;
 #define APP_CH585_SPI_SOURCE0_CAPTURE_BYTES sizeof(ch585_scan_frame_v1_t)
 #endif
 
+#define APP_CH585_SPI_HW_SPI2_SHORT_XFER \
+    (APP_CH585_SPI_WIRE_SHORT && \
+     (APP_CH585_SPI_PIPELINE_SHORT || APP_CH585_SPI_REQUEST_ONLY_SHORT))
+
 #ifndef APP_CH585_SPI_PIN_SCK
 #define APP_CH585_SPI_PIN_SCK  "PD.2"
 #endif
@@ -330,7 +334,9 @@ static ch585_scan_cmd_v1_t g_source0_spi2_cmd_rx __attribute__((aligned(4)));
 #endif
 
 #if APP_CH585_SPI_HW_SPI2_BACKEND
+#if APP_CH585_SPI_AUTO_TRAIN
 static int ch585_hw_spi2_train(void);
+#endif
 static int ch585_scan_decode_source0_capture(ch585_scan_frame_v1_t *frame);
 static int ch585_scan_frame_is_valid(const ch585_scan_frame_v1_t *frame);
 
@@ -1500,6 +1506,7 @@ timeout:
     return -1;
 }
 
+#if APP_CH585_SPI_HW_SPI2_SHORT_XFER
 static int ch585_hw_spi2_drain_xfer(uint16_t len)
 {
     uint32_t timeout_cycles;
@@ -1572,6 +1579,7 @@ timeout:
     SPI_Cmd(CH585_HW_SPIx, DISABLE);
     return -1;
 }
+#endif
 
 static void ch585_hw_spi2_prepare_cmd(void)
 {
@@ -1639,6 +1647,7 @@ static void ch585_hw_spi2_prepare_cmd(void)
     }
 }
 
+#if APP_CH585_SPI_HW_SPI2_SHORT_XFER
 static void ch585_hw_spi2_prepare_pipeline_tx(void)
 {
     memset(g_source0_spi2_tx, 0xFF, sizeof(g_source0_spi2_tx));
@@ -1792,8 +1801,10 @@ static int ch585_hw_spi2_dma_frame_xfer(void)
 
     return (((flags & DMA1_FLAG_TC2) != 0U) && ((flags & DMA1_FLAG_TC3) != 0U)) ? 0 : -1;
 }
+#endif
 
-#if APP_CH585_SPI_AUTO_TRAIN && APP_CH585_SPI_WIRE_SHORT && APP_CH585_SPI_REQUEST_ONLY_SHORT
+#if APP_CH585_SPI_AUTO_TRAIN
+#if APP_CH585_SPI_WIRE_SHORT && APP_CH585_SPI_REQUEST_ONLY_SHORT
 typedef struct
 {
     uint16_t prescaler;
@@ -1990,6 +2001,7 @@ static int ch585_hw_spi2_train(void)
 {
     return 0;
 }
+#endif
 #endif
 
 #if APP_CH585_SPI_PIPELINE_SHORT && APP_CH585_SPI_WIRE_SHORT

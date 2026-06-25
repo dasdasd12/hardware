@@ -1076,6 +1076,7 @@ static uint16_t scan_cmd_apply(const ch585_scan_wire_cmd_t *cmd)
 }
 #endif
 
+#if !CH585_ADC_PROBE_MODE
 static uint16_t sim_clamp_adc(int32_t value)
 {
     if (value < 0)
@@ -1140,6 +1141,7 @@ static uint16_t sim_adc_value(uint16_t seq, uint8_t key_id)
 
     return sim_clamp_adc(value);
 }
+#endif
 
 static void key_state_set_bit(ch585_scan_wire_frame_t *frame, uint8_t key_id)
 {
@@ -1323,6 +1325,7 @@ static int ch585_adc_probe_update_enabled_keys(void)
 }
 #endif
 
+#if !CH585_ADC_PROBE_MODE
 static void update_all_key_states(uint16_t seq)
 {
     uint8_t i;
@@ -1332,6 +1335,7 @@ static void update_all_key_states(uint16_t seq)
         update_key_state_from_adc(i, sim_adc_value(seq, i));
     }
 }
+#endif
 
 #if CH585_MODE_PIPELINE_SHORT || CH585_MODE_REQUEST_ONLY_SHORT || CH585_MODE_COMMAND_RESPONSE
 static uint8_t scan_cmd_is_valid(const ch585_scan_wire_cmd_t *cmd)
