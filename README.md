@@ -77,9 +77,29 @@ hardware/
 │       │       │       └── inc/
 │       │       └── LIB/                      # CH585 BLE/RF 相关 WCH 二进制库和头文件
 │       ├── Makefile                          # CH585 RF basic smoke 构建入口
-│       ├── applications/                     # CH585 应用入口、磁轴算法和 RF 实验入口
-│       ├── bsp/                              # CH585 板级支持和 HAL 适配
-│       └── drivers/                          # CH585 ADS7948、MUX、BLE、RF 和 USB 驱动
+│       ├── applications/
+│       │   ├── magnetic_key_engine.c         # CH585 磁轴算法
+│       │   ├── magnetic_key_engine.h
+│       │   ├── rf_basic/                     # 当前默认 RF basic smoke 入口
+│       │   │   └── main.c
+│       │   ├── rf_receiver_usbfs/            # RF 接收 + USBFS HID 实验入口
+│       │   └── rf_receiver_usbhs/            # RF 接收 + USBHS HID 实验入口
+│       ├── bsp/
+│       │   └── hal/                          # CH585 HAL、RTC、sleep 和配置头
+│       │       ├── include/
+│       │       ├── MCU.c
+│       │       ├── RTC.c
+│       │       └── SLEEP.c
+│       └── drivers/
+│           ├── ads7948.c                     # ADS7948 基础驱动
+│           ├── ads7948.h
+│           ├── ch585_ads7948_mux_scan.c      # ADS7948 + MUX 扫描层
+│           ├── ch585_ads7948_mux_scan.h
+│           ├── ble/                          # CH585 BLE HID 服务和 profile 支持
+│           ├── rf/                           # CH585 RF basic/tx 支持
+│           │   └── include/
+│           └── usb/
+│               └── usbhs_keyboard/           # CH585 USBHS HID keyboard 支持
 │
 ├── skills/
 │   ├── pdf-reader/                           # 本地 PDF 读取辅助 skill
