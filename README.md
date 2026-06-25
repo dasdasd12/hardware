@@ -78,7 +78,6 @@ hardware/
 │       │       └── LIB/                      # CH585 BLE/RF 相关 WCH 二进制库和头文件
 │       ├── common/                           # CH585 侧通用磁轴算法
 │       ├── frontend/                         # CH585 前端采样、ADS7948 和 MUX 代码
-│       ├── spi_slave_test/                   # CH585 SPI slave bring-up 固件目标
 │       ├── legacy/                           # CH585 BLE/RF/USB 历史源码快照，不携带重复 SDK
 │       └── tools/                            # CH585 本地调试工具
 │
@@ -105,9 +104,6 @@ make -C firmware/h417 clean
 
 # H417 烧录
 make -C firmware/h417 flash
-
-# CH585 SPI slave bring-up
-make -B -C firmware/ch585/spi_slave_test
 ```
 
 ## 维护规则
