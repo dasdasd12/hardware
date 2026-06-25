@@ -24,6 +24,14 @@
 #define CDC_HS_MPS 512U
 #define CDC_SS_MPS 1024U
 
+#ifndef APP_ENABLE_USBSS_CDC
+#define APP_ENABLE_USBSS_CDC 0
+#endif
+
+#ifndef APP_USBSS_SKIP_FOR_V3F_OFFICIAL
+#define APP_USBSS_SKIP_FOR_V3F_OFFICIAL 0
+#endif
+
 #ifndef APP_ENABLE_USB2_HS_CDC
 #define APP_ENABLE_USB2_HS_CDC 1
 #endif
@@ -510,6 +518,7 @@ int ch32h417_usb_cdc_write(const void *data, uint32_t len)
 
 void ch32h417_dual_cdc_poll(void)
 {
+#if APP_ENABLE_USBSS_CDC
 #if defined(APP_USBSS_SKIP_FOR_V3F_OFFICIAL) && (APP_USBSS_SKIP_FOR_V3F_OFFICIAL != 0)
     return;
 #else
@@ -528,6 +537,9 @@ void ch32h417_dual_cdc_poll(void)
         }
     }
 #endif
+#else
+    return;
+#endif
 }
 
 int ch32h417_dual_cdc_init(void)
@@ -536,10 +548,14 @@ int ch32h417_dual_cdc_init(void)
     int ret_hs = -1;
     int ret_ss = -1;
 
+#if APP_ENABLE_USBSS_CDC
 #if defined(APP_USBSS_SKIP_FOR_V3F_OFFICIAL) && (APP_USBSS_SKIP_FOR_V3F_OFFICIAL != 0)
     rt_kprintf("USBSS CDC skipped on V5F; V3F official CH372 stack owns USBSS\r\n");
 #else
     ret_ss = ch32h417_usbss_cdc_init();
+#endif
+#else
+    rt_kprintf("USBSS CDC disabled on V5F\r\n");
 #endif
 
 #if APP_ENABLE_USB2_HS_CDC
