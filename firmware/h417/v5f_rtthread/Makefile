@@ -35,12 +35,21 @@ DEFS := -DCore_V5F -DBSP_USING_UART8 -D__RT_KERNEL_SOURCE__ -D__RT_IPC_SOURCE__ 
 DEFS += -DAPP_ENABLE_USB_TEST=1
 APP_ENABLE_USBSS_CDC ?= 0
 APP_USBSS_SKIP_FOR_V3F_OFFICIAL ?= 0
-APP_ENABLE_USB2_HS_CDC ?= 1
-APP_ENABLE_USB2_FS_CDC ?= 0
+APP_ENABLE_USB2_HS_CDC ?= 0
+APP_ENABLE_USB2_FS_CDC ?= 1
+APP_ENABLE_USB2_HS_HID ?= 0
+APP_ENABLE_CH585_BLE_BRIDGE ?= 0
+APP_MAIN_LOOP_DELAY_MS ?=
 DEFS += -DAPP_ENABLE_USBSS_CDC=$(APP_ENABLE_USBSS_CDC)
 DEFS += -DAPP_USBSS_SKIP_FOR_V3F_OFFICIAL=$(APP_USBSS_SKIP_FOR_V3F_OFFICIAL)
 DEFS += -DAPP_ENABLE_USB2_HS_CDC=$(APP_ENABLE_USB2_HS_CDC)
 DEFS += -DAPP_ENABLE_USB2_FS_CDC=$(APP_ENABLE_USB2_FS_CDC)
+DEFS += -DAPP_ENABLE_USB2_HS_HID=$(APP_ENABLE_USB2_HS_HID)
+DEFS += -DAPP_ENABLE_CH585_BLE_BRIDGE=$(APP_ENABLE_CH585_BLE_BRIDGE)
+ifneq ($(APP_MAIN_LOOP_DELAY_MS),)
+DEFS += -DAPP_MAIN_LOOP_DELAY_MS=$(APP_MAIN_LOOP_DELAY_MS)
+endif
+DEFS += $(DEFS_EXTRA)
 
 # Include paths
 INC := -I"$(PROJECT_ROOT)" -I"$(PROJECT_ROOT)/bsp" -I"$(PROJECT_ROOT)/drivers" -I"$(PROJECT_ROOT)/libcpu"
@@ -56,6 +65,7 @@ CHERRYUSB_ROOT := $(RTT_ROOT)/components/drivers/usb/cherryusb
 INC += -I"$(CHERRYUSB_ROOT)/core"
 INC += -I"$(CHERRYUSB_ROOT)/common"
 INC += -I"$(CHERRYUSB_ROOT)/class/cdc"
+INC += -I"$(CHERRYUSB_ROOT)/class/hid"
 INC += -I"$(CHERRYUSB_ROOT)/port/ch32h417"
 
 # Source files
@@ -114,11 +124,15 @@ DRV_SRC += $(PROJECT_ROOT)/drivers/drv_gpio.c
 # Application
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_spi_scan.c
+APP_SRC += $(PROJECT_ROOT)/applications/ch585_ble_bridge.c
+APP_SRC += $(PROJECT_ROOT)/applications/keyboard_engine.c
 APP_SRC += $(PROJECT_ROOT)/applications/usb_cdc_dual.c
+APP_SRC += $(PROJECT_ROOT)/applications/usb_hs_hid_keyboard.c
 
 # CherryUSB stack
 CHERRYUSB_SRC := $(CHERRYUSB_ROOT)/core/usbd_core.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/class/cdc/usbd_cdc_acm.c
+CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/class/hid/usbd_hid.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/osal/usb_osal_rtthread.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/port/ch32h417/usb_dc_ch32h417.c
 CHERRYUSB_SRC += $(CHERRYUSB_ROOT)/port/ch32h417/usb_dc_ch32h417_usbss.c
@@ -188,6 +202,6 @@ size: $(ELF)
 	@$(SIZE) "$(ELF)"
 
 clean:
-	rm -rf "$(BUILD)"
+	rm -rf "$(BUILD_ROOT)"
 
 -include $(DEPS)
