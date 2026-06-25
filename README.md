@@ -77,10 +77,9 @@ hardware/
 │       │       │       └── inc/
 │       │       └── LIB/                      # CH585 BLE/RF 相关 WCH 二进制库和头文件
 │       ├── Makefile                          # CH585 RF basic smoke 构建入口
-│       ├── applications/                     # CH585 应用入口、磁轴算法和 BLE/RF 实验入口
+│       ├── applications/                     # CH585 应用入口、磁轴算法和 RF 实验入口
 │       ├── bsp/                              # CH585 板级支持和 HAL 适配
-│       ├── drivers/                          # CH585 ADS7948、MUX、BLE、RF 和 USB 驱动
-│       └── tools/                            # CH585 本地调试工具
+│       └── drivers/                          # CH585 ADS7948、MUX、BLE、RF 和 USB 驱动
 │
 ├── skills/
 │   ├── pdf-reader/                           # 本地 PDF 读取辅助 skill

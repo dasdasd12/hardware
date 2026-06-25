@@ -10,12 +10,11 @@
 #include "battservice.h"
 #include "hidkbdservice.h"
 #include "hiddev.h"
-#include "usb_cdc_debug.h"
 
 #define BLE_HID_LOG(...)            \
     do                              \
     {                               \
-        USB_CDC_DebugLog(__VA_ARGS__); \
+        PRINT(__VA_ARGS__);         \
     } while(0)
 
 #define BLE_HID_PARAM_UPDATE_EVT      0x0001
