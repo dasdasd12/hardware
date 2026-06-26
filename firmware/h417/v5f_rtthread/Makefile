@@ -7,12 +7,12 @@ PROJECT_ROOT ?= .
 BUILD_ROOT   ?= ../build
 CORE         ?= V5F
 
-CC      := $(PREFIX)gcc
-AS      := $(PREFIX)gcc -x assembler-with-cpp
-LD      := $(PREFIX)gcc
-OBJCOPY := $(PREFIX)objcopy
-OBJDUMP := $(PREFIX)objdump
-SIZE    := $(PREFIX)size
+CC      := "$(PREFIX)gcc"
+AS      := "$(PREFIX)gcc" -x assembler-with-cpp
+LD      := "$(PREFIX)gcc"
+OBJCOPY := "$(PREFIX)objcopy"
+OBJDUMP := "$(PREFIX)objdump"
+SIZE    := "$(PREFIX)size"
 
 # Architecture flags: V5F has FPU (rv32imafc), V3F does not (rv32imac)
 ARCH_FLAGS := -march=rv32imafc_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
@@ -39,6 +39,7 @@ APP_ENABLE_USB2_HS_CDC ?= 0
 APP_ENABLE_USB2_FS_CDC ?= 1
 APP_ENABLE_USB2_HS_HID ?= 0
 APP_ENABLE_CH585_BLE_BRIDGE ?= 0
+APP_CH585_SPI_PCB_SOURCE0_RIGHT ?= 0
 APP_MAIN_LOOP_DELAY_MS ?=
 DEFS += -DAPP_ENABLE_USBSS_CDC=$(APP_ENABLE_USBSS_CDC)
 DEFS += -DAPP_USBSS_SKIP_FOR_V3F_OFFICIAL=$(APP_USBSS_SKIP_FOR_V3F_OFFICIAL)
@@ -46,6 +47,7 @@ DEFS += -DAPP_ENABLE_USB2_HS_CDC=$(APP_ENABLE_USB2_HS_CDC)
 DEFS += -DAPP_ENABLE_USB2_FS_CDC=$(APP_ENABLE_USB2_FS_CDC)
 DEFS += -DAPP_ENABLE_USB2_HS_HID=$(APP_ENABLE_USB2_HS_HID)
 DEFS += -DAPP_ENABLE_CH585_BLE_BRIDGE=$(APP_ENABLE_CH585_BLE_BRIDGE)
+DEFS += -DAPP_CH585_SPI_PCB_SOURCE0_RIGHT=$(APP_CH585_SPI_PCB_SOURCE0_RIGHT)
 ifneq ($(APP_MAIN_LOOP_DELAY_MS),)
 DEFS += -DAPP_MAIN_LOOP_DELAY_MS=$(APP_MAIN_LOOP_DELAY_MS)
 endif
@@ -196,7 +198,11 @@ $(BUILD)/%.lst: $(ELF)
 	@$(OBJDUMP) --all-headers --demangle --disassemble -M xw "$<" > "$@"
 
 $(BUILD):
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$@' | Out-Null"
+else
 	@mkdir -p "$@"
+endif
 
 size: $(ELF)
 	@$(SIZE) "$(ELF)"
