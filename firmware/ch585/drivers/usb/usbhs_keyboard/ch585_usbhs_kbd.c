@@ -276,6 +276,8 @@ void USB2_DEVICE_IRQHandler(void)
                                             } else if (USBHS_SetupReqIndex == 0x02) {
                                                 /* Custom interface: 空报告描述符，直接 ZLP */
                                                 len = 0;
+                                                pUSBHS_Descr = KeyRepDesc_Custom;
+                                                len = DEF_CUSTOM_REP_DESC_LEN;
                                             } else {
                                                 errflag = 0xFF;
                                             }
