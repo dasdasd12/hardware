@@ -74,6 +74,22 @@ const uint8_t KeyRepDesc_Consumer[] = {
     0xC0         // End Collection
 };
 
+const uint8_t KeyRepDesc_Custom[] = {
+    0x06, 0x00, 0xFF,  // Usage Page (Vendor Defined 0xFF00)
+    0x09, 0x01,        // Usage (1)
+    0xA1, 0x01,        // Collection (Application)
+    0x15, 0x00,        // Logical Min (0)
+    0x26, 0xFF, 0x00,  // Logical Max (255)
+    0x75, 0x08,        // Report Size (8)
+    0x95, 0x40,        // Report Count (64)
+    0x09, 0x01,        // Usage (1)
+    0x81, 0x02,        // Input (Data,Var,Abs)
+    0x95, 0x40,        // Report Count (64)
+    0x09, 0x01,        // Usage (1)
+    0x91, 0x02,        // Output (Data,Var,Abs)
+    0xC0               // End Collection
+};
+
 /* ─── 设备描述符 ─── */
 const uint8_t MyDevDescr[] = {
     0x12,                                    // bLength
@@ -122,7 +138,9 @@ const uint8_t MyCfgDescr[] = {
     /* ── Interface 2：Custom Config ── */
     0x09, 0x04, 0x02, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00,
     /* HID Descriptor（无报告描述符直接返回0长度时主机不要求它）*/
-    0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22, 0x00, 0x00,
+    0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22,
+    (uint8_t)sizeof(KeyRepDesc_Custom),
+    (uint8_t)(sizeof(KeyRepDesc_Custom) >> 8),
     /* EP3 IN，64B */
     0x07, 0x05, 0x83, 0x03, 0x40, 0x00, 0x01,
     /* EP3 OUT，64B */

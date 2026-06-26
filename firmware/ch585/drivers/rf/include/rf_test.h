@@ -45,6 +45,7 @@ typedef struct
 } testBound_t;
 
 void RFRole_Init(void);
+void RFRole_Poll(void);
 void RF_LowPower( uint32_t time);
 void RF_ProcessRx( void );
 

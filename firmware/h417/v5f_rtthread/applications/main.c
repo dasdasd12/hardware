@@ -39,20 +39,40 @@
 #define APP_ENABLE_CH585_SPI_SCAN 1
 #endif
 
+#ifndef APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_CH585_BLE_BRIDGE 0
+#endif
+
 #ifndef APP_CH585_SPI_SCAN_POLLS_PER_LOOP
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_CH585_SPI_SCAN_POLLS_PER_LOOP 4
+#else
 #define APP_CH585_SPI_SCAN_POLLS_PER_LOOP 1
+#endif
 #endif
 
 #ifndef APP_ENABLE_USB_SCAN_REPORT
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_USB_SCAN_REPORT 0
+#else
 #define APP_ENABLE_USB_SCAN_REPORT 1
+#endif
 #endif
 
 #ifndef APP_ENABLE_USB_SCAN_STATUS_REPORT
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_USB_SCAN_STATUS_REPORT 0
+#else
 #define APP_ENABLE_USB_SCAN_STATUS_REPORT 1
+#endif
 #endif
 
 #ifndef APP_ENABLE_USB_SPI_TRAIN_REPORT
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_USB_SPI_TRAIN_REPORT 0
+#else
 #define APP_ENABLE_USB_SPI_TRAIN_REPORT 1
+#endif
 #endif
 
 #ifndef APP_ENABLE_KEYBOARD_ENGINE
@@ -92,7 +112,7 @@
 #endif
 
 #ifndef APP_CH585_CONFIG_TEST_ENABLE
-#define APP_CH585_CONFIG_TEST_ENABLE 1
+#define APP_CH585_CONFIG_TEST_ENABLE 0
 #endif
 
 #ifndef APP_CH585_CONFIG_TEST_LOOP
@@ -112,7 +132,7 @@
 #endif
 
 #ifndef APP_CH585_CALIBRATE_TEST_ENABLE
-#define APP_CH585_CALIBRATE_TEST_ENABLE 1
+#define APP_CH585_CALIBRATE_TEST_ENABLE 0
 #endif
 
 #ifndef APP_CH585_CALIBRATE_TEST_LOOP
@@ -140,7 +160,19 @@
 #endif
 
 #ifndef APP_ENABLE_SERIAL_HEARTBEAT
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_SERIAL_HEARTBEAT 0
+#else
 #define APP_ENABLE_SERIAL_HEARTBEAT 1
+#endif
+#endif
+
+#ifndef APP_MAIN_LOOP_DELAY_MS
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_MAIN_LOOP_DELAY_MS 0
+#else
+#define APP_MAIN_LOOP_DELAY_MS 500
+#endif
 #endif
 
 #ifndef APP_MAIN_LOOP_DELAY_MS
@@ -672,6 +704,9 @@ int main(void)
         for (scan_poll = 0; scan_poll < APP_CH585_SPI_SCAN_POLLS_PER_LOOP; scan_poll++)
         {
             ch585_spi_scan_poll_once();
+#if APP_ENABLE_CH585_BLE_BRIDGE
+            ch585_ble_bridge_poll_from_raw(ch585_spi_scan_raw(), CH585_SCAN_TOTAL_KEYS);
+#endif
         }
 #if APP_ENABLE_KEYBOARD_ENGINE
         keyboard_engine_update(ch585_spi_scan_raw());
@@ -719,7 +754,11 @@ int main(void)
         }
 #endif
         heartbeat++;
+#if APP_MAIN_LOOP_DELAY_MS > 0
         rt_thread_mdelay(APP_MAIN_LOOP_DELAY_MS);
+#else
+        rt_thread_yield();
+#endif
     }
 
     return 0;

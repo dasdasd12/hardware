@@ -103,6 +103,7 @@ void Main_Circulation(void)
     while(1)
     {
         TMOS_SystemProcess();
+        RF_Receiver_ServiceUsbHsReport();
 #if USBHS_SELF_TEST_ENABLE
         usbhs_self_test_once();
 #endif
@@ -126,6 +127,18 @@ int main(void)
 {
     HSECFG_Capacitance(HSECap_18p);
     SetSysClock(SYSCLK_FREQ);
+
+#ifdef DEBUG
+    GPIOA_SetBits(GPIO_Pin_14);
+    GPIOPinRemap(ENABLE, RB_PIN_UART0);
+    GPIOA_ModeCfg(GPIO_Pin_15, GPIO_ModeIN_PU);
+    GPIOA_ModeCfg(GPIO_Pin_14, GPIO_ModeOut_PP_5mA);
+    UART0_DefInit();
+    UART0_BaudRateCfg(921600);
+#endif
+
+    PRINT("rf rx usbhs start.\r\n");
+    PRINT("%s\r\n", VER_LIB);
 
     CH58x_BLEInit();
     HAL_Init();
