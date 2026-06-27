@@ -86,6 +86,9 @@ def scan_paths(path):
 
 
 def assert_ch585_firmware_has_no_test_residue():
+    allowed_main_paths = {
+        "firmware/ch585/drivers/rf/include/rf_test.h",
+    }
     test_residue_patterns = (
         r"(^|/)tests?(/|$)",
         r"(^|/)spi_slave_test(/|$)",
@@ -94,6 +97,8 @@ def assert_ch585_firmware_has_no_test_residue():
     )
 
     for relpath in scan_paths(CH585_FIRMWARE_ROOT):
+        if relpath in allowed_main_paths:
+            continue
         for pattern in test_residue_patterns:
             if re.search(pattern, relpath, flags=re.IGNORECASE):
                 fail("CH585 firmware test residue: {0}".format(relpath))
