@@ -2,15 +2,16 @@
 # Default target builds the RF basic smoke firmware.
 
 PREFIX       ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
-PROJECT_NAME ?= ch585_rf_basic
+APP          ?= rf_basic
+PROJECT_NAME ?= ch585_$(APP)
 BUILD_ROOT   ?= build
 
-CC      := $(PREFIX)gcc
-AS      := $(PREFIX)gcc -x assembler-with-cpp
-LD      := $(PREFIX)gcc
-OBJCOPY := $(PREFIX)objcopy
-OBJDUMP := $(PREFIX)objdump
-SIZE    := $(PREFIX)size
+CC      := "$(PREFIX)gcc"
+AS      := "$(PREFIX)gcc" -x assembler-with-cpp
+LD      := "$(PREFIX)gcc"
+OBJCOPY := "$(PREFIX)objcopy"
+OBJDUMP := "$(PREFIX)objdump"
+SIZE    := "$(PREFIX)size"
 
 ARCH_FLAGS := -march=rv32imc_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
 
@@ -18,6 +19,7 @@ COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -g -fmessage-length=0 -fsigned
 COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized -std=gnu99
 # WCH SDK sources keep unused locals behind compile-time feature gates.
 COMMON_FLAGS += -Wno-unused-variable
+COMMON_FLAGS += $(DEFS_EXTRA)
 
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
@@ -25,15 +27,31 @@ LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs
 SDK_ROOT := basic/wch/SRC
 LIB_ROOT := basic/wch/LIB
 
-INC := -I"applications/rf_basic"
+INC := -I"applications/$(APP)"
+INC += -I"drivers"
 INC += -I"drivers/rf/include"
+INC += -I"drivers/usb/usbhs_keyboard"
 INC += -I"bsp/hal/include"
 INC += -I"$(LIB_ROOT)"
 INC += -I"$(SDK_ROOT)/StdPeriphDriver/inc"
 INC += -I"$(SDK_ROOT)/RVMSIS"
 
-C_SOURCES := applications/rf_basic/main.c
-C_SOURCES += drivers/rf/RF_basic.c
+APP_C_SOURCES :=
+ifeq ($(APP),rf_basic)
+APP_C_SOURCES += applications/rf_basic/main.c
+APP_C_SOURCES += drivers/rf/RF_basic.c
+else ifeq ($(APP),rf_receiver_usbhs)
+APP_C_SOURCES += applications/rf_receiver_usbhs/main.c
+APP_C_SOURCES += applications/rf_receiver_usbhs/rf_receiver.c
+APP_C_SOURCES += drivers/usb/usbhs_keyboard/ch585_usbhs_kbd.c
+APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_desc_hid.c
+APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hid.c
+APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hs_config_stub.c
+else
+$(error Unknown APP '$(APP)'; expected rf_basic or rf_receiver_usbhs)
+endif
+
+C_SOURCES := $(APP_C_SOURCES)
 C_SOURCES += bsp/hal/MCU.c
 C_SOURCES += bsp/hal/RTC.c
 C_SOURCES += bsp/hal/SLEEP.c
@@ -42,17 +60,20 @@ C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_clk.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_flash.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_gpio.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_pwr.c
+C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_spi0.c
+C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_spi1.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_sys.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_timer0.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_timer3.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_uart0.c
+C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_uart1.c
 
 ASM_SOURCES := $(SDK_ROOT)/Startup/startup_CH585.S
 ASM_SOURCES += $(LIB_ROOT)/ble_task_scheduler.S
 
 LDSCRIPT := $(SDK_ROOT)/Ld/Link.ld
 
-BUILD := $(BUILD_ROOT)/rf_basic
+BUILD := $(BUILD_ROOT)/$(APP)
 ELF := $(BUILD)/$(PROJECT_NAME).elf
 
 OBJS := $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SOURCES)))
@@ -61,12 +82,15 @@ OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all rf_basic clean size
+.PHONY: all firmware rf_basic rf_receiver_usbhs clean size
 
-all: rf_basic
+all: firmware
 
-rf_basic: $(ELF) $(BUILD)/$(PROJECT_NAME).hex $(BUILD)/$(PROJECT_NAME).bin $(BUILD)/$(PROJECT_NAME).lst
+firmware: $(ELF) $(BUILD)/$(PROJECT_NAME).hex $(BUILD)/$(PROJECT_NAME).bin $(BUILD)/$(PROJECT_NAME).lst
 	@$(SIZE) "$(ELF)"
+
+rf_basic rf_receiver_usbhs:
+	@$(MAKE) APP=$@ firmware
 
 $(BUILD)/%.o: %.c | $(BUILD)
 	@echo "CC  $(notdir $<)"
@@ -94,7 +118,11 @@ $(BUILD)/%.lst: $(ELF)
 	@$(OBJDUMP) --all-headers --demangle --disassemble -M xw "$<" > "$@"
 
 $(BUILD):
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "[void](New-Item -ItemType Directory -Force -Path '$@')"
+else
 	@mkdir -p "$@"
+endif
 
 size: $(ELF)
 	@$(SIZE) "$(ELF)"

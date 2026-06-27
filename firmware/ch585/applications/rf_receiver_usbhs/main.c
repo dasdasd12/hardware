@@ -103,6 +103,7 @@ void Main_Circulation(void)
     while(1)
     {
         TMOS_SystemProcess();
+        RF_Receiver_ServiceUsbHsReport();
 #if USBHS_SELF_TEST_ENABLE
         usbhs_self_test_once();
 #endif

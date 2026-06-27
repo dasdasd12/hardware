@@ -27,10 +27,12 @@ extern const uint8_t MyProdInfo[];
 extern const uint8_t MySerialInfo[];
 extern const uint8_t KeyRepDesc_NKRO[];
 extern const uint8_t KeyRepDesc_Consumer[];
+extern const uint8_t KeyRepDesc_Custom[];
 
 /* ─── Report 描述符字节长度（用于跨编译单元的 sizeof 替代）─── */
 #define DEF_NKRO_REP_DESC_LEN     45   /* sizeof(KeyRepDesc_NKRO)     */
 #define DEF_CONSUMER_REP_DESC_LEN 23   /* sizeof(KeyRepDesc_Consumer) */
+#define DEF_CUSTOM_REP_DESC_LEN   27   /* sizeof(KeyRepDesc_Custom)   */
 
 /* ─── 字符串描述符长度（sizeof 计算）─── */
 #define DEF_USBD_MANU_DESC_LEN      14   /* sizeof(MyManuInfo)   */

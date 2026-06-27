@@ -139,6 +139,21 @@ void USB_HID_SendADCMonitor(volatile uint16_t *adc9)
 /* -----------------------------------------------------------------------
  * USB_HID_EP3_Complete — EP3发送完成回调（由USB中断调用）
  * ----------------------------------------------------------------------- */
+uint8_t USB_HID_SendCustom64(const uint8_t *report)
+{
+    if(!USBHS_DevEnumStatus) return 0;
+    if(s_ep3_state == 1) return 0;
+    if(USBHS_Endp_Busy[DEF_UEP3] & DEF_UEP_BUSY) return 0;
+
+    s_ep3_state = 3;
+    if(!USBHS_Endp_DataUp(DEF_UEP3, (uint8_t *)report, CFG_EP_LEN, DEF_UEP_CPY_LOAD)) {
+        s_ep3_state = 0;
+        return 0;
+    }
+
+    return 1;
+}
+
 void USB_HID_EP3_Complete(void)
 {
     s_ep3_state = 0;  /* EP3空闲 */
