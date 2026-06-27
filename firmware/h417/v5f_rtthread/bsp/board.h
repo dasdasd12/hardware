@@ -15,7 +15,7 @@
 #include "ch32h417.h"
 
 /* CH32H417 V5F memory map */
-/* FLASH:  0x00010000, 128K  */
+/* FLASH:  0x00010000, 500K test link region in the 960K CodeFlash */
 /* RAM_CODE (ITCM): 0x200A0000, 128K */
 /* RAM (DTCM): 0x200C0000+512+256, ~255K */
 
@@ -23,7 +23,7 @@
 #define SRAM_END   (0x200C0000 + SRAM_SIZE * 1024)
 
 #define CH32_FLASH_START_ADDRESS   ((uint32_t)0x00010000)
-#define CH32_FLASH_SIZE            (128 * 1024)
+#define CH32_FLASH_SIZE            (500 * 1024)
 #define CH32_FLASH_END_ADDRESS     ((uint32_t)(CH32_FLASH_START_ADDRESS + CH32_FLASH_SIZE))
 
 extern int _ebss;

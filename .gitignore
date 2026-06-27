@@ -1,7 +1,7 @@
 # Local editor / assistant state
 .vscode/
 .claude/
-
+.wch-skill-logs/
 # Generated documentation caches
 .tmp_pdf_text/
 

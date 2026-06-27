@@ -17,6 +17,7 @@
 #endif
 
 extern uint32_t SystemCoreClock;
+extern uint32_t HCLKClock;
 extern int rt_hw_pin_init(void);
 
 /* Early bring-up UART: mirrors firmware/h417/basic/wch/SRC/Debug/debug.c
@@ -88,8 +89,12 @@ void rt_hw_board_init(void)
     bsp_early_uart_init(115200);
     bsp_early_puts("\r\n[V5F] early-uart up\r\n");
 
-    /* System Tick Configuration */
-    _SysTick_Config(SystemCoreClock / RT_TICK_PER_SECOND);
+    /*
+     * CH32H417 SysTick1 is clocked from HCLK on V5F. SystemCoreClock can be
+     * higher than HCLK when the FPRE divider is active, which makes RT-Thread
+     * delays run slow if it is used as the tick source frequency.
+     */
+    _SysTick_Config(HCLKClock / RT_TICK_PER_SECOND);
 
 #if defined(RT_USING_USER_MAIN) && defined(RT_USING_HEAP)
     rt_system_heap_init((void *)HEAP_BEGIN, (void *)HEAP_END);

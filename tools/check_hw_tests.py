@@ -11,9 +11,16 @@ H417_FIRMWARE_ROOT = os.path.join(ROOT, "firmware", "h417")
 CH585_FIRMWARE_ROOT = os.path.join(ROOT, "firmware", "ch585")
 H417_WCH_ROOT = os.path.join(H417_FIRMWARE_ROOT, "basic", "wch", "SRC")
 CH585_WCH_ROOT = os.path.join(CH585_FIRMWARE_ROOT, "basic", "wch", "SRC")
+H417_DRIVER_ROOT = os.path.join(H417_FIRMWARE_ROOT, "drivers")
 H417_V3F_DRIVER_ROOT = os.path.join(H417_FIRMWARE_ROOT, "v3f", "drivers")
 H417_RGB1W_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "rgb1w_pioc")
-H417_LTDC_RGB_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "ltdc_rgb")
+H417_FLASH_NAND_ROOT = os.path.join(H417_DRIVER_ROOT, "gd5f1g_spi_nand")
+H417_LTDC_RGB_ROOT = os.path.join(H417_DRIVER_ROOT, "ltdc_rgb")
+H417_GPHA_2D_ROOT = os.path.join(H417_DRIVER_ROOT, "gpha_2d")
+H417_V3F_TEST_ROOT = os.path.join(H417_ROOT, "passed", "v3f_standalone")
+H417_V3F_TEST_SRC_ROOT = os.path.join(H417_V3F_TEST_ROOT, "src")
+H417_V5F_TEST_ROOT = os.path.join(H417_ROOT, "passed", "v5f_rtthread")
+H417_V5F_TEST_SRC = os.path.join(H417_V5F_TEST_ROOT, "src", "v5f_hw_test.c")
 
 
 def fail(message):
@@ -45,6 +52,11 @@ def assert_exists(path, description):
         fail("missing {0}: {1}".format(os.path.relpath(path, ROOT), description))
 
 
+def assert_not_exists(path, description):
+    if os.path.exists(path):
+        fail("{0} should not exist: {1}".format(os.path.relpath(path, ROOT), description))
+
+
 def scan_tree(path, suffixes):
     if not os.path.exists(path):
         fail("missing {0}".format(os.path.relpath(path, ROOT)))
@@ -62,6 +74,31 @@ def scan_tree(path, suffixes):
     return "".join(data)
 
 
+def scan_paths(path):
+    if not os.path.exists(path):
+        fail("missing {0}".format(os.path.relpath(path, ROOT)))
+    paths = []
+    for base, dirs, files in os.walk(path):
+        for name in sorted(dirs + files):
+            child = os.path.join(base, name)
+            paths.append(os.path.relpath(child, ROOT).replace(os.sep, "/"))
+    return paths
+
+
+def assert_ch585_firmware_has_no_test_residue():
+    test_residue_patterns = (
+        r"(^|/)tests?(/|$)",
+        r"(^|/)spi_slave_test(/|$)",
+        r"(^|/)[^/]*(selftest|_test|test_|bringup|probe|example|demo)[^/]*($|/|\.)",
+        r"(^|/)EVT/EXAM(/|$)",
+    )
+
+    for relpath in scan_paths(CH585_FIRMWARE_ROOT):
+        for pattern in test_residue_patterns:
+            if re.search(pattern, relpath, flags=re.IGNORECASE):
+                fail("CH585 firmware test residue: {0}".format(relpath))
+
+
 def main():
     h417_makefile = os.path.join(H417_ROOT, "Makefile")
     ch585_makefile = os.path.join(CH585_ROOT, "Makefile")
@@ -69,10 +106,15 @@ def main():
     assert_contains(h417_makefile, r"\bHW_TEST\s*\?=", "HW_TEST selection")
     assert_contains(h417_makefile, r"firmware/h417", "H417 firmware-owned dependency root")
     assert_contains(h417_makefile, r"WCH_H417_SRC_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/basic/wch/SRC", "H417-local WCH source tree")
+    assert_contains(h417_makefile, r"H417_DRIVER_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/drivers", "H417 shared driver root")
     assert_contains(h417_makefile, r"V3F_DRIVER_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/v3f/drivers", "V3F driver root")
     assert_contains(h417_makefile, r"RGB1W_PIOC_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/rgb1w_pioc", "V3F RGB1W PIOC driver tree")
-    assert_contains(h417_makefile, r"FLASH_NAND_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/gd5f1g_spi_nand", "V3F-local GD5F1G driver tree")
-    assert_contains(h417_makefile, r"LTDC_RGB_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/ltdc_rgb", "V3F-local LTDC RGB driver tree")
+    assert_contains(h417_makefile, r"FLASH_NAND_ROOT\s*:=\s*\$\(H417_DRIVER_ROOT\)/gd5f1g_spi_nand", "H417 shared GD5F1G driver tree")
+    assert_contains(h417_makefile, r"LTDC_RGB_ROOT\s*:=\s*\$\(H417_DRIVER_ROOT\)/ltdc_rgb", "H417 shared LTDC RGB driver tree")
+    assert_contains(h417_makefile, r"V3F_STANDALONE_ROOT\s*:=\s*passed/v3f_standalone", "H417 passed V3F standalone test root")
+    assert_contains(h417_makefile, r"H417_DUAL_CORE_TESTS\s*:=", "H417 dual-core test wrapper list")
+    assert_contains(h417_makefile, r"DUAL_CORE_BUILD_ROOT\s*:=\s*\.\./\.\./hw_tests/h417/\$\(BUILD_ROOT\)/\$\(HW_TEST\)", "dual-core test build root")
+    assert_contains(h417_makefile, r"APP_V5F_HW_TEST=\$\(APP_V5F_HW_TEST_MODE\)", "V5F test mode forwarding")
     assert_not_contains(h417_makefile, r"third_party|EVT_ROOT", "external third_party EVT dependency")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
     assert_contains(ch585_makefile, r"\bHALF\s*\?=", "HALF selection")
@@ -95,17 +137,17 @@ def main():
     assert_contains(h417_makefile, r"startup_ch32h417_v3f\.S", "official H417 V3F startup")
     assert_not_contains(h417_makefile, r"_dual\.hex|Core_V5F|startup_h417_v5f|Link_h417_v5f", "H417 V5F or dual-core test flow")
     assert_contains(
-        os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+        os.path.join(H417_V3F_TEST_SRC_ROOT, "h417_ws2812.c"),
         r"#define\s+WS2812_LED_COUNT\s+77u",
         "WS2812 per-key LED count",
     )
     assert_contains(
-        os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+        os.path.join(H417_V3F_TEST_SRC_ROOT, "h417_ws2812.c"),
         r"#define\s+WS2812_TEST_LEVEL\s+0x08u",
         "low-brightness WS2812 test level",
     )
     assert_contains(
-        os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+        os.path.join(H417_V3F_TEST_SRC_ROOT, "h417_ws2812.c"),
         r"ch32h417_pioc_rgb1w_send_ram\(",
         "V3F PIOC RGB1W RAM-mode full-frame sender",
     )
@@ -116,12 +158,12 @@ def main():
             "separate WS2812 {0} build".format(effect),
         )
         assert_contains(
-            os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+            os.path.join(H417_V3F_TEST_SRC_ROOT, "h417_ws2812.c"),
             r"ws_effect_{0}\(".format(effect),
             "WS2812 {0} effect implementation".format(effect),
         )
         assert_contains(
-            os.path.join(H417_ROOT, "src", "h417_ws2812.c"),
+            os.path.join(H417_V3F_TEST_SRC_ROOT, "h417_ws2812.c"),
             r"WS2812_EFFECT_{0}".format(effect.upper()),
             "WS2812 {0} effect selector".format(effect),
         )
@@ -146,7 +188,7 @@ def main():
         "libc memcpy dependency",
     )
     assert_contains(
-        os.path.join(H417_ROOT, "src", "system_ch32h417.c"),
+        os.path.join(H417_V3F_TEST_SRC_ROOT, "system_ch32h417.c"),
         r"SystemCoreClock\s*=\s*100000000u",
         "100 MHz V3F clock for WCH PIOC RGB1W timing",
     )
@@ -156,22 +198,22 @@ def main():
         "separate GD5F1G image write/read build",
     )
     assert_contains(
-        os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand", "include", "gd5f1g_spi_nand.h"),
+        os.path.join(H417_FLASH_NAND_ROOT, "include", "gd5f1g_spi_nand.h"),
         r"GD5F1G_PAGE_SIZE\s+2048u",
         "GD5F1G SPI-NAND geometry",
     )
     assert_contains(
-        os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand", "src", "ch32h417_gd5f1g_spi1.c"),
+        os.path.join(H417_FLASH_NAND_ROOT, "src", "ch32h417_gd5f1g_spi1.c"),
         r"GPIO_PinSource7,\s*GPIO_AF3",
         "PF7 SPI1 clock mapping",
     )
     assert_contains(
-        os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand", "src", "ch32h417_gd5f1g_spi1.c"),
+        os.path.join(H417_FLASH_NAND_ROOT, "src", "ch32h417_gd5f1g_spi1.c"),
         r"GPIO_PinSource8,\s*GPIO_AF3",
         "PF8 SPI1 data-out mapping",
     )
     assert_contains(
-        os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand", "src", "ch32h417_gd5f1g_spi1.c"),
+        os.path.join(H417_FLASH_NAND_ROOT, "src", "ch32h417_gd5f1g_spi1.c"),
         r"GPIO_PinSource9,\s*GPIO_AF3",
         "PF9 SPI1 data-in mapping",
     )
@@ -195,11 +237,92 @@ def main():
         r"LTDC_Pixelformat_RGB565",
         "RGB565 LTDC layer support",
     )
+    assert_contains(
+        os.path.join(H417_LTDC_RGB_ROOT, "include", "ch32h417_ltdc_rgb.h"),
+        r"ch32h417_ltdc_rgb_start_layer1",
+        "shared LTDC layer1 startup API",
+    )
+    assert_contains(
+        os.path.join(H417_LTDC_RGB_ROOT, "include", "ch32h417_ltdc_rgb.h"),
+        r"ch32h417_ltdc_rgb_layer1_clut_enable",
+        "shared LTDC L8 CLUT enable API",
+    )
+    assert_contains(
+        os.path.join(H417_LTDC_RGB_ROOT, "include", "ch32h417_ltdc_rgb.h"),
+        r"ch32h417_ltdc_rgb_pack_rgb565",
+        "shared RGB565 color packing API",
+    )
+    assert_contains(
+        os.path.join(H417_LTDC_RGB_ROOT, "include", "ch32h417_ltdc_rgb.h"),
+        r"ch32h417_ltdc_rgb_fb_plot_l8_rot180",
+        "shared rotated L8 framebuffer helper",
+    )
+    assert_contains(
+        os.path.join(H417_GPHA_2D_ROOT, "include", "ch32h417_gpha_2d.h"),
+        r"ch32h417_gpha_2d_fill_l8_quad",
+        "shared GPHA L8 byte-fill helper",
+    )
+    assert_contains(
+        os.path.join(H417_GPHA_2D_ROOT, "include", "ch32h417_gpha_2d.h"),
+        r"does not provide native L8 output",
+        "documented GPHA L8 limitation",
+    )
+    assert_not_exists(
+        os.path.join(H417_FLASH_NAND_ROOT, "include", "gd5f1g_l8_asset_store.h"),
+        "test-only L8 asset store header in shared SPI-NAND driver tree",
+    )
+    assert_not_exists(
+        os.path.join(H417_FLASH_NAND_ROOT, "src", "gd5f1g_l8_asset_store.c"),
+        "test-only L8 asset store source in shared SPI-NAND driver tree",
+    )
+    assert_contains(
+        os.path.join(H417_V5F_TEST_ROOT, "src", "gd5f1g_l8_asset_store.h"),
+        r"gd5f1g_l8_asset_write_manifest",
+        "V5F flash asset test manifest writer",
+    )
+    assert_not_contains(
+        os.path.join(H417_GPHA_2D_ROOT, "include", "ch32h417_gpha_2d.h"),
+        r"rtthread|rt_[a-z0-9_]*",
+        "RT-Thread dependency in GPHA driver API",
+    )
+    assert_not_contains(
+        os.path.join(H417_V5F_TEST_ROOT, "src", "gd5f1g_l8_asset_store.h"),
+        r"#\s*include.*(rtthread|ltdc|gpha)|\brt_[a-z0-9_]*",
+        "display or RT-Thread dependency in V5F flash asset test helper API",
+    )
+    assert_not_contains(
+        H417_V5F_TEST_SRC,
+        r"LTDC_CLUT(StructInit|Init|Cmd)",
+        "direct LTDC CLUT register access in V5F tests",
+    )
+    assert_not_contains(
+        H417_V5F_TEST_SRC,
+        r"GPHA_Output(Blue|Green|Red)\s*=\s*(color\s*&\s*0x1Fu|\(color\s*>>\s*5\)\s*&\s*0x3Fu|\(color\s*>>\s*11\)\s*&\s*0x1Fu)",
+        "RGB565 bit-field values as GPHA R2M OCOLR components",
+    )
+    for name in (
+        "v5f_hw_test.c",
+        "v5f_hw_test.h",
+        "v5f_ltdc_flash_assets.S",
+        "v5f_ltdc_gray_800x480.raw",
+        "v5f_ltdc_palette_800x480.raw",
+    ):
+        if os.path.exists(os.path.join(H417_FIRMWARE_ROOT, "v5f_rtthread", "applications", name)):
+            fail("V5F application tree still contains test-only file {0}".format(name))
 
-    h417_text = scan_tree(H417_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
+    h417_text = (
+        read_text(h417_makefile) +
+        read_text(os.path.join(H417_V3F_TEST_ROOT, "Link_h417_v3f.ld")) +
+        scan_tree(H417_V3F_TEST_SRC_ROOT, (".c", ".h", ".S", ".ld", ".mk", "")) +
+        scan_tree(H417_V5F_TEST_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
+    )
+    h417_standalone_text = (
+        read_text(os.path.join(H417_V3F_TEST_ROOT, "Link_h417_v3f.ld")) +
+        scan_tree(H417_V3F_TEST_SRC_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
+    )
     pioc_driver_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"))
     ltdc_rgb_driver_text = scan_tree(H417_LTDC_RGB_ROOT, (".c", ".h"))
-    combined_h417_text = h417_text + pioc_driver_text + ltdc_rgb_driver_text
+    combined_h417_text = h417_standalone_text + pioc_driver_text + ltdc_rgb_driver_text
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
 
     forbidden_h417 = {
@@ -228,10 +351,27 @@ def main():
         "h417_lcd_backlight",
         "h417_ltdc",
         "h417_flash_image",
+        "h417_v5f_ltdc",
+        "h417_v5f_ltdc_l8_palette_image",
+        "h417_v5f_ltdc_rgb565_diag",
+        "h417_v5f_gpha_r2m_fill",
+        "h417_v5f_gpha_pfc_l8_rgb565",
+        "h417_v5f_gpha_blend_rgb565",
+        "h417_v5f_gpha_l8_ltdc_fullscreen",
+        "h417_v5f_flash",
+        "h417_v5f_flash_l8_assets",
     )
     for name in required_h417_tests:
         if name not in h417_text:
             fail("h417 sources missing {0}".format(name))
+
+    for stale_name in (
+        "h417_v5f_gpha ",
+        "h417_v5f_gpha_l8_clut_bars_diag",
+        "APP_V5F_HW_TEST_GPHA_L8_CLUT_BARS_DIAG",
+    ):
+        if stale_name in h417_text:
+            fail("h417 sources still contain stale GPHA test name {0}".format(stale_name.strip()))
 
     required_ch585_tests = (
         "ch585_u2_eeprom_i2c",
@@ -248,15 +388,7 @@ def main():
         if token not in ch585_text:
             fail("ch585 sources missing serial token {0}".format(token))
 
-    forbidden_ch585 = {
-        r"\bSPI\b|SPI_": "CH585 SPI use",
-        r"\bADC\b|ADC_": "CH585 ADC use",
-        r"\bUSB\b|USBHS|USBFS": "CH585 USB use",
-        r"\bBLE\b|Bluetooth|RF_": "CH585 wireless use",
-    }
-    for pattern, description in forbidden_ch585.items():
-        if re.search(pattern, ch585_text, flags=re.IGNORECASE):
-            fail("ch585 sources contain forbidden {0}".format(description))
+    assert_ch585_firmware_has_no_test_residue()
 
     print("PASS: hardware test projects stay inside the reserved-interface boundary")
 

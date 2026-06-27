@@ -16,6 +16,14 @@
 #include "board.h"
 #include "ch585_spi_scan.h"
 
+#ifndef APP_ENABLE_V5F_HW_TEST
+#define APP_ENABLE_V5F_HW_TEST 0
+#endif
+
+#if APP_ENABLE_V5F_HW_TEST
+#include "v5f_hw_test.h"
+#endif
+
 #ifndef APP_ENABLE_USB_TEST
 #define APP_ENABLE_USB_TEST 1
 #endif
@@ -244,6 +252,10 @@ int main(void)
 
     rt_kprintf("Hello, RT-Thread on CH32H417 V5F!\n");
     rt_pin_mode(led_pin, PIN_MODE_OUTPUT);
+
+#if APP_ENABLE_V5F_HW_TEST
+    v5f_hw_test_start();
+#endif
 
 #if APP_ENABLE_CH585_SPI_SCAN
     ch585_spi_scan_init();
