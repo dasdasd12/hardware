@@ -118,6 +118,9 @@ void Delay_Ms(uint32_t n)
  */
 void USART_Printf_Init(uint32_t baudrate)
 {
+#if(DEBUG == DEBUG_NONE)
+    (void)baudrate;
+#else
     GPIO_InitTypeDef  GPIO_InitStructure = {0};
     USART_InitTypeDef USART_InitStructure = {0};
 
@@ -129,16 +132,6 @@ void USART_Printf_Init(uint32_t baudrate)
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_Very_High;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_Init(GPIOA, &GPIO_InitStructure);
-
-#elif(DEBUG == DEBUG_UART8)
-    RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO | RCC_HB2Periph_GPIOB, ENABLE);
-    RCC_HB1PeriphClockCmd(RCC_HB1Periph_USART8, ENABLE);
-    GPIO_PinAFConfig(GPIOB, GPIO_PinSource4, GPIO_AF11);
-
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4;
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_Very_High;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
 
 #elif(DEBUG == DEBUG_UART6)
     RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO | RCC_HB2Periph_GPIOB, ENABLE);
@@ -163,14 +156,11 @@ void USART_Printf_Init(uint32_t baudrate)
     USART_Init(USART1, &USART_InitStructure);
     USART_Cmd(USART1, ENABLE);
 
-#elif(DEBUG == DEBUG_UART8)
-    USART_Init(USART8, &USART_InitStructure);
-    USART_Cmd(USART8, ENABLE);
-    
 #elif(DEBUG == DEBUG_UART6)
     USART_Init(USART6, &USART_InitStructure);
     USART_Cmd(USART6, ENABLE);
 
+#endif
 #endif
 }
 
@@ -193,9 +183,6 @@ __attribute__((used)) int _write(int fd, char *buf, int size)
 #if(DEBUG == DEBUG_UART1)
         while(USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET);
         USART_SendData(USART1, *buf++);
-#elif(DEBUG == DEBUG_UART8)
-        while(USART_GetFlagStatus(USART8, USART_FLAG_TC) == RESET);
-        USART_SendData(USART8, *buf++);
 #elif(DEBUG == DEBUG_UART6)
         while(USART_GetFlagStatus(USART6, USART_FLAG_TC) == RESET);
         USART_SendData(USART6, *buf++);
@@ -224,6 +211,4 @@ __attribute__((used)) void *_sbrk(ptrdiff_t incr)
     curbrk += incr;
     return curbrk - incr;
 }
-
-
 

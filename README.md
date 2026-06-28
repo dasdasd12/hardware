@@ -118,3 +118,19 @@ chore(h417): move basic library under firmware
 refactor(h417): split v5f hardware test drivers
 docs: update hardware tree overview
 ```
+
+## Firmware hardware contract
+
+`../latex/contest_report_template.tex` is the source of truth for board
+hardware. A default firmware path must not initialize or depend on a device,
+peripheral instance, pin role, or board resource that is not described there.
+
+Run this before changing default firmware hardware bring-up code:
+
+```bash
+python tools/check_firmware_hardware_contract.py
+```
+
+The check intentionally fails while default firmware still contains stale
+hardware assumptions, such as undeclared H417 UART8 console use, eval-board
+LED pins, fake CH585 halves, or old SPI fallback pins.

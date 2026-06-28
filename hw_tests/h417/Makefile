@@ -2,6 +2,7 @@
 
 PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 HW_TEST ?= h417_gpio_status
+SPI_SOURCE ?= left
 PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
 H417_FIRMWARE_ROOT ?= $(PROJECT_ROOT)/firmware/h417
@@ -15,8 +16,12 @@ LTDC_RGB_CONTROL_SRC := $(LTDC_RGB_ROOT)/src/ch32h417_lcd_rgb_control.c
 LTDC_RGB_LTDC_SRC := $(LTDC_RGB_ROOT)/src/ch32h417_ltdc_rgb.c
 V3F_STANDALONE_ROOT := passed/v3f_standalone
 V3F_STANDALONE_SRC_ROOT := $(V3F_STANDALONE_ROOT)/src
-H417_DUAL_CORE_TESTS := h417_v5f_ltdc h417_v5f_ltdc_l8_palette_image h417_v5f_ltdc_rgb565_diag h417_v5f_gpha_r2m_fill h417_v5f_gpha_pfc_l8_rgb565 h417_v5f_gpha_blend_rgb565 h417_v5f_gpha_l8_ltdc_fullscreen h417_v5f_flash h417_v5f_flash_l8_assets h417_v5f_tick_diag
+H417_DUAL_CORE_TESTS := h417_v5f_ltdc h417_v5f_ltdc_l8_palette_image h417_v5f_ltdc_rgb565_diag h417_v5f_gpha_r2m_fill h417_v5f_gpha_pfc_l8_rgb565 h417_v5f_gpha_blend_rgb565 h417_v5f_gpha_l8_ltdc_fullscreen h417_v5f_flash h417_v5f_flash_l8_assets h417_v5f_tick_diag h417_v5f_sdram_memtest h417_v5f_sdram_ltdc_rgb565 h417_v5f_sdram_remap_probe h417_v5f_sdram_dq_probe h417_v5f_ch585_spi_speed
 IS_DUAL_CORE_TEST := $(filter $(HW_TEST),$(H417_DUAL_CORE_TESTS))
+APP_V5F_HW_TEST_ID_OVERRIDE :=
+APP_V5F_HW_TEST_USB_CDC :=
+APP_V5F_HW_TEST_SOURCE_ARGS :=
+H417_HW_TEST_BUILD_NAME := $(HW_TEST)
 
 ifeq ($(HW_TEST),h417_v5f_ltdc)
 APP_V5F_HW_TEST_MODE := ltdc
@@ -38,9 +43,40 @@ else ifeq ($(HW_TEST),h417_v5f_flash_l8_assets)
 APP_V5F_HW_TEST_MODE := flash_l8_assets
 else ifeq ($(HW_TEST),h417_v5f_tick_diag)
 APP_V5F_HW_TEST_MODE := tick_diag
+else ifeq ($(HW_TEST),h417_v5f_sdram_memtest)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 11
+else ifeq ($(HW_TEST),h417_v5f_sdram_ltdc_rgb565)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 12
+else ifeq ($(HW_TEST),h417_v5f_sdram_remap_probe)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 13
+else ifeq ($(HW_TEST),h417_v5f_sdram_dq_probe)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 14
+APP_V5F_HW_TEST_USB_CDC := 1
+else ifeq ($(HW_TEST),h417_v5f_ch585_spi_speed)
+APP_V5F_HW_TEST_MODE := ch585_spi_speed
+APP_V5F_HW_TEST_ID_OVERRIDE := 15
+APP_V5F_HW_TEST_USB_CDC := 1
+H417_HW_TEST_BUILD_NAME := $(HW_TEST)_$(SPI_SOURCE)
+ifeq ($(SPI_SOURCE),left)
+APP_V5F_HW_TEST_SOURCE_ARGS := DEFS_EXTRA=-DAPP_CH585_SPI_SPEED_SOURCE_LEFT=1
+else ifeq ($(SPI_SOURCE),right)
+APP_V5F_HW_TEST_SOURCE_ARGS := DEFS_EXTRA=-DAPP_CH585_SPI_SPEED_SOURCE_RIGHT=1
+else
+$(error SPI_SOURCE must be left/right for h417_v5f_ch585_spi_speed, got '$(SPI_SOURCE)')
+endif
 endif
 
-DUAL_CORE_BUILD_ROOT := ../../hw_tests/h417/$(BUILD_ROOT)/$(HW_TEST)
+APP_V5F_HW_TEST_USB_CDC_ARGS :=
+ifeq ($(APP_V5F_HW_TEST_USB_CDC),1)
+APP_V5F_HW_TEST_USB_CDC_ARGS := APP_ENABLE_USB_TEST=1 APP_ENABLE_USB2_FS_CDC=1 APP_ENABLE_USB2_HS_CDC=0 APP_ENABLE_USBSS_CDC=0
+endif
+
+DUAL_CORE_BUILD_ROOT := ../../hw_tests/h417/$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)
+DIRECT_V5F_BUILD_ROOT := ../../../hw_tests/h417/$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)
 
 CC := $(PREFIX)gcc
 AS := $(PREFIX)gcc -x assembler-with-cpp
@@ -54,13 +90,18 @@ ifeq ($(IS_DUAL_CORE_TEST),$(HW_TEST))
 .PHONY: all clean size
 
 all:
+ifeq ($(APP_V5F_HW_TEST_ID_OVERRIDE),)
 	@$(MAKE) -C "$(H417_FIRMWARE_ROOT)" PREFIX=$(PREFIX) BUILD_ROOT=$(DUAL_CORE_BUILD_ROOT) APP_V5F_HW_TEST=$(APP_V5F_HW_TEST_MODE)
-	@echo "V3F build: $(BUILD_ROOT)/$(HW_TEST)/V3F"
-	@echo "V5F build: $(BUILD_ROOT)/$(HW_TEST)/V5F"
+else
+	@$(MAKE) -C "$(H417_FIRMWARE_ROOT)" v3f PREFIX=$(PREFIX) BUILD_ROOT=$(DUAL_CORE_BUILD_ROOT)
+	@$(MAKE) -C "$(H417_FIRMWARE_ROOT)/v5f_rtthread" PREFIX=$(PREFIX) BUILD_ROOT=$(DIRECT_V5F_BUILD_ROOT) CORE=V5F APP_V5F_HW_TEST=$(APP_V5F_HW_TEST_MODE) APP_V5F_HW_TEST_ID=$(APP_V5F_HW_TEST_ID_OVERRIDE) $(APP_V5F_HW_TEST_USB_CDC_ARGS) $(APP_V5F_HW_TEST_SOURCE_ARGS)
+endif
+	@echo "V3F build: $(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F"
+	@echo "V5F build: $(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F"
 
 size:
-	@$(SIZE) "$(BUILD_ROOT)/$(HW_TEST)/V3F/h417_V3F.elf"
-	@$(SIZE) "$(BUILD_ROOT)/$(HW_TEST)/V5F/rtthread_ch32h417_V5F.elf"
+	@$(SIZE) "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F/h417_V3F.elf"
+	@$(SIZE) "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.elf"
 
 clean:
 	rm -rf "$(BUILD_ROOT)"

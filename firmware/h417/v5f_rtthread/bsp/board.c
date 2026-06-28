@@ -20,46 +20,6 @@ extern uint32_t SystemCoreClock;
 extern uint32_t HCLKClock;
 extern int rt_hw_pin_init(void);
 
-/* Early bring-up UART: mirrors firmware/h417/basic/wch/SRC/Debug/debug.c
-   USART_Printf_Init(DEBUG_UART8). Does not depend on RT-Thread device
-   framework so it is visible the instant V5F runs. */
-static void bsp_early_uart_init(uint32_t baud)
-{
-    GPIO_InitTypeDef  GPIO_InitStructure  = {0};
-    USART_InitTypeDef USART_InitStructure = {0};
-
-    RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO | RCC_HB2Periph_GPIOB, ENABLE);
-    RCC_HB1PeriphClockCmd(RCC_HB1Periph_USART8, ENABLE);
-    GPIO_PinAFConfig(GPIOB, GPIO_PinSource4, GPIO_AF11);
-
-    GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_4;
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_Very_High;
-    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AF_PP;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
-
-    USART_InitStructure.USART_BaudRate            = baud;
-    USART_InitStructure.USART_WordLength          = USART_WordLength_8b;
-    USART_InitStructure.USART_StopBits            = USART_StopBits_1;
-    USART_InitStructure.USART_Parity              = USART_Parity_No;
-    USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
-    USART_InitStructure.USART_Mode                = USART_Mode_Tx;
-    USART_Init(USART8, &USART_InitStructure);
-    USART_Cmd(USART8, ENABLE);
-}
-
-static void bsp_early_putc(char c)
-{
-    while (USART_GetFlagStatus(USART8, USART_FLAG_TC) == RESET);
-    USART8->DATAR = (uint8_t)c;
-}
-
-static void bsp_early_puts(const char *s)
-{
-    while (*s) {
-        bsp_early_putc(*s++);
-    }
-}
-
 static uint32_t _SysTick_Config(rt_uint32_t ticks)
 {
     /* Set lowest priority for SysTick1 and Software interrupts */
@@ -84,10 +44,6 @@ void rt_hw_board_init(void)
 {
     /* System Clock Update */
     SystemAndCoreClockUpdate();
-
-    /* Early UART before anything else can hang; visible if clock tree is alive */
-    bsp_early_uart_init(115200);
-    bsp_early_puts("\r\n[V5F] early-uart up\r\n");
 
     /*
      * CH32H417 SysTick1 is clocked from HCLK on V5F. SystemCoreClock can be

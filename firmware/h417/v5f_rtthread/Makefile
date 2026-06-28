@@ -33,6 +33,7 @@ GPHA_2D_ROOT := $(H417_DRIVER_ROOT)/gpha_2d
 V5F_HW_TEST_ROOT ?= ../../../hw_tests/h417/passed/v5f_rtthread
 V5F_HW_TEST_SRC_ROOT := $(V5F_HW_TEST_ROOT)/src
 V5F_HW_TEST_ASSET_ROOT := $(V5F_HW_TEST_ROOT)/assets
+HW_TEST_COMMON_ROOT ?= ../../../hw_tests/common
 
 # RT-Thread root
 RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
@@ -49,6 +50,7 @@ RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
 #   flash - GD5F1G read-only ID/status test with LTDC status output
 #   flash_l8_assets - erase/write/read GD5F1G L8 image assets and display color L8
 #   tick_diag - V5F RT tick versus mcycle visual timing comparison
+#   ch585_spi_speed - CH585 SPI1 link SCK sweep with CDC debug output
 APP_V5F_HW_TEST ?= none
 APP_V5F_HW_TEST_ID := 0
 
@@ -84,6 +86,9 @@ APP_V5F_HW_TEST_ID := 10
 else ifeq ($(APP_V5F_HW_TEST),tick_diag)
 APP_ENABLE_V5F_HW_TEST := 1
 APP_V5F_HW_TEST_ID := 7
+else ifeq ($(APP_V5F_HW_TEST),ch585_spi_speed)
+APP_ENABLE_V5F_HW_TEST := 1
+APP_V5F_HW_TEST_ID := 15
 else
 $(error Unknown APP_V5F_HW_TEST '$(APP_V5F_HW_TEST)')
 endif
@@ -99,7 +104,7 @@ APP_ENABLE_SERIAL_HEARTBEAT ?= 1
 endif
 
 # Defines (only board-specific ones; RT-Thread config macros are in rtconfig.h)
-DEFS := -DCore_V5F -DBSP_USING_UART8 -D__RT_KERNEL_SOURCE__ -D__RT_IPC_SOURCE__
+DEFS := -DCore_V5F -D__RT_KERNEL_SOURCE__ -D__RT_IPC_SOURCE__
 ifeq ($(APP_ENABLE_USB_TEST),1)
 DEFS += -DCONFIG_CHERRYUSB
 endif
@@ -138,6 +143,7 @@ INC += -I"$(SRC_ROOT)/Debug" -I"$(SRC_ROOT)/Core" -I"$(SRC_ROOT)/Peripheral/inc"
 INC += -I"$(LTDC_RGB_ROOT)/include" -I"$(FLASH_NAND_ROOT)/include" -I"$(GPHA_2D_ROOT)/include"
 ifneq ($(APP_V5F_HW_TEST),none)
 INC += -I"$(V5F_HW_TEST_ROOT)/include"
+INC += -I"$(HW_TEST_COMMON_ROOT)"
 INC += -I"$(V5F_HW_TEST_ASSET_ROOT)/ltdc" -I"$(V5F_HW_TEST_ASSET_ROOT)/flash"
 endif
 
@@ -173,7 +179,6 @@ RTT_SRC += $(RTT_ROOT)/src/klibc/kstring.c
 
 # RT-Thread components
 RTT_SRC += $(RTT_ROOT)/components/drivers/core/device.c
-RTT_SRC += $(RTT_ROOT)/components/drivers/serial/dev_serial.c
 RTT_SRC += $(RTT_ROOT)/components/drivers/pin/dev_pin.c
 RTT_SRC += $(RTT_ROOT)/components/drivers/ipc/completion_comm.c
 RTT_SRC += $(RTT_ROOT)/components/drivers/ipc/completion_up.c
@@ -199,8 +204,7 @@ LIBCPU_ASM += $(PROJECT_ROOT)/libcpu/interrupt_gcc.S
 BSP_SRC := $(PROJECT_ROOT)/bsp/board.c
 BSP_SRC += $(PROJECT_ROOT)/bsp/software_irq.c
 BSP_SRC += $(PROJECT_ROOT)/bsp/system_ch32h417.c
-DRV_SRC := $(PROJECT_ROOT)/drivers/drv_usart.c
-DRV_SRC += $(PROJECT_ROOT)/drivers/drv_gpio.c
+DRV_SRC := $(PROJECT_ROOT)/drivers/drv_gpio.c
 
 ifneq ($(APP_V5F_HW_TEST),none)
 DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_lcd_rgb_control.c

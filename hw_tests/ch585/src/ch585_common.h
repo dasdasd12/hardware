@@ -30,5 +30,7 @@ void ch585_u2_controls_gpio_run(void);
 void ch585_u3_max17048_i2c_run(void);
 void ch585_u3_charge_gpio_run(void);
 void ch585_u3_ec11_gpio_run(void);
+void ch585_adc_mux_scan_run(void);
+void ch585_spi0_speed_slave_run(void);
 
 #endif
