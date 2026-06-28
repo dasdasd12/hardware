@@ -26,8 +26,16 @@ extern uint32_t HCLKClock;
 #define APP_CH585_SPI_REAL_SOURCE0 1
 #endif
 
+#ifndef APP_CH585_SPI_REAL_SOURCE1
+#define APP_CH585_SPI_REAL_SOURCE1 0
+#endif
+
 #ifndef APP_CH585_SPI_FAKE_SOURCE1
+#if APP_CH585_SPI_REAL_SOURCE1
+#define APP_CH585_SPI_FAKE_SOURCE1 0
+#else
 #define APP_CH585_SPI_FAKE_SOURCE1 1
+#endif
 #endif
 
 #ifndef APP_CH585_SPI_SOFT_DELAY_CYCLES
@@ -134,28 +142,20 @@ extern uint32_t HCLKClock;
 #define APP_CH585_SPI_SOURCE0_CAPTURE_BYTES sizeof(ch585_scan_frame_v1_t)
 #endif
 
-#define APP_CH585_SPI_HW_SPI2_SHORT_XFER \
-    (APP_CH585_SPI_WIRE_SHORT && \
-     (APP_CH585_SPI_PIPELINE_SHORT || APP_CH585_SPI_REQUEST_ONLY_SHORT))
-
 #ifndef APP_CH585_SPI_PIN_SCK
-#define APP_CH585_SPI_PIN_SCK  "PB.3"
+#define APP_CH585_SPI_PIN_SCK  "PD.2"
 #endif
 
 #ifndef APP_CH585_SPI_PIN_MOSI
-#define APP_CH585_SPI_PIN_MOSI "PB.5"
+#define APP_CH585_SPI_PIN_MOSI "PD.3"
 #endif
 
 #ifndef APP_CH585_SPI_PIN_MISO0
-#define APP_CH585_SPI_PIN_MISO0 "PB.4"
+#define APP_CH585_SPI_PIN_MISO0 "PD.4"
 #endif
 
 #ifndef APP_CH585_SPI_PIN_CS0
-#if APP_CH585_SPI_PCB_SOURCE0_RIGHT
-#define APP_CH585_SPI_PIN_CS0 "PD.9"
-#else
-#define APP_CH585_SPI_PIN_CS0 "PF.2"
-#endif
+#define APP_CH585_SPI_PIN_CS0 "PD.6"
 #endif
 
 #define CH585_SPI_DMA_PHASES_PER_BIT 2U
@@ -331,6 +331,7 @@ static ch585_soft_spi_t g_soft_spi;
 static uint8_t g_source0_capture[APP_CH585_SPI_SOURCE0_CAPTURE_BYTES];
 
 #if APP_CH585_SPI_HW_SPI2_BACKEND
+static uint8_t g_hw_spi2_active_source;
 static uint8_t g_source0_spi2_tx[APP_CH585_SPI_SOURCE0_CAPTURE_BYTES] __attribute__((aligned(4)));
 static uint8_t g_source0_spi2_rx[APP_CH585_SPI_SOURCE0_CAPTURE_BYTES] __attribute__((aligned(4)));
 static ch585_scan_cmd_v1_t g_source0_spi2_cmd_tx __attribute__((aligned(4)));
@@ -338,9 +339,7 @@ static ch585_scan_cmd_v1_t g_source0_spi2_cmd_rx __attribute__((aligned(4)));
 #endif
 
 #if APP_CH585_SPI_HW_SPI2_BACKEND
-#if APP_CH585_SPI_AUTO_TRAIN
 static int ch585_hw_spi2_train(void);
-#endif
 static int ch585_scan_decode_source0_capture(ch585_scan_frame_v1_t *frame);
 static int ch585_scan_frame_is_valid(const ch585_scan_frame_v1_t *frame);
 
@@ -418,6 +417,51 @@ static const char *ch585_scan_source0_backend_name(void)
         return "cpu-gpio";
     }
 }
+
+#if APP_CH585_SPI_HW_SPI2_GPIO_CS
+static GPIO_TypeDef *ch585_hw_spi2_cs_port(uint8_t source_id)
+{
+#if APP_CH585_SPI_PCB_SPI1_BACKEND && APP_CH585_SPI_REAL_SOURCE1
+    return (source_id == 1U) ? GPIOD : GPIOF;
+#else
+    (void)source_id;
+    return CH585_HW_SPI_CS_PORT;
+#endif
+}
+
+static uint16_t ch585_hw_spi2_cs_pin(uint8_t source_id)
+{
+#if APP_CH585_SPI_PCB_SPI1_BACKEND && APP_CH585_SPI_REAL_SOURCE1
+    return (source_id == 1U) ? GPIO_Pin_9 : GPIO_Pin_2;
+#else
+    (void)source_id;
+    return CH585_HW_SPI_CS_PIN;
+#endif
+}
+
+static void ch585_hw_spi2_set_all_cs_high(void)
+{
+#if APP_CH585_SPI_PCB_SPI1_BACKEND && APP_CH585_SPI_REAL_SOURCE1
+    GPIO_SetBits(GPIOF, GPIO_Pin_2);
+    GPIO_SetBits(GPIOD, GPIO_Pin_9);
+#else
+    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    GPIO_SetBits(CH585_HW_SPI_OTHER_CS_PORT, CH585_HW_SPI_OTHER_CS_PIN);
+#endif
+}
+
+static void ch585_hw_spi2_active_cs_high(void)
+{
+    GPIO_SetBits(ch585_hw_spi2_cs_port(g_hw_spi2_active_source),
+                 ch585_hw_spi2_cs_pin(g_hw_spi2_active_source));
+}
+
+static void ch585_hw_spi2_active_cs_low(void)
+{
+    GPIO_ResetBits(ch585_hw_spi2_cs_port(g_hw_spi2_active_source),
+                   ch585_hw_spi2_cs_pin(g_hw_spi2_active_source));
+}
+#endif
 
 static void ch585_hw_spi2_apply_config(uint16_t prescaler, uint8_t hsrx, uint16_t cpha)
 {
@@ -1428,7 +1472,7 @@ static int ch585_hw_spi2_cmd_xfer(const ch585_scan_cmd_v1_t *cmd)
     memset(&g_source0_spi2_cmd_rx, 0, sizeof(g_source0_spi2_cmd_rx));
 
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
     DMA_Cmd(DMA1_Channel2, DISABLE);
     DMA_Cmd(DMA1_Channel3, DISABLE);
@@ -1440,7 +1484,7 @@ static int ch585_hw_spi2_cmd_xfer(const ch585_scan_cmd_v1_t *cmd)
     timeout_cycles = (SystemCoreClock != 0U) ? (SystemCoreClock / 100U) : 4000000U;
     SPI_Cmd(CH585_HW_SPIx, ENABLE);
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_ResetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_low();
 #endif
     if (APP_CH585_SPI_CS_SETUP_MS != 0U)
     {
@@ -1490,7 +1534,7 @@ static int ch585_hw_spi2_cmd_xfer(const ch585_scan_cmd_v1_t *cmd)
     }
 
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
     SPI_Cmd(CH585_HW_SPIx, DISABLE);
     for (i = 0U; (i < sizeof(g_scan.source0_cmd_rx)) && (i < sizeof(g_source0_spi2_cmd_rx)); i++)
@@ -1502,7 +1546,7 @@ static int ch585_hw_spi2_cmd_xfer(const ch585_scan_cmd_v1_t *cmd)
 
 timeout:
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
     SPI_Cmd(CH585_HW_SPIx, DISABLE);
     g_scan.source0_cmd_runs++;
@@ -1510,7 +1554,6 @@ timeout:
     return -1;
 }
 
-#if APP_CH585_SPI_HW_SPI2_SHORT_XFER
 static int ch585_hw_spi2_drain_xfer(uint16_t len)
 {
     uint32_t timeout_cycles;
@@ -1518,7 +1561,7 @@ static int ch585_hw_spi2_drain_xfer(uint16_t len)
     uint16_t i;
 
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
     DMA_Cmd(DMA1_Channel2, DISABLE);
     DMA_Cmd(DMA1_Channel3, DISABLE);
@@ -1530,7 +1573,7 @@ static int ch585_hw_spi2_drain_xfer(uint16_t len)
     timeout_cycles = (SystemCoreClock != 0U) ? (SystemCoreClock / 100U) : 4000000U;
     SPI_Cmd(CH585_HW_SPIx, ENABLE);
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_ResetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_low();
 #endif
 
     for (i = 0U; i < len; i++)
@@ -1571,19 +1614,18 @@ static int ch585_hw_spi2_drain_xfer(uint16_t len)
     }
 
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
     SPI_Cmd(CH585_HW_SPIx, DISABLE);
     return 0;
 
 timeout:
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
     SPI_Cmd(CH585_HW_SPIx, DISABLE);
     return -1;
 }
-#endif
 
 static void ch585_hw_spi2_prepare_cmd(void)
 {
@@ -1651,7 +1693,6 @@ static void ch585_hw_spi2_prepare_cmd(void)
     }
 }
 
-#if APP_CH585_SPI_HW_SPI2_SHORT_XFER
 static void ch585_hw_spi2_prepare_pipeline_tx(void)
 {
     memset(g_source0_spi2_tx, 0xFF, sizeof(g_source0_spi2_tx));
@@ -1676,7 +1717,7 @@ static int ch585_hw_spi2_dma_frame_xfer(void)
         ((CH585_HW_SPI_MISO_PORT->INDR & CH585_HW_SPI_MISO_PIN) != 0U) ? 1U : 0U;
 
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
 
     DMA_Cmd(DMA1_Channel2, DISABLE);
@@ -1722,7 +1763,7 @@ static int ch585_hw_spi2_dma_frame_xfer(void)
     SPI_I2S_DMACmd(CH585_HW_SPIx, SPI_I2S_DMAReq_Rx, ENABLE);
     SPI_I2S_DMACmd(CH585_HW_SPIx, SPI_I2S_DMAReq_Tx, ENABLE);
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_ResetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_low();
 #endif
     SPI_Cmd(CH585_HW_SPIx, ENABLE);
 
@@ -1752,7 +1793,7 @@ static int ch585_hw_spi2_dma_frame_xfer(void)
     flags = DMA1->INTFR;
 
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
     DMA_Cmd(DMA1_Channel3, DISABLE);
     DMA_Cmd(DMA1_Channel2, DISABLE);
@@ -1805,10 +1846,8 @@ static int ch585_hw_spi2_dma_frame_xfer(void)
 
     return (((flags & DMA1_FLAG_TC2) != 0U) && ((flags & DMA1_FLAG_TC3) != 0U)) ? 0 : -1;
 }
-#endif
 
-#if APP_CH585_SPI_AUTO_TRAIN
-#if APP_CH585_SPI_WIRE_SHORT && APP_CH585_SPI_REQUEST_ONLY_SHORT
+#if APP_CH585_SPI_AUTO_TRAIN && APP_CH585_SPI_WIRE_SHORT && APP_CH585_SPI_REQUEST_ONLY_SHORT
 typedef struct
 {
     uint16_t prescaler;
@@ -2006,7 +2045,6 @@ static int ch585_hw_spi2_train(void)
     return 0;
 }
 #endif
-#endif
 
 #if APP_CH585_SPI_PIPELINE_SHORT && APP_CH585_SPI_WIRE_SHORT
 static int ch585_scan_fetch_source0_hw_spi2_pipeline(ch585_scan_frame_v1_t *frame)
@@ -2149,7 +2187,7 @@ static int ch585_scan_fetch_source0_hw_spi2(ch585_scan_frame_v1_t *frame)
         ((CH585_HW_SPI_MISO_PORT->INDR & CH585_HW_SPI_MISO_PIN) != 0U) ? 1U : 0U;
 
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
 
     DMA_Cmd(DMA1_Channel2, DISABLE);
@@ -2195,7 +2233,7 @@ static int ch585_scan_fetch_source0_hw_spi2(ch585_scan_frame_v1_t *frame)
     SPI_I2S_DMACmd(CH585_HW_SPIx, SPI_I2S_DMAReq_Rx, ENABLE);
     SPI_I2S_DMACmd(CH585_HW_SPIx, SPI_I2S_DMAReq_Tx, ENABLE);
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_ResetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_low();
 #endif
     SPI_Cmd(CH585_HW_SPIx, ENABLE);
 
@@ -2225,7 +2263,7 @@ static int ch585_scan_fetch_source0_hw_spi2(ch585_scan_frame_v1_t *frame)
     flags = DMA1->INTFR;
 
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
-    GPIO_SetBits(CH585_HW_SPI_CS_PORT, CH585_HW_SPI_CS_PIN);
+    ch585_hw_spi2_active_cs_high();
 #endif
     DMA_Cmd(DMA1_Channel3, DISABLE);
     DMA_Cmd(DMA1_Channel2, DISABLE);
@@ -2467,6 +2505,9 @@ static int ch585_scan_fetch_real_or_fake(uint8_t source_id, ch585_scan_frame_v1_
     if (source_id == 0U)
     {
 #if APP_CH585_SPI_HW_SPI2_BACKEND
+        g_hw_spi2_active_source = 0U;
+#endif
+#if APP_CH585_SPI_HW_SPI2_BACKEND
 #if APP_CH585_SPI_REQUEST_ONLY_SHORT && APP_CH585_SPI_WIRE_SHORT
         if (ch585_scan_fetch_source0_hw_spi2_request_only(frame) == 0)
         {
@@ -2490,6 +2531,29 @@ static int ch585_scan_fetch_real_or_fake(uint8_t source_id, ch585_scan_frame_v1_
 #else
         return ch585_scan_fetch_source0_soft_spi(frame);
 #endif
+    }
+#endif
+
+#if APP_CH585_SPI_REAL_SOURCE1
+    if (source_id == 1U)
+    {
+#if APP_CH585_SPI_HW_SPI2_BACKEND
+        g_hw_spi2_active_source = 1U;
+#if APP_CH585_SPI_REQUEST_ONLY_SHORT && APP_CH585_SPI_WIRE_SHORT
+        if (ch585_scan_fetch_source0_hw_spi2_request_only(frame) == 0)
+        {
+            return 0;
+        }
+#elif APP_CH585_SPI_PIPELINE_SHORT && APP_CH585_SPI_WIRE_SHORT
+        if (ch585_scan_fetch_source0_hw_spi2_pipeline(frame) == 0)
+        {
+            return 0;
+        }
+#else
+        return ch585_scan_fetch_source0_hw_spi2(frame);
+#endif
+#endif
+        return -1;
     }
 #endif
 
@@ -3167,6 +3231,24 @@ uint16_t ch585_spi_scan_source0_slave_diag_rx_crc(void)
 uint16_t ch585_spi_scan_source0_slave_diag_expected_crc(void)
 {
     return g_scan.source0_slave_diag_expected_crc;
+}
+
+uint8_t ch585_spi_scan_source0_capture_head(uint8_t index)
+{
+    if (index >= sizeof(g_scan.source0_head))
+    {
+        return 0U;
+    }
+    return g_scan.source0_head[index];
+}
+
+uint8_t ch585_spi_scan_source0_capture_tail(uint8_t index)
+{
+    if (index >= sizeof(g_scan.source0_tail))
+    {
+        return 0U;
+    }
+    return g_scan.source0_tail[index];
 }
 
 uint32_t ch585_spi_scan_source0_ack_errors(void)

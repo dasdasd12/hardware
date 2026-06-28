@@ -17,6 +17,7 @@
 
 #include "ch585_ble_bridge.h"
 #include "ch585_spi_scan.h"
+#include "keyboard_profile.h"
 
 extern uint32_t SystemCoreClock;
 
@@ -68,62 +69,7 @@ typedef struct
     uint32_t send_errors;
 } ch585_ble_bridge_state_t;
 
-typedef struct
-{
-    uint8_t key_id;
-    uint8_t usage;
-    uint8_t modifier;
-} ch585_ble_bridge_keymap_t;
-
 static ch585_ble_bridge_state_t g_bridge;
-
-/*
- * Debug map for the right half PCB, copied from the right CH585 ADS7948 probe
- * key map. This is a temporary stand-in for the future compiled Profile table.
- */
-static const ch585_ble_bridge_keymap_t g_right_keymap[] = {
-    {0U,  0x45U, 0U},    /* F12 */
-    {1U,  0x44U, 0U},    /* F11 */
-    {2U,  0x43U, 0U},    /* F10 */
-    {3U,  0x42U, 0U},    /* F9 */
-    {4U,  0x41U, 0U},    /* F8 */
-    {5U,  0x40U, 0U},    /* F7 */
-    {6U,  0x3FU, 0U},    /* F6 */
-    {7U,  0x2AU, 0U},    /* Backspace */
-    {8U,  0x2EU, 0U},    /* Equal */
-    {9U,  0x2DU, 0U},    /* Minus */
-    {16U, 0x27U, 0U},    /* 0 */
-    {17U, 0x26U, 0U},    /* 9 */
-    {18U, 0x25U, 0U},    /* 8 */
-    {19U, 0x24U, 0U},    /* 7 */
-    {20U, 0x31U, 0U},    /* Backslash */
-    {21U, 0x30U, 0U},    /* Right bracket */
-    {22U, 0x2FU, 0U},    /* Left bracket */
-    {23U, 0x13U, 0U},    /* P */
-    {24U, 0x12U, 0U},    /* O */
-    {25U, 0x0CU, 0U},    /* I */
-    {32U, 0x18U, 0U},    /* U */
-    {33U, 0x1CU, 0U},    /* Y */
-    {34U, 0x28U, 0U},    /* Enter */
-    {35U, 0x34U, 0U},    /* Quote */
-    {36U, 0x33U, 0U},    /* Semicolon */
-    {37U, 0x0FU, 0U},    /* L */
-    {38U, 0x0EU, 0U},    /* K */
-    {39U, 0x0DU, 0U},    /* J */
-    {40U, 0x0BU, 0U},    /* H */
-    {41U, 0U,    0x20U}, /* Right shift */
-    {48U, 0x38U, 0U},    /* Slash */
-    {49U, 0x37U, 0U},    /* Dot */
-    {50U, 0x36U, 0U},    /* Comma */
-    {51U, 0x10U, 0U},    /* M */
-    {52U, 0x11U, 0U},    /* N */
-    {53U, 0x05U, 0U},    /* B */
-    {54U, 0U,    0x10U}, /* Right ctrl */
-    {55U, 0U,    0x80U}, /* Right GUI */
-    {56U, 0U,    0U},    /* Fn: local layer key, no HID output yet */
-    {57U, 0U,    0x40U}, /* Right alt */
-    {58U, 0x2CU, 0U},    /* Space */
-};
 
 static uint32_t bridge_cycle_now(void)
 {
@@ -294,64 +240,14 @@ static uint8_t bridge_build_report_from_raw(const uint16_t *raw_adc,
                                             uint8_t report[BLE_BRIDGE_REPORT_LEN],
                                             uint8_t *first_key)
 {
-    uint16_t map_index;
-    uint8_t slot = 2U;
-    uint8_t any_down = 0U;
+    uint8_t first_scan_source;
 
-    memset(report, 0, BLE_BRIDGE_REPORT_LEN);
-    if (first_key != RT_NULL)
-    {
-        *first_key = 0xFFU;
-    }
-
-    if (raw_adc == RT_NULL)
-    {
-        return 0U;
-    }
-
-    for (map_index = 0U;
-         map_index < (uint16_t)(sizeof(g_right_keymap) / sizeof(g_right_keymap[0]));
-         map_index++)
-    {
-        const ch585_ble_bridge_keymap_t *entry = &g_right_keymap[map_index];
-
-#if APP_CH585_BLE_BRIDGE_DEBUG_ONLY_KEY_ID != 0xFFU
-        if (entry->key_id != (uint8_t)APP_CH585_BLE_BRIDGE_DEBUG_ONLY_KEY_ID)
-        {
-            continue;
-        }
-#endif
-
-        if (entry->key_id >= key_count)
-        {
-            continue;
-        }
-
-        if (raw_adc[entry->key_id] < APP_CH585_BLE_BRIDGE_DOWN_THRESHOLD_ADC)
-        {
-            continue;
-        }
-
-        any_down = 1U;
-        if ((first_key != RT_NULL) && (*first_key == 0xFFU))
-        {
-            *first_key = entry->key_id;
-        }
-
-        report[0] |= entry->modifier;
-
-        if (entry->usage == 0U)
-        {
-            continue;
-        }
-
-        if (slot < BLE_BRIDGE_REPORT_LEN)
-        {
-            report[slot++] = entry->usage;
-        }
-    }
-
-    return any_down;
+    return keyboard_profile_build_boot_report_from_raw(raw_adc,
+                                                       key_count,
+                                                       APP_CH585_BLE_BRIDGE_DOWN_THRESHOLD_ADC,
+                                                       report,
+                                                       &first_scan_source,
+                                                       first_key);
 }
 
 static int bridge_send_report(const uint8_t report[BLE_BRIDGE_REPORT_LEN],

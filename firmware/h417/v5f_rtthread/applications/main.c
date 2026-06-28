@@ -17,6 +17,7 @@
 #include "ch585_ble_bridge.h"
 #include "ch585_spi_scan.h"
 #include "keyboard_engine.h"
+#include "keyboard_profile.h"
 #include "usb_hs_hid_keyboard.h"
 
 #ifndef APP_ENABLE_V5F_HW_TEST
@@ -43,24 +44,48 @@
 #define APP_ENABLE_USB2_HS_HID 0
 #endif
 
+#ifndef APP_ENABLE_USBFS_CDC_HID
+#define APP_ENABLE_USBFS_CDC_HID 0
+#endif
+
 #ifndef APP_ENABLE_CH585_SPI_SCAN
 #define APP_ENABLE_CH585_SPI_SCAN 0
 #endif
 
+#ifndef APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_CH585_BLE_BRIDGE 0
+#endif
+
 #ifndef APP_CH585_SPI_SCAN_POLLS_PER_LOOP
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_CH585_SPI_SCAN_POLLS_PER_LOOP 4
+#else
 #define APP_CH585_SPI_SCAN_POLLS_PER_LOOP 1
+#endif
 #endif
 
 #ifndef APP_ENABLE_USB_SCAN_REPORT
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_USB_SCAN_REPORT 0
+#else
 #define APP_ENABLE_USB_SCAN_REPORT 1
+#endif
 #endif
 
 #ifndef APP_ENABLE_USB_SCAN_STATUS_REPORT
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_USB_SCAN_STATUS_REPORT 0
+#else
 #define APP_ENABLE_USB_SCAN_STATUS_REPORT 1
+#endif
 #endif
 
 #ifndef APP_ENABLE_USB_SPI_TRAIN_REPORT
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_USB_SPI_TRAIN_REPORT 0
+#else
 #define APP_ENABLE_USB_SPI_TRAIN_REPORT 1
+#endif
 #endif
 
 #ifndef APP_ENABLE_KEYBOARD_ENGINE
@@ -91,6 +116,18 @@
 #define APP_USB_SPI_TRAIN_REPORT_PERIOD_LOOPS 4
 #endif
 
+#ifndef APP_ENABLE_USBFS_KEY_REPORT
+#define APP_ENABLE_USBFS_KEY_REPORT 0
+#endif
+
+#ifndef APP_USBFS_KEY_REPORT_PERIOD_LOOPS
+#define APP_USBFS_KEY_REPORT_PERIOD_LOOPS 4
+#endif
+
+#ifndef APP_USBFS_KEY_REPORT_DOWN_THRESHOLD
+#define APP_USBFS_KEY_REPORT_DOWN_THRESHOLD 2000U
+#endif
+
 #ifndef APP_CH585_DEBUG_REQUEST_PERIOD_LOOPS
 #define APP_CH585_DEBUG_REQUEST_PERIOD_LOOPS 8
 #endif
@@ -100,7 +137,7 @@
 #endif
 
 #ifndef APP_CH585_CONFIG_TEST_ENABLE
-#define APP_CH585_CONFIG_TEST_ENABLE 1
+#define APP_CH585_CONFIG_TEST_ENABLE 0
 #endif
 
 #ifndef APP_CH585_CONFIG_TEST_LOOP
@@ -120,7 +157,7 @@
 #endif
 
 #ifndef APP_CH585_CALIBRATE_TEST_ENABLE
-#define APP_CH585_CALIBRATE_TEST_ENABLE 1
+#define APP_CH585_CALIBRATE_TEST_ENABLE 0
 #endif
 
 #ifndef APP_CH585_CALIBRATE_TEST_LOOP
@@ -148,7 +185,19 @@
 #endif
 
 #ifndef APP_ENABLE_SERIAL_HEARTBEAT
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_ENABLE_SERIAL_HEARTBEAT 0
+#else
 #define APP_ENABLE_SERIAL_HEARTBEAT 1
+#endif
+#endif
+
+#ifndef APP_MAIN_LOOP_DELAY_MS
+#if APP_ENABLE_CH585_BLE_BRIDGE
+#define APP_MAIN_LOOP_DELAY_MS 0
+#else
+#define APP_MAIN_LOOP_DELAY_MS 500
+#endif
 #endif
 
 #ifndef APP_MAIN_LOOP_DELAY_MS
@@ -345,7 +394,16 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
     const ch585_scan_source_stats_t *src1;
     const uint16_t *raw;
     uint32_t sck_x10;
-    char line[96];
+    uint32_t left_mask0 = 0U;
+    uint32_t left_mask1 = 0U;
+    uint32_t right_mask0 = 0U;
+    uint32_t right_mask1 = 0U;
+    uint16_t down_ids[4] = {255U, 255U, 255U, 255U};
+    uint16_t right_down_ids[4] = {255U, 255U, 255U, 255U};
+    uint16_t down_count = 0U;
+    uint16_t right_down_count = 0U;
+    uint16_t i;
+    char line[128];
     int used;
 
     if ((heartbeat % APP_USB_SCAN_STATUS_REPORT_PERIOD_LOOPS) != 1U) {
@@ -361,10 +419,13 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
     }
 
     used = rt_snprintf(line, sizeof(line),
-                       "SS hb=%u ok=%u fetch=%u crc=%u seq=%u s1ok=%u\r\n",
+                       "SS hb=%u ok=%u fetch=%u mag=%u ver=%u src=%u crc=%u seq=%u s1ok=%u\r\n",
                        (unsigned int)heartbeat,
                        (unsigned int)src0->frames_ok,
                        (unsigned int)src0->fetch_errors,
+                       (unsigned int)src0->magic_errors,
+                       (unsigned int)src0->version_errors,
+                       (unsigned int)src0->source_errors,
                        (unsigned int)src0->crc_errors,
                        (unsigned int)src0->seq_drops,
                        (unsigned int)src1->frames_ok);
@@ -427,6 +488,24 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
         if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
             (void)usb_cdc_write_line(line, used);
         }
+
+        used = rt_snprintf(line, sizeof(line),
+                           "SH head=%02x %02x %02x %02x %02x %02x %02x %02x tail=%02x %02x %02x %02x\r\n",
+                           (unsigned int)ch585_spi_scan_source0_capture_head(0U),
+                           (unsigned int)ch585_spi_scan_source0_capture_head(1U),
+                           (unsigned int)ch585_spi_scan_source0_capture_head(2U),
+                           (unsigned int)ch585_spi_scan_source0_capture_head(3U),
+                           (unsigned int)ch585_spi_scan_source0_capture_head(4U),
+                           (unsigned int)ch585_spi_scan_source0_capture_head(5U),
+                           (unsigned int)ch585_spi_scan_source0_capture_head(6U),
+                           (unsigned int)ch585_spi_scan_source0_capture_head(7U),
+                           (unsigned int)ch585_spi_scan_source0_capture_tail(0U),
+                           (unsigned int)ch585_spi_scan_source0_capture_tail(1U),
+                           (unsigned int)ch585_spi_scan_source0_capture_tail(2U),
+                           (unsigned int)ch585_spi_scan_source0_capture_tail(3U));
+        if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
+            (void)usb_cdc_write_line(line, used);
+        }
     }
 
     used = rt_snprintf(line, sizeof(line),
@@ -435,6 +514,73 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
                        (unsigned int)raw[1],
                        (unsigned int)raw[63],
                        (unsigned int)raw[64]);
+    if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
+        (void)usb_cdc_write_line(line, used);
+    }
+
+    for (i = 0U; i < 64U; i++)
+    {
+        if (raw[i] > 2000U)
+        {
+            if (i < 32U)
+            {
+                left_mask0 |= (1UL << i);
+            }
+            else
+            {
+                left_mask1 |= (1UL << (i - 32U));
+            }
+            if (down_count < 4U)
+            {
+                down_ids[down_count] = i;
+            }
+            down_count++;
+        }
+
+        if (raw[64U + i] > 2000U)
+        {
+            if (i < 32U)
+            {
+                right_mask0 |= (1UL << i);
+            }
+            else
+            {
+                right_mask1 |= (1UL << (i - 32U));
+            }
+            if (right_down_count < 4U)
+            {
+                right_down_ids[right_down_count] = i;
+            }
+            right_down_count++;
+        }
+    }
+
+    used = rt_snprintf(line, sizeof(line),
+                       "S0 cnt=%u ids=%u,%u,%u,%u m0=%08x m1=%08x r21=%u r35=%u\r\n",
+                       (unsigned int)down_count,
+                       (unsigned int)down_ids[0],
+                       (unsigned int)down_ids[1],
+                       (unsigned int)down_ids[2],
+                       (unsigned int)down_ids[3],
+                       (unsigned int)left_mask0,
+                       (unsigned int)left_mask1,
+                       (unsigned int)raw[21],
+                       (unsigned int)raw[35]);
+    if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
+        (void)usb_cdc_write_line(line, used);
+    }
+
+    used = rt_snprintf(line, sizeof(line),
+                       "S1 cnt=%u ids=%u,%u,%u,%u m0=%08x m1=%08x r85=%u r122=%u\r\n",
+                       (unsigned int)right_down_count,
+                       (unsigned int)right_down_ids[0],
+                       (unsigned int)right_down_ids[1],
+                       (unsigned int)right_down_ids[2],
+                       (unsigned int)right_down_ids[3],
+                       (unsigned int)right_mask0,
+                       (unsigned int)right_mask1,
+                       (unsigned int)raw[64U + 21U],
+                       (unsigned int)raw[64U + 58U]);
     if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
         (void)usb_cdc_write_line(line, used);
     }
@@ -479,6 +625,187 @@ static void usb_scan_debug_report_poll(rt_uint32_t heartbeat)
     if ((used > 0) && ((rt_size_t)used < sizeof(line)))
     {
         (void)usb_cdc_write_line(line, used);
+    }
+}
+#endif
+
+#if APP_ENABLE_USB_TEST && APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USBFS_KEY_REPORT
+static void usbfs_key_profile_report_poll(const uint16_t *raw,
+                                          uint16_t key_count,
+                                          rt_uint8_t changed)
+{
+    char line[160];
+    int used;
+    rt_uint16_t raw_index;
+    rt_uint8_t printed = 0U;
+
+    if ((changed == 0U) || (raw == RT_NULL))
+    {
+        return;
+    }
+
+    used = rt_snprintf(line, sizeof(line), "KP");
+    if ((used < 0) || ((rt_size_t)used >= sizeof(line)))
+    {
+        return;
+    }
+
+    for (raw_index = 0U;
+         (raw_index < key_count) && (printed < 5U);
+         raw_index++)
+    {
+        const keyboard_profile_entry_t *entry;
+        rt_uint8_t scan_source;
+        rt_uint8_t local_id;
+        int wrote;
+
+        if (raw[raw_index] <= APP_USBFS_KEY_REPORT_DOWN_THRESHOLD)
+        {
+            continue;
+        }
+
+        entry = keyboard_profile_lookup_raw_index(raw_index);
+        if (entry == RT_NULL)
+        {
+            continue;
+        }
+
+        scan_source = (rt_uint8_t)(raw_index / KEYBOARD_PROFILE_HALF_KEY_COUNT);
+        local_id = (rt_uint8_t)(raw_index % KEYBOARD_PROFILE_HALF_KEY_COUNT);
+        wrote = rt_snprintf(&line[used],
+                            sizeof(line) - (rt_size_t)used,
+                            " %s%u:%s/%02x/%02x",
+                            keyboard_profile_scan_source_name(scan_source),
+                            (unsigned int)local_id,
+                            entry->label,
+                            (unsigned int)entry->hid_usage,
+                            (unsigned int)entry->modifier);
+        if ((wrote < 0) ||
+            ((rt_size_t)wrote >= (sizeof(line) - (rt_size_t)used)))
+        {
+            break;
+        }
+
+        used += wrote;
+        printed++;
+    }
+
+    if (printed == 0U)
+    {
+        int wrote = rt_snprintf(&line[used],
+                                sizeof(line) - (rt_size_t)used,
+                                " none");
+        if ((wrote < 0) ||
+            ((rt_size_t)wrote >= (sizeof(line) - (rt_size_t)used)))
+        {
+            return;
+        }
+        used += wrote;
+    }
+
+    if ((rt_size_t)used > (sizeof(line) - 3U))
+    {
+        return;
+    }
+
+    line[used++] = '\r';
+    line[used++] = '\n';
+    line[used] = '\0';
+    (void)usb_cdc_write_line(line, used);
+}
+
+static void usbfs_key_report_poll(rt_uint32_t heartbeat)
+{
+    static rt_uint32_t report_frame;
+    static rt_uint32_t last_s0_lo = 0xffffffffU;
+    static rt_uint32_t last_s0_hi = 0xffffffffU;
+    static rt_uint32_t last_s1_lo = 0xffffffffU;
+    static rt_uint32_t last_s1_hi = 0xffffffffU;
+    const uint16_t *raw = ch585_spi_scan_raw();
+    rt_uint32_t s0_lo = 0U;
+    rt_uint32_t s0_hi = 0U;
+    rt_uint32_t s1_lo = 0U;
+    rt_uint32_t s1_hi = 0U;
+    rt_uint16_t s0_count = 0U;
+    rt_uint16_t s1_count = 0U;
+    rt_uint16_t i;
+    rt_uint8_t changed;
+    rt_uint8_t periodic = 0U;
+    char line[128];
+    int used;
+
+    if (raw == RT_NULL)
+    {
+        return;
+    }
+
+    for (i = 0U; i < 64U; i++)
+    {
+        if ((i < CH585_SCAN_TOTAL_KEYS) &&
+            (raw[i] > APP_USBFS_KEY_REPORT_DOWN_THRESHOLD))
+        {
+            if (i < 32U)
+            {
+                s0_lo |= (1UL << i);
+            }
+            else
+            {
+                s0_hi |= (1UL << (i - 32U));
+            }
+            s0_count++;
+        }
+
+        if (((64U + i) < CH585_SCAN_TOTAL_KEYS) &&
+            (raw[64U + i] > APP_USBFS_KEY_REPORT_DOWN_THRESHOLD))
+        {
+            if (i < 32U)
+            {
+                s1_lo |= (1UL << i);
+            }
+            else
+            {
+                s1_hi |= (1UL << (i - 32U));
+            }
+            s1_count++;
+        }
+    }
+
+    changed = ((s0_lo != last_s0_lo) ||
+               (s0_hi != last_s0_hi) ||
+               (s1_lo != last_s1_lo) ||
+               (s1_hi != last_s1_hi)) ? 1U : 0U;
+
+    if (APP_USBFS_KEY_REPORT_PERIOD_LOOPS != 0U)
+    {
+        periodic = ((heartbeat % APP_USBFS_KEY_REPORT_PERIOD_LOOPS) == 0U) ? 1U : 0U;
+    }
+
+    if ((changed == 0U) && (periodic == 0U))
+    {
+        return;
+    }
+
+    used = rt_snprintf(line, sizeof(line),
+                       "KR f=%u hb=%u s0=%08x:%08x s1=%08x:%08x c0=%u c1=%u\r\n",
+                       (unsigned int)report_frame,
+                       (unsigned int)heartbeat,
+                       (unsigned int)s0_hi,
+                       (unsigned int)s0_lo,
+                       (unsigned int)s1_hi,
+                       (unsigned int)s1_lo,
+                       (unsigned int)s0_count,
+                       (unsigned int)s1_count);
+    if ((used > 0) && ((rt_size_t)used < sizeof(line)))
+    {
+        if (usb_cdc_write_line(line, used) == used)
+        {
+            usbfs_key_profile_report_poll(raw, CH585_SCAN_TOTAL_KEYS, changed);
+            last_s0_lo = s0_lo;
+            last_s0_hi = s0_hi;
+            last_s1_lo = s1_lo;
+            last_s1_hi = s1_hi;
+            report_frame++;
+        }
     }
 }
 #endif
@@ -695,6 +1022,9 @@ int main(void)
         for (scan_poll = 0; scan_poll < APP_CH585_SPI_SCAN_POLLS_PER_LOOP; scan_poll++)
         {
             ch585_spi_scan_poll_once();
+#if APP_ENABLE_CH585_BLE_BRIDGE
+            ch585_ble_bridge_poll_from_raw(ch585_spi_scan_raw(), CH585_SCAN_TOTAL_KEYS);
+#endif
         }
 #if APP_ENABLE_KEYBOARD_ENGINE
         keyboard_engine_update(ch585_spi_scan_raw());
@@ -709,9 +1039,16 @@ int main(void)
         ch32h417_usbhs_hid_poll_keyboard(ch585_spi_scan_raw(),
                                          CH585_SCAN_TOTAL_KEYS);
 #endif
+#if APP_ENABLE_USBFS_CDC_HID && APP_ENABLE_CH585_SPI_SCAN
+        ch32h417_usbfs_hid_poll_keyboard(ch585_spi_scan_raw(),
+                                         CH585_SCAN_TOTAL_KEYS);
+#endif
 #if APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SCAN_STATUS_REPORT
         usb_scan_status_report_poll(heartbeat);
         usb_scan_debug_report_poll(heartbeat);
+#endif
+#if APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USBFS_KEY_REPORT
+        usbfs_key_report_poll(heartbeat);
 #endif
 #if APP_ENABLE_USB2_HS_HID
         usb_hs_hid_status_report_poll(heartbeat);
@@ -742,7 +1079,11 @@ int main(void)
         }
 #endif
         heartbeat++;
+#if APP_MAIN_LOOP_DELAY_MS > 0
         rt_thread_mdelay(APP_MAIN_LOOP_DELAY_MS);
+#else
+        rt_thread_yield();
+#endif
     }
 
     return 0;

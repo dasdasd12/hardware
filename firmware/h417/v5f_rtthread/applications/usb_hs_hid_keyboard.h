@@ -7,6 +7,11 @@ int ch32h417_usbhs_hid_init(void);
 void ch32h417_usbhs_hid_poll_keyboard(const rt_uint16_t *raw_adc,
                                       rt_uint16_t key_count);
 
+void ch32h417_usbfs_hid_register_bus(void);
+void ch32h417_usbfs_hid_event(rt_uint8_t event);
+void ch32h417_usbfs_hid_poll_keyboard(const rt_uint16_t *raw_adc,
+                                      rt_uint16_t key_count);
+
 rt_uint8_t ch32h417_usbhs_hid_configured(void);
 rt_uint8_t ch32h417_usbhs_hid_keyboard_busy(void);
 rt_uint8_t ch32h417_usbhs_hid_vendor_busy(void);

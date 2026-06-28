@@ -11,6 +11,7 @@
 #include "usbd_core.h"
 #include "usbd_hid.h"
 #include "usb_dc_ch32h417.h"
+#include "keyboard_profile.h"
 #include "usb_hs_hid_keyboard.h"
 
 #define USBHS_HID_VID        0x1A86
@@ -20,12 +21,15 @@
 #define USBHS_KBD_IN_EP      0x81
 #define USBHS_VENDOR_IN_EP   0x82
 #define USBHS_VENDOR_OUT_EP  0x02
+#define USBFS_KBD_IN_EP      0x84
 
 #define USBHS_KBD_REPORT_LEN     8U
 #define USBHS_VENDOR_REPORT_LEN  64U
+#define USBFS_KBD_REPORT_LEN     8U
 
 #define USBHS_KBD_INTERVAL       1U
 #define USBHS_VENDOR_INTERVAL    1U
+#define USBFS_KBD_INTERVAL       1U
 
 #define USBHS_KBD_REPORT_DESC_SIZE     63U
 #define USBHS_VENDOR_REPORT_DESC_SIZE  38U
@@ -171,48 +175,39 @@ static const uint8_t usbhs_hid_vendor_report_desc[USBHS_VENDOR_REPORT_DESC_SIZE]
 
 static struct usbd_interface usbhs_kbd_intf;
 static struct usbd_interface usbhs_vendor_intf;
+static struct usbd_interface usbfs_kbd_intf;
 static struct usbd_endpoint usbhs_kbd_in_ep;
 static struct usbd_endpoint usbhs_vendor_in_ep;
 static struct usbd_endpoint usbhs_vendor_out_ep;
+static struct usbd_endpoint usbfs_kbd_in_ep;
 
 static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX
 uint8_t usbhs_kbd_report[USBHS_KBD_REPORT_LEN];
+static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX
+uint8_t usbfs_kbd_report[USBFS_KBD_REPORT_LEN];
 static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX
 uint8_t usbhs_vendor_rx[USBHS_VENDOR_REPORT_LEN];
 static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX
 uint8_t usbhs_vendor_tx[USBHS_VENDOR_REPORT_LEN];
 
 static uint8_t usbhs_hid_registered;
+static uint8_t usbfs_hid_registered;
 static volatile uint8_t usbhs_hid_configured_flag;
+static volatile uint8_t usbfs_hid_configured_flag;
 static volatile uint8_t usbhs_kbd_busy;
+static volatile uint8_t usbfs_kbd_busy;
 static volatile uint8_t usbhs_vendor_busy;
 static uint8_t usbhs_kbd_idle;
 static uint8_t usbhs_kbd_protocol = 1U;
+static uint8_t usbfs_kbd_idle;
+static uint8_t usbfs_kbd_protocol = 1U;
 static uint8_t usbhs_kbd_leds;
+static uint8_t usbfs_kbd_leds;
 static uint8_t usbhs_last_vendor_cmd;
 static uint32_t usbhs_kbd_reports;
+static uint32_t usbfs_kbd_reports;
 static uint32_t usbhs_vendor_rx_reports;
 static uint32_t usbhs_vendor_tx_reports;
-
-static uint8_t key_id_to_hid_usage(uint16_t key_id)
-{
-    static const uint8_t digit_usage[10] = {
-        0x27, 0x1E, 0x1F, 0x20, 0x21,
-        0x22, 0x23, 0x24, 0x25, 0x26
-    };
-
-    if (key_id < 26U)
-    {
-        return (uint8_t)(0x04U + key_id);
-    }
-
-    if ((key_id >= 26U) && (key_id < 36U))
-    {
-        return digit_usage[key_id - 26U];
-    }
-
-    return 0U;
-}
 
 static void usbhs_vendor_build_status_report(void)
 {
@@ -271,6 +266,15 @@ static void usbhs_kbd_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
     (void)nbytes;
     usbhs_kbd_busy = 0U;
     usbhs_kbd_reports++;
+}
+
+static void usbfs_kbd_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
+{
+    (void)busid;
+    (void)ep;
+    (void)nbytes;
+    usbfs_kbd_busy = 0U;
+    usbfs_kbd_reports++;
 }
 
 static void usbhs_vendor_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
@@ -339,6 +343,44 @@ static void usbhs_hid_register_bus(void)
     usbhs_hid_registered = 1U;
 }
 
+void ch32h417_usbfs_hid_register_bus(void)
+{
+    if (usbfs_hid_registered != 0U)
+    {
+        return;
+    }
+
+    usbfs_kbd_in_ep.ep_addr = USBFS_KBD_IN_EP;
+    usbfs_kbd_in_ep.ep_cb = usbfs_kbd_in_callback;
+
+    usbd_add_interface(USB_CH32H417_BUS_FS,
+                       usbd_hid_init_intf(USB_CH32H417_BUS_FS,
+                                          &usbfs_kbd_intf,
+                                          usbhs_hid_keyboard_report_desc,
+                                          sizeof(usbhs_hid_keyboard_report_desc)));
+    usbd_add_endpoint(USB_CH32H417_BUS_FS, &usbfs_kbd_in_ep);
+    usbfs_hid_registered = 1U;
+}
+
+void ch32h417_usbfs_hid_event(rt_uint8_t event)
+{
+    switch (event)
+    {
+    case USBD_EVENT_CONFIGURED:
+        usbfs_hid_configured_flag = 1U;
+        usbfs_kbd_busy = 0U;
+        rt_kprintf("USBFS HID configured\r\n");
+        break;
+    case USBD_EVENT_RESET:
+    case USBD_EVENT_DISCONNECTED:
+        usbfs_hid_configured_flag = 0U;
+        usbfs_kbd_busy = 0U;
+        break;
+    default:
+        break;
+    }
+}
+
 int ch32h417_usbhs_hid_init(void)
 {
     int ret;
@@ -355,12 +397,43 @@ int ch32h417_usbhs_hid_init(void)
     return ret;
 }
 
+void ch32h417_usbfs_hid_poll_keyboard(const rt_uint16_t *raw_adc,
+                                      rt_uint16_t key_count)
+{
+    uint8_t report[USBFS_KBD_REPORT_LEN] = {0};
+
+    if ((usbfs_hid_configured_flag == 0U) || (usbfs_kbd_busy != 0U))
+    {
+        return;
+    }
+
+    if (raw_adc == RT_NULL)
+    {
+        return;
+    }
+
+    (void)keyboard_profile_build_boot_report_from_raw(raw_adc,
+                                                      key_count,
+                                                      APP_USBHS_HID_DOWN_ADC,
+                                                      report,
+                                                      RT_NULL,
+                                                      RT_NULL);
+
+    memcpy(usbfs_kbd_report, report, sizeof(usbfs_kbd_report));
+    usbfs_kbd_busy = 1U;
+    if (usbd_ep_start_write(USB_CH32H417_BUS_FS,
+                            USBFS_KBD_IN_EP,
+                            usbfs_kbd_report,
+                            sizeof(usbfs_kbd_report)) != 0)
+    {
+        usbfs_kbd_busy = 0U;
+    }
+}
+
 void ch32h417_usbhs_hid_poll_keyboard(const rt_uint16_t *raw_adc,
                                       rt_uint16_t key_count)
 {
     uint8_t report[USBHS_KBD_REPORT_LEN] = {0};
-    uint8_t slot = 2U;
-    rt_uint16_t i;
 
     if ((usbhs_hid_configured_flag == 0U) || (usbhs_kbd_busy != 0U))
     {
@@ -372,24 +445,12 @@ void ch32h417_usbhs_hid_poll_keyboard(const rt_uint16_t *raw_adc,
         return;
     }
 
-    for (i = 0U; (i < key_count) && (slot < USBHS_KBD_REPORT_LEN); i++)
-    {
-        uint8_t usage;
-
-        if (raw_adc[i] < APP_USBHS_HID_DOWN_ADC)
-        {
-            continue;
-        }
-
-        usage = key_id_to_hid_usage(i);
-        if (usage == 0U)
-        {
-            continue;
-        }
-
-        report[slot] = usage;
-        slot++;
-    }
+    (void)keyboard_profile_build_boot_report_from_raw(raw_adc,
+                                                      key_count,
+                                                      APP_USBHS_HID_DOWN_ADC,
+                                                      report,
+                                                      RT_NULL,
+                                                      RT_NULL);
 
     memcpy(usbhs_kbd_report, report, sizeof(usbhs_kbd_report));
     usbhs_kbd_busy = 1U;
@@ -448,6 +509,11 @@ void usbd_hid_get_report(uint8_t busid,
 
     if (busid != USB_CH32H417_BUS_HS)
     {
+        if ((busid == USB_CH32H417_BUS_FS) && (intf == 2U))
+        {
+            *data = usbfs_kbd_report;
+            *len = sizeof(usbfs_kbd_report);
+        }
         return;
     }
 
@@ -476,6 +542,11 @@ uint8_t usbd_hid_get_idle(uint8_t busid, uint8_t intf, uint8_t report_id)
         return usbhs_kbd_idle;
     }
 
+    if ((busid == USB_CH32H417_BUS_FS) && (intf == 2U))
+    {
+        return usbfs_kbd_idle;
+    }
+
     return 0U;
 }
 
@@ -484,6 +555,11 @@ uint8_t usbd_hid_get_protocol(uint8_t busid, uint8_t intf)
     if ((busid == USB_CH32H417_BUS_HS) && (intf == 0U))
     {
         return usbhs_kbd_protocol;
+    }
+
+    if ((busid == USB_CH32H417_BUS_FS) && (intf == 2U))
+    {
+        return usbfs_kbd_protocol;
     }
 
     return 0U;
@@ -499,8 +575,18 @@ void usbd_hid_set_report(uint8_t busid,
     (void)report_id;
     (void)report_type;
 
-    if ((busid != USB_CH32H417_BUS_HS) || (report == RT_NULL) ||
-        (report_len == 0U))
+    if ((report == RT_NULL) || (report_len == 0U))
+    {
+        return;
+    }
+
+    if ((busid == USB_CH32H417_BUS_FS) && (intf == 2U))
+    {
+        usbfs_kbd_leds = report[0];
+        return;
+    }
+
+    if (busid != USB_CH32H417_BUS_HS)
     {
         return;
     }
@@ -527,6 +613,11 @@ void usbd_hid_set_idle(uint8_t busid,
     {
         usbhs_kbd_idle = duration;
     }
+
+    if ((busid == USB_CH32H417_BUS_FS) && (intf == 2U))
+    {
+        usbfs_kbd_idle = duration;
+    }
 }
 
 void usbd_hid_set_protocol(uint8_t busid, uint8_t intf, uint8_t protocol)
@@ -534,5 +625,10 @@ void usbd_hid_set_protocol(uint8_t busid, uint8_t intf, uint8_t protocol)
     if ((busid == USB_CH32H417_BUS_HS) && (intf == 0U))
     {
         usbhs_kbd_protocol = protocol;
+    }
+
+    if ((busid == USB_CH32H417_BUS_FS) && (intf == 2U))
+    {
+        usbfs_kbd_protocol = protocol;
     }
 }

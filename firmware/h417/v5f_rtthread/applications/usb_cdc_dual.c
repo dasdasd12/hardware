@@ -8,8 +8,10 @@
 
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
+#include "usbd_hid.h"
 #include "usb_dc_ch32h417.h"
 #include "usb_dc_ch32h417_usbss.h"
+#include "usb_hs_hid_keyboard.h"
 
 #define USBD_VID           0x1A86
 #define USBD_PID           0xFE31
@@ -23,6 +25,11 @@
 #define CDC_FS_MPS 64U
 #define CDC_HS_MPS 512U
 #define CDC_SS_MPS 1024U
+
+#define FS_KBD_IN_EP         0x84
+#define FS_KBD_REPORT_LEN    8U
+#define FS_KBD_INTERVAL      1U
+#define FS_KBD_REPORT_DESC_SIZE 63U
 
 #ifndef APP_ENABLE_USB2_HS_CDC
 #define APP_ENABLE_USB2_HS_CDC 1
@@ -48,7 +55,17 @@
 #endif
 #endif
 
+#ifndef APP_ENABLE_USBFS_CDC_HID
+#define APP_ENABLE_USBFS_CDC_HID 0
+#endif
+
+#if APP_ENABLE_USBFS_CDC_HID
+#define USB_CONFIG_SIZE_FS (9 + CDC_ACM_DESCRIPTOR_LEN + HID_KEYBOARD_DESCRIPTOR_LEN)
+#define USB_CONFIG_INTERFACE_COUNT_FS 0x03
+#else
 #define USB_CONFIG_SIZE_FS (9 + CDC_ACM_DESCRIPTOR_LEN)
+#define USB_CONFIG_INTERFACE_COUNT_FS 0x02
+#endif
 #define USB_CONFIG_SIZE_HS (9 + CDC_ACM_DESCRIPTOR_LEN)
 #define USB_CONFIG_SIZE_SS (9 + 8 + 9 + 5 + 5 + 4 + 5 + 7 + 6 + 9 + 7 + 6 + 7 + 6)
 
@@ -79,8 +96,13 @@ static const uint8_t device_descriptor_ss[] = {
 };
 
 static const uint8_t config_descriptor_fs[] = {
-    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_FS, 0x02, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER),
+    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_FS, USB_CONFIG_INTERFACE_COUNT_FS, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER),
     CDC_ACM_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_FS_MPS, 0x02),
+#if APP_ENABLE_USBFS_CDC_HID
+    HID_KEYBOARD_DESCRIPTOR_INIT(0x02, 0x01, FS_KBD_REPORT_DESC_SIZE,
+                                 FS_KBD_IN_EP, FS_KBD_REPORT_LEN,
+                                 FS_KBD_INTERVAL),
+#endif
 };
 
 static const uint8_t config_descriptor_hs[] = {
@@ -472,6 +494,11 @@ static void usb_event_handler(uint8_t busid, uint8_t event)
         cdc_tx_busy[busid] = 0U;
         cdc_bus_configured[busid] = 1U;
         cdc_submit_read(busid);
+#if APP_ENABLE_USBFS_CDC_HID
+        if (busid == USB_CH32H417_BUS_FS) {
+            ch32h417_usbfs_hid_event(event);
+        }
+#endif
         rt_kprintf("%s CDC configured\r\n", cdc_bus_name(busid));
         break;
     case USBD_EVENT_RESET:
@@ -479,6 +506,11 @@ static void usb_event_handler(uint8_t busid, uint8_t event)
         cdc_tx_busy[busid] = 0U;
         cdc_bus_configured[busid] = 0U;
         cdc_reset_rx(busid);
+#if APP_ENABLE_USBFS_CDC_HID
+        if (busid == USB_CH32H417_BUS_FS) {
+            ch32h417_usbfs_hid_event(event);
+        }
+#endif
         break;
     default:
         break;
@@ -504,6 +536,11 @@ static void dual_cdc_register_bus(uint8_t busid)
     usbd_add_endpoint(busid, &cdc_out_ep[busid]);
     usbd_add_endpoint(busid, &cdc_in_ep[busid]);
     usbd_add_endpoint(busid, &cdc_int_ep[busid]);
+#if APP_ENABLE_USBFS_CDC_HID
+    if (busid == USB_CH32H417_BUS_FS) {
+        ch32h417_usbfs_hid_register_bus();
+    }
+#endif
     cdc_bus_registered[busid] = 1U;
 }
 

@@ -211,6 +211,8 @@ uint8_t ch585_spi_scan_source0_slave_diag_raw_host_seq(void);
 uint8_t ch585_spi_scan_source0_slave_diag_raw_ack_seq(void);
 uint16_t ch585_spi_scan_source0_slave_diag_rx_crc(void);
 uint16_t ch585_spi_scan_source0_slave_diag_expected_crc(void);
+uint8_t ch585_spi_scan_source0_capture_head(uint8_t index);
+uint8_t ch585_spi_scan_source0_capture_tail(uint8_t index);
 uint32_t ch585_spi_scan_source0_ack_errors(void);
 uint16_t ch585_spi_scan_source0_host_seq(void);
 uint8_t ch585_spi_scan_source0_train_candidate_count(void);
