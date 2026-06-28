@@ -8,43 +8,28 @@ BUILD_ROOT ?= build
 ALLOW_EEPROM_WRITE ?= 0
 CH585_FIRMWARE_ROOT ?= $(PROJECT_ROOT)/firmware/ch585
 WCH_CH585_SRC_ROOT := $(CH585_FIRMWARE_ROOT)/basic/wch/SRC
-CH585_FIRMWARE_DRIVER_ROOT := $(CH585_FIRMWARE_ROOT)/drivers
+CH585_DRIVER_ROOT := $(CH585_FIRMWARE_ROOT)/drivers
 
-ifeq ($(HALF),left)
-CH585_HALF_ROLE := left
-CH585_HALF_BOARD := u2
-else ifeq ($(HALF),right)
-CH585_HALF_ROLE := right
-CH585_HALF_BOARD := u3
-else ifeq ($(HALF),u2)
-CH585_HALF_ROLE := left
-CH585_HALF_BOARD := u2
-else ifeq ($(HALF),u3)
-CH585_HALF_ROLE := right
-CH585_HALF_BOARD := u3
-else
-$(error HALF must be left/right; legacy u2/u3 aliases are accepted, got '$(HALF)')
-endif
-
-CC := $(PREFIX)gcc
-AS := $(PREFIX)gcc -x assembler-with-cpp
-LD := $(PREFIX)gcc
-OBJCOPY := $(PREFIX)objcopy
-OBJDUMP := $(PREFIX)objdump
-SIZE := $(PREFIX)size
+CC := "$(PREFIX)gcc"
+AS := "$(PREFIX)gcc" -x assembler-with-cpp
+LD := "$(PREFIX)gcc"
+OBJCOPY := "$(PREFIX)objcopy"
+OBJDUMP := "$(PREFIX)objdump"
+SIZE := "$(PREFIX)size"
 
 ARCH_FLAGS := -march=rv32imac_zicsr -mabi=ilp32 -msmall-data-limit=8 -msave-restore
 COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -g -fmessage-length=0 -fsigned-char
 COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized -std=gnu99
+COMMON_FLAGS += -Wno-unused-variable
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 SRC_ROOT := $(WCH_CH585_SRC_ROOT)
 DRIVER_ROOT := $(SRC_ROOT)/StdPeriphDriver
-INC := -I$(SRC_ROOT)/RVMSIS -I$(DRIVER_ROOT)/inc -I$(CH585_FIRMWARE_DRIVER_ROOT) -Isrc -I../common
-DEFS := -DTEST_NAME=\"$(TEST)\" -DCH585_HALF_NAME=\"$(CH585_HALF_ROLE)\"
-DEFS += -DCH585_HALF_BOARD=\"$(CH585_HALF_BOARD)\"
+INC := -I$(SRC_ROOT)/RVMSIS -I$(DRIVER_ROOT)/inc -I$(CH585_DRIVER_ROOT) -Isrc
+DEFS := -DTEST_NAME=\"$(TEST)\" -DCH585_HALF_NAME=\"$(HALF)\"
 DEFS += -DALLOW_EEPROM_WRITE=$(ALLOW_EEPROM_WRITE)
+DEFS += $(DEFS_EXTRA)
 
 COMMON_SRC := src/ch585_common.c src/ch585_test_main.c
 TEST_EXTRA_SRC :=
@@ -67,32 +52,18 @@ DEFS += -DCH585_TEST_FUNC=ch585_u3_charge_gpio_run
 else ifeq ($(filter $(TEST),ch585_right_ec11_gpio ch585_u3_ec11_gpio),$(TEST))
 TEST_SRC := src/ch585_u3_ec11_gpio.c
 DEFS += -DCH585_TEST_FUNC=ch585_u3_ec11_gpio_run
-else ifeq ($(TEST),ch585_adc_mux_scan)
-TEST_SRC := src/ch585_adc_mux_scan.c
-TEST_EXTRA_SRC += $(CH585_FIRMWARE_DRIVER_ROOT)/ch585_ads7948_mux_acq.c
-TEST_EXTRA_SDK_SRC += $(DRIVER_ROOT)/CH58x_spi1.c
-DEFS += -DCH585_TEST_FUNC=ch585_adc_mux_scan_run
-DEFS += -DCH585_SYSCLK_SOURCE=CLK_SOURCE_HSE_PLL_78MHz
-DEFS += -DFREQ_SYS=78000000
-ifeq ($(CH585_HALF_ROLE),right)
-DEFS += -DCH585_ADC_MUX_HALF_RIGHT=1
-else ifeq ($(CH585_HALF_ROLE),left)
-DEFS += -DCH585_ADC_MUX_HALF_LEFT=1
-else
-$(error ch585_adc_mux_scan supports HALF=left or HALF=right, got '$(HALF)')
-endif
-else ifeq ($(TEST),ch585_spi0_speed_slave)
-TEST_SRC := src/ch585_spi0_speed_slave.c
-TEST_EXTRA_SDK_SRC += $(DRIVER_ROOT)/CH58x_spi0.c
-DEFS += -DCH585_TEST_FUNC=ch585_spi0_speed_slave_run
-DEFS += -DCH585_SYSCLK_SOURCE=CLK_SOURCE_HSE_PLL_78MHz
-DEFS += -DFREQ_SYS=78000000
+else ifeq ($(TEST),ch585_ads7948_mux_probe)
+TEST_SRC := src/ch585_ads7948_mux_probe.c
+TEST_EXTRA_SRC += $(CH585_DRIVER_ROOT)/ads7948.c
+TEST_EXTRA_SRC += $(CH585_DRIVER_ROOT)/ch585_ads7948_mux_scan.c
+DEFS += -DCH585_TEST_FUNC=ch585_ads7948_mux_probe_run
 else
 $(error Unknown TEST '$(TEST)')
 endif
 
 SDK_SRC := $(DRIVER_ROOT)/CH58x_clk.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_gpio.c
+SDK_SRC += $(DRIVER_ROOT)/CH58x_spi1.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_sys.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_uart1.c
 SDK_SRC += $(TEST_EXTRA_SDK_SRC)
@@ -143,7 +114,11 @@ $(BUILD)/%.lst: $(ELF)
 	@$(OBJDUMP) --all-headers --demangle --disassemble -M xw "$<" > "$@"
 
 $(BUILD):
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "[void](New-Item -ItemType Directory -Force -Path '$@')"
+else
 	@mkdir -p "$@"
+endif
 
 size: $(ELF)
 	@$(SIZE) "$(ELF)"
