@@ -47,8 +47,11 @@ APP_C_SOURCES += drivers/usb/usbhs_keyboard/ch585_usbhs_kbd.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_desc_hid.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hid.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hs_config_stub.c
+else ifeq ($(APP),rf_keyboard_tx)
+APP_C_SOURCES += applications/rf_keyboard_tx/main.c
+APP_C_SOURCES += applications/rf_keyboard_tx/rf_keyboard_tx.c
 else
-$(error Unknown APP '$(APP)'; expected rf_basic or rf_receiver_usbhs)
+$(error Unknown APP '$(APP)'; expected rf_basic, rf_receiver_usbhs, or rf_keyboard_tx)
 endif
 
 C_SOURCES := $(APP_C_SOURCES)
@@ -82,14 +85,14 @@ OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all firmware rf_basic rf_receiver_usbhs clean size
+.PHONY: all firmware rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
 
 all: firmware
 
 firmware: $(ELF) $(BUILD)/$(PROJECT_NAME).hex $(BUILD)/$(PROJECT_NAME).bin $(BUILD)/$(PROJECT_NAME).lst
 	@$(SIZE) "$(ELF)"
 
-rf_basic rf_receiver_usbhs:
+rf_basic rf_receiver_usbhs rf_keyboard_tx:
 	@$(MAKE) APP=$@ firmware
 
 $(BUILD)/%.o: %.c | $(BUILD)
