@@ -32,7 +32,7 @@ extern int _heap_end;
 #define HEAP_BEGIN  ((void *)&_ebss)
 #define HEAP_END    ((void *)&_heap_end)
 
-#define RT_CONSOLE_DEVICE_NAME  "uart8"
+#define RT_CONSOLE_DEVICE_NAME  "none"
 
 #define GET_INT_SP()   __asm volatile("csrrw sp,mscratch,sp")
 #define FREE_INT_SP()  __asm volatile("csrrw sp,mscratch,sp")

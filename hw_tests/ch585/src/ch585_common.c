@@ -8,6 +8,22 @@
 #define CH585_HALF_NAME "unknown"
 #endif
 
+#ifndef CH585_SYSCLK_SOURCE
+#define CH585_SYSCLK_SOURCE CLK_SOURCE_HSE_PLL_62_4MHz
+#endif
+
+#ifndef CH585_SYSCLK_HZ
+#ifdef FREQ_SYS
+#define CH585_SYSCLK_HZ FREQ_SYS
+#else
+#define CH585_SYSCLK_HZ 62400000U
+#endif
+#endif
+
+#ifndef CH585_DELAY_CYCLES_PER_MS
+#define CH585_DELAY_CYCLES_PER_MS (CH585_SYSCLK_HZ / 10000U)
+#endif
+
 static uint16_t str_len(const char *text)
 {
     uint16_t len = 0;
@@ -21,7 +37,7 @@ static uint16_t str_len(const char *text)
 void ch585_board_init(void)
 {
     HSECFG_Capacitance(HSECap_18p);
-    SetSysClock(CLK_SOURCE_HSE_PLL_62_4MHz);
+    SetSysClock(CH585_SYSCLK_SOURCE);
 
     GPIOA_SetBits(CH585_SERIAL_TX1_PA9_PIN);
     GPIOA_ModeCfg(CH585_SERIAL_RX1_PA8_PIN, GPIO_ModeIN_PU);
@@ -42,7 +58,7 @@ void ch585_delay_ms(uint16_t ms)
 {
     while(ms--)
     {
-        ch585_delay_cycles(6200u);
+        ch585_delay_cycles(CH585_DELAY_CYCLES_PER_MS);
     }
 }
 

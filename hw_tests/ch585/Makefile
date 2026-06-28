@@ -1,8 +1,8 @@
 # Standalone CH585 board bring-up tests.
 
 PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
-HALF ?= u2
-TEST ?= ch585_u2_eeprom_i2c
+HALF ?= left
+TEST ?= ch585_left_eeprom_i2c
 PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
 ALLOW_EEPROM_WRITE ?= 0
@@ -33,22 +33,23 @@ DEFS += $(DEFS_EXTRA)
 
 COMMON_SRC := src/ch585_common.c src/ch585_test_main.c
 TEST_EXTRA_SRC :=
+TEST_EXTRA_SDK_SRC :=
 
-ifeq ($(TEST),ch585_u2_eeprom_i2c)
+ifeq ($(filter $(TEST),ch585_left_eeprom_i2c ch585_u2_eeprom_i2c),$(TEST))
 TEST_SRC := src/ch585_u2_eeprom_i2c.c
 TEST_EXTRA_SRC += src/ch585_soft_i2c.c
 DEFS += -DCH585_TEST_FUNC=ch585_u2_eeprom_i2c_run
-else ifeq ($(TEST),ch585_u2_controls_gpio)
+else ifeq ($(filter $(TEST),ch585_left_controls_gpio ch585_u2_controls_gpio),$(TEST))
 TEST_SRC := src/ch585_u2_controls_gpio.c
 DEFS += -DCH585_TEST_FUNC=ch585_u2_controls_gpio_run
-else ifeq ($(TEST),ch585_u3_max17048_i2c)
+else ifeq ($(filter $(TEST),ch585_right_max17048_i2c ch585_u3_max17048_i2c),$(TEST))
 TEST_SRC := src/ch585_u3_max17048_i2c.c
 TEST_EXTRA_SRC += src/ch585_soft_i2c.c
 DEFS += -DCH585_TEST_FUNC=ch585_u3_max17048_i2c_run
-else ifeq ($(TEST),ch585_u3_charge_gpio)
+else ifeq ($(filter $(TEST),ch585_right_charge_gpio ch585_u3_charge_gpio),$(TEST))
 TEST_SRC := src/ch585_u3_charge_gpio.c
 DEFS += -DCH585_TEST_FUNC=ch585_u3_charge_gpio_run
-else ifeq ($(TEST),ch585_u3_ec11_gpio)
+else ifeq ($(filter $(TEST),ch585_right_ec11_gpio ch585_u3_ec11_gpio),$(TEST))
 TEST_SRC := src/ch585_u3_ec11_gpio.c
 DEFS += -DCH585_TEST_FUNC=ch585_u3_ec11_gpio_run
 else ifeq ($(TEST),ch585_ads7948_mux_probe)
@@ -65,6 +66,7 @@ SDK_SRC += $(DRIVER_ROOT)/CH58x_gpio.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_spi1.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_sys.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_uart1.c
+SDK_SRC += $(TEST_EXTRA_SDK_SRC)
 SDK_LIB := $(DRIVER_ROOT)/libISP585.a
 
 STARTUP := $(SRC_ROOT)/Startup/startup_CH585.S
@@ -73,8 +75,10 @@ LDSCRIPT := $(SRC_ROOT)/Ld/Link.ld
 C_SOURCES := $(COMMON_SRC) $(TEST_SRC) $(TEST_EXTRA_SRC) $(SDK_SRC)
 ASM_SOURCES := $(STARTUP)
 
-BUILD := $(BUILD_ROOT)/$(HALF)_$(TEST)
-ELF := $(BUILD)/$(HALF)_$(TEST).elf
+BUILD_NAME := $(CH585_HALF_ROLE)_$(TEST)
+
+BUILD := $(BUILD_ROOT)/$(BUILD_NAME)
+ELF := $(BUILD)/$(CH585_HALF_ROLE)_$(TEST).elf
 OBJS := $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SOURCES)))
 OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
@@ -82,7 +86,7 @@ DEPS := $(OBJS:.o=.d)
 
 .PHONY: all clean size
 
-all: $(ELF) $(BUILD)/$(HALF)_$(TEST).hex $(BUILD)/$(HALF)_$(TEST).bin $(BUILD)/$(HALF)_$(TEST).lst
+all: $(ELF) $(BUILD)/$(CH585_HALF_ROLE)_$(TEST).hex $(BUILD)/$(CH585_HALF_ROLE)_$(TEST).bin $(BUILD)/$(CH585_HALF_ROLE)_$(TEST).lst
 	@$(SIZE) "$(ELF)"
 
 $(BUILD)/%.o: %.c | $(BUILD)
@@ -95,7 +99,7 @@ $(BUILD)/%.o: %.S | $(BUILD)
 
 $(ELF): $(OBJS) $(LDSCRIPT)
 	@echo "LD  $(notdir $@)"
-	@$(LD) $(OBJS) $(SDK_LIB) $(LDFLAGS) -T"$(LDSCRIPT)" -Wl,-Map,"$(BUILD)/$(HALF)_$(TEST).map" -lm -o $@
+	@$(LD) $(OBJS) $(SDK_LIB) $(LDFLAGS) -T"$(LDSCRIPT)" -Wl,-Map,"$(BUILD)/$(CH585_HALF_ROLE)_$(TEST).map" -lm -o $@
 
 $(BUILD)/%.hex: $(ELF)
 	@echo "HEX $(notdir $@)"

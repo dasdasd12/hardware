@@ -21,18 +21,18 @@
 #include "ch32h417.h"
 
 /* UART Printf Definition */
+#define DEBUG_NONE     0
 #define DEBUG_UART1    1
-#define DEBUG_UART8    2
 #define DEBUG_UART6    3
 
 /* DEBUG UATR Definition */
 #ifndef DEBUG
 
 #ifdef Core_V3F
-#define DEBUG   DEBUG_UART1
+#define DEBUG   DEBUG_NONE
 
 #elif defined(Core_V5F)
-#define DEBUG   DEBUG_UART8
+#define DEBUG   DEBUG_NONE
 
 #endif
 
@@ -81,6 +81,5 @@ void USART_Printf_Init(uint32_t baudrate);
 #endif
 
 #endif 
-
 
 

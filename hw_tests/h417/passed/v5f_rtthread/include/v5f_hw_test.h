@@ -14,6 +14,11 @@
 #define APP_V5F_HW_TEST_GPHA_BLEND_RGB565 8
 #define APP_V5F_HW_TEST_GPHA_L8_LTDC_FULLSCREEN 9
 #define APP_V5F_HW_TEST_FLASH_L8_ASSETS 10
+#define APP_V5F_HW_TEST_SDRAM_MEMTEST 11
+#define APP_V5F_HW_TEST_SDRAM_LTDC_RGB565 12
+#define APP_V5F_HW_TEST_SDRAM_REMAP_PROBE 13
+#define APP_V5F_HW_TEST_SDRAM_DQ_PROBE 14
+#define APP_V5F_HW_TEST_CH585_SPI_SPEED 15
 
 typedef struct
 {
@@ -32,6 +37,16 @@ typedef struct
     volatile uint8_t flash_status2;
     volatile uint8_t flash_bad_marker;
     volatile uint8_t flash_bad_marker_status;
+    volatile uint32_t sdram_stage;
+    volatile uint32_t sdram_test_bytes;
+    volatile uint32_t sdram_fail_offset;
+    volatile uint32_t sdram_expected;
+    volatile uint32_t sdram_actual;
+    volatile uint32_t sdram_hclk_hz;
+    volatile uint32_t sdram_sdclk_hz;
+    volatile uint32_t sdram_refresh_count;
+    volatile uint32_t sdram_ok_count;
+    volatile uint32_t sdram_fail_count;
 } v5f_hw_test_diag_t;
 
 extern volatile v5f_hw_test_diag_t g_v5f_hw_test_diag;
