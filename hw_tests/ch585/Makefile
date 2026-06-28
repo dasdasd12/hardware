@@ -8,25 +8,28 @@ BUILD_ROOT ?= build
 ALLOW_EEPROM_WRITE ?= 0
 CH585_FIRMWARE_ROOT ?= $(PROJECT_ROOT)/firmware/ch585
 WCH_CH585_SRC_ROOT := $(CH585_FIRMWARE_ROOT)/basic/wch/SRC
+CH585_DRIVER_ROOT := $(CH585_FIRMWARE_ROOT)/drivers
 
-CC := $(PREFIX)gcc
-AS := $(PREFIX)gcc -x assembler-with-cpp
-LD := $(PREFIX)gcc
-OBJCOPY := $(PREFIX)objcopy
-OBJDUMP := $(PREFIX)objdump
-SIZE := $(PREFIX)size
+CC := "$(PREFIX)gcc"
+AS := "$(PREFIX)gcc" -x assembler-with-cpp
+LD := "$(PREFIX)gcc"
+OBJCOPY := "$(PREFIX)objcopy"
+OBJDUMP := "$(PREFIX)objdump"
+SIZE := "$(PREFIX)size"
 
 ARCH_FLAGS := -march=rv32imac_zicsr -mabi=ilp32 -msmall-data-limit=8 -msave-restore
 COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -g -fmessage-length=0 -fsigned-char
 COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized -std=gnu99
+COMMON_FLAGS += -Wno-unused-variable
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
 
 SRC_ROOT := $(WCH_CH585_SRC_ROOT)
 DRIVER_ROOT := $(SRC_ROOT)/StdPeriphDriver
-INC := -I$(SRC_ROOT)/RVMSIS -I$(DRIVER_ROOT)/inc -Isrc
+INC := -I$(SRC_ROOT)/RVMSIS -I$(DRIVER_ROOT)/inc -I$(CH585_DRIVER_ROOT) -Isrc
 DEFS := -DTEST_NAME=\"$(TEST)\" -DCH585_HALF_NAME=\"$(HALF)\"
 DEFS += -DALLOW_EEPROM_WRITE=$(ALLOW_EEPROM_WRITE)
+DEFS += $(DEFS_EXTRA)
 
 COMMON_SRC := src/ch585_common.c src/ch585_test_main.c
 TEST_EXTRA_SRC :=
@@ -48,12 +51,18 @@ DEFS += -DCH585_TEST_FUNC=ch585_u3_charge_gpio_run
 else ifeq ($(TEST),ch585_u3_ec11_gpio)
 TEST_SRC := src/ch585_u3_ec11_gpio.c
 DEFS += -DCH585_TEST_FUNC=ch585_u3_ec11_gpio_run
+else ifeq ($(TEST),ch585_ads7948_mux_probe)
+TEST_SRC := src/ch585_ads7948_mux_probe.c
+TEST_EXTRA_SRC += $(CH585_DRIVER_ROOT)/ads7948.c
+TEST_EXTRA_SRC += $(CH585_DRIVER_ROOT)/ch585_ads7948_mux_scan.c
+DEFS += -DCH585_TEST_FUNC=ch585_ads7948_mux_probe_run
 else
 $(error Unknown TEST '$(TEST)')
 endif
 
 SDK_SRC := $(DRIVER_ROOT)/CH58x_clk.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_gpio.c
+SDK_SRC += $(DRIVER_ROOT)/CH58x_spi1.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_sys.c
 SDK_SRC += $(DRIVER_ROOT)/CH58x_uart1.c
 SDK_LIB := $(DRIVER_ROOT)/libISP585.a
@@ -101,7 +110,11 @@ $(BUILD)/%.lst: $(ELF)
 	@$(OBJDUMP) --all-headers --demangle --disassemble -M xw "$<" > "$@"
 
 $(BUILD):
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "[void](New-Item -ItemType Directory -Force -Path '$@')"
+else
 	@mkdir -p "$@"
+endif
 
 size: $(ELF)
 	@$(SIZE) "$(ELF)"
