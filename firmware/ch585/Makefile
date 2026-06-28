@@ -50,8 +50,18 @@ APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hs_config_stub.c
 else ifeq ($(APP),rf_keyboard_tx)
 APP_C_SOURCES += applications/rf_keyboard_tx/main.c
 APP_C_SOURCES += applications/rf_keyboard_tx/rf_keyboard_tx.c
+else ifeq ($(APP),spi_slave_test)
+APP_C_SOURCES += applications/spi_slave_test/main.c
+APP_C_SOURCES += applications/spi_slave_test/ch585_local_periph_test.c
+APP_C_SOURCES += applications/spi_slave_test/ch585_soft_i2c.c
+APP_C_SOURCES += drivers/ads7948.c
+APP_C_SOURCES += drivers/ch585_i2c_bus.c
+APP_C_SOURCES += drivers/ch585_local_inputs.c
+APP_C_SOURCES += drivers/ch585_power_status.c
+APP_C_SOURCES += drivers/hx24lc16.c
+APP_C_SOURCES += drivers/max17048.c
 else
-$(error Unknown APP '$(APP)'; expected rf_basic, rf_receiver_usbhs, or rf_keyboard_tx)
+$(error Unknown APP '$(APP)'; expected rf_basic, rf_receiver_usbhs, rf_keyboard_tx, or spi_slave_test)
 endif
 
 C_SOURCES := $(APP_C_SOURCES)
@@ -85,14 +95,14 @@ OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all firmware rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
+.PHONY: all firmware rf_basic rf_receiver_usbhs rf_keyboard_tx spi_slave_test clean size
 
 all: firmware
 
 firmware: $(ELF) $(BUILD)/$(PROJECT_NAME).hex $(BUILD)/$(PROJECT_NAME).bin $(BUILD)/$(PROJECT_NAME).lst
 	@$(SIZE) "$(ELF)"
 
-rf_basic rf_receiver_usbhs rf_keyboard_tx:
+rf_basic rf_receiver_usbhs rf_keyboard_tx spi_slave_test:
 	@$(MAKE) APP=$@ firmware
 
 $(BUILD)/%.o: %.c | $(BUILD)
