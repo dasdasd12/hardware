@@ -2,6 +2,20 @@
 
 PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 BUILD_ROOT ?= build
+V5F_MAKE_ARGS :=
+
+ifneq ($(origin APP_V5F_HW_TEST),undefined)
+V5F_MAKE_ARGS += APP_V5F_HW_TEST=$(APP_V5F_HW_TEST)
+endif
+ifneq ($(origin APP_ENABLE_USB_TEST),undefined)
+V5F_MAKE_ARGS += APP_ENABLE_USB_TEST=$(APP_ENABLE_USB_TEST)
+endif
+ifneq ($(origin APP_ENABLE_CH585_SPI_SCAN),undefined)
+V5F_MAKE_ARGS += APP_ENABLE_CH585_SPI_SCAN=$(APP_ENABLE_CH585_SPI_SCAN)
+endif
+ifneq ($(origin APP_ENABLE_SERIAL_HEARTBEAT),undefined)
+V5F_MAKE_ARGS += APP_ENABLE_SERIAL_HEARTBEAT=$(APP_ENABLE_SERIAL_HEARTBEAT)
+endif
 
 .PHONY: all v3f V3F v5f V5F clean flash
 
@@ -11,7 +25,7 @@ v3f V3F:
 	@$(MAKE) -C v3f PREFIX=$(PREFIX) BUILD_ROOT=../$(BUILD_ROOT)/V3F
 
 v5f V5F:
-	@$(MAKE) -C v5f_rtthread PREFIX=$(PREFIX) BUILD_ROOT=../$(BUILD_ROOT) CORE=V5F
+	@$(MAKE) -C v5f_rtthread PREFIX=$(PREFIX) BUILD_ROOT=../$(BUILD_ROOT) CORE=V5F $(V5F_MAKE_ARGS)
 
 clean:
 	@$(MAKE) -C v3f BUILD_ROOT=../$(BUILD_ROOT)/V3F clean

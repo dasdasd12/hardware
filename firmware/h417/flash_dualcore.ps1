@@ -61,4 +61,4 @@ if ($openocdExitCode -ne 0) {
 }
 
 Write-Host "Done. V3F firmware should now be running and has started V5F."
-Write-Host "Connect serial terminal to PB4 (USART8) at 115200-8-N-1 to see RT-Thread boot."
+Write-Host "No H417 UART console is defined by the board hardware contract; use USB CDC after boot for firmware diagnostics."

@@ -19,6 +19,14 @@
 #include "keyboard_engine.h"
 #include "usb_hs_hid_keyboard.h"
 
+#ifndef APP_ENABLE_V5F_HW_TEST
+#define APP_ENABLE_V5F_HW_TEST 0
+#endif
+
+#if APP_ENABLE_V5F_HW_TEST
+#include "v5f_hw_test.h"
+#endif
+
 #ifndef APP_ENABLE_USB_TEST
 #define APP_ENABLE_USB_TEST 1
 #endif
@@ -36,7 +44,7 @@
 #endif
 
 #ifndef APP_ENABLE_CH585_SPI_SCAN
-#define APP_ENABLE_CH585_SPI_SCAN 1
+#define APP_ENABLE_CH585_SPI_SCAN 0
 #endif
 
 #ifndef APP_CH585_SPI_SCAN_POLLS_PER_LOOP
@@ -158,8 +166,13 @@ extern void usb_dc_ch32h417_dump_diag(void);
 extern int ch32h417_usb_cdc_write(const void *data, rt_uint32_t len);
 #endif
 
-/* Eval board: PB1 = LED */
-#define LED_PIN  rt_pin_get("PB.1")
+#ifndef APP_ENABLE_BOARD_HEARTBEAT_PIN
+#define APP_ENABLE_BOARD_HEARTBEAT_PIN 0
+#endif
+
+#if APP_ENABLE_BOARD_HEARTBEAT_PIN && !defined(APP_BOARD_HEARTBEAT_PIN_NAME)
+#error "APP_BOARD_HEARTBEAT_PIN_NAME must name a /latex-declared H417 indicator pin"
+#endif
 
 #if APP_ENABLE_USB_TEST
 static int usb_cdc_write_full(const char *data, rt_size_t len)
@@ -195,7 +208,7 @@ static int usb_cdc_write_full(const char *data, rt_size_t len)
     return (int)offset;
 }
 
-static int usb_cdc_write_line(const char *line, int len)
+static int __attribute__((unused)) usb_cdc_write_line(const char *line, int len)
 {
     if (len <= 0)
     {
@@ -612,11 +625,19 @@ static void usb_hs_hid_status_report_poll(rt_uint32_t heartbeat)
 
 int main(void)
 {
-    rt_base_t led_pin = LED_PIN;
     rt_uint32_t heartbeat = 0;
+#if APP_ENABLE_BOARD_HEARTBEAT_PIN
+    rt_base_t heartbeat_pin = rt_pin_get(APP_BOARD_HEARTBEAT_PIN_NAME);
+#endif
 
     rt_kprintf("Hello, RT-Thread on CH32H417 V5F!\n");
-    rt_pin_mode(led_pin, PIN_MODE_OUTPUT);
+#if APP_ENABLE_BOARD_HEARTBEAT_PIN
+    rt_pin_mode(heartbeat_pin, PIN_MODE_OUTPUT);
+#endif
+
+#if APP_ENABLE_V5F_HW_TEST
+    v5f_hw_test_start();
+#endif
 
 #if APP_ENABLE_CH585_SPI_SCAN
     ch585_spi_scan_init();
@@ -662,7 +683,9 @@ int main(void)
 
     while (1)
     {
-        rt_pin_write(led_pin, (heartbeat & 1U) ? PIN_HIGH : PIN_LOW);
+#if APP_ENABLE_BOARD_HEARTBEAT_PIN
+        rt_pin_write(heartbeat_pin, (heartbeat & 1U) ? PIN_HIGH : PIN_LOW);
+#endif
 #if APP_ENABLE_CH585_SPI_SCAN
         rt_uint32_t scan_poll;
 

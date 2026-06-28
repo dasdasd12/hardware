@@ -10,10 +10,11 @@ MEMORY
 {
 	/*FLASH, RAM, and RAM-CODE can be freely configured according to project
 	requirements;Please refer to the datasheet manual for specific allocation*/
-	FLASH (rx) : ORIGIN = 0x00010000, LENGTH = 128K                    /* zero_wait flah ,and loaded into RAM_CODE for running */
+	FLASH (rx) : ORIGIN = 0x00010000, LENGTH = 500K                    /* V5F test image/code region within the 960KB CodeFlash */
 	RAM_CODE (xrw) : ORIGIN = 0x200A0000, LENGTH = 128K                /*ITCM RAM for running code*/
 	RAM (xrw) : ORIGIN = (0x200C0000+512+256), LENGTH = (256K-512-256) /*DTCM RAM for .data .bss section and other*/
 	RAM_LOAD (xrw) : ORIGIN = (0x200C0000+512), LENGTH = 256           /* RAM for .load section*/
+	LCD_FB (xrw) : ORIGIN = 0x20118000, LENGTH = 384K                  /* shared SRAM reserved from V3F for an 800x480 L8 framebuffer */
 }
 
 SECTIONS
@@ -194,6 +195,14 @@ SECTIONS
 		PROVIDE( _edata = .);
 	} >RAM AT>FLASH
 
+	.image_rodata :
+	{
+		. = ALIGN(4);
+		KEEP(*(.image_rodata))
+		KEEP(*(.image_rodata.*))
+		. = ALIGN(4);
+	} >FLASH AT>FLASH
+
 	.bss :
 	{
 		. = ALIGN(4);
@@ -206,6 +215,16 @@ SECTIONS
 		. = ALIGN(4);
 		PROVIDE( _ebss = .);
 	} >RAM AT>FLASH
+
+	.lcd_fb (NOLOAD) :
+	{
+		. = ALIGN(64);
+		PROVIDE(__lcd_fb_start = .);
+		KEEP(*(.lcd_fb))
+		KEEP(*(.lcd_fb.*))
+		. = ALIGN(64);
+		PROVIDE(__lcd_fb_end = .);
+	} >LCD_FB
 
 	PROVIDE( _end = _ebss);
 	PROVIDE( end = . );

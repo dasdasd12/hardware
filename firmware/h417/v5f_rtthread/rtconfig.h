@@ -46,7 +46,7 @@
 #define RT_USING_DEVICE
 #define RT_USING_CONSOLE
 #define RT_CONSOLEBUF_SIZE  128
-#define RT_CONSOLE_DEVICE_NAME  "uart8"
+#define RT_CONSOLE_DEVICE_NAME  "none"
 #define RT_USING_COMPONENTS_INIT
 
 /* Thread */
@@ -81,7 +81,8 @@
 #define FINSH_ARG_MAX           10
 
 /* Device Drivers */
-#define RT_USING_SERIAL
+/* No H417 UART is declared in the board hardware contract. */
+/* #define RT_USING_SERIAL */
 #define RT_SERIAL_USING_DMA
 #define RT_USING_PIN
 
