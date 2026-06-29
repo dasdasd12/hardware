@@ -9,6 +9,7 @@
 
 #include "rf_test.h"
 #include "hal.h"
+#include "aik_spi_protocol.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -31,10 +32,12 @@
 
 #define RF_TX_MODE_STRESS_8K      1
 #define RF_TX_MODE_LEGACY_DEMO    2
-#define RF_TX_MODE_KEYSTATE_8K    3
+#define RF_TX_MODE_KEYSTATE       3
+#define RF_TX_MODE_KEYSTATE_8K    RF_TX_MODE_KEYSTATE
+#define RF_TX_MODE_LEGACY_NKRO    4
 
 #ifndef RF_TX_MODE
-#define RF_TX_MODE RF_TX_MODE_KEYSTATE_8K
+#define RF_TX_MODE RF_TX_MODE_LEGACY_NKRO
 #endif
 
 #ifndef RF_TX_KEYSTATE_DEMO_ENABLE
@@ -43,8 +46,10 @@
 
 #if RF_TX_MODE == RF_TX_MODE_LEGACY_DEMO
 #define RF_TX_TIMER_HZ      4
-#else
+#elif RF_TX_MODE == RF_TX_MODE_STRESS_8K
 #define RF_TX_TIMER_HZ      8000
+#else
+#define RF_TX_TIMER_HZ      1000
 #endif
 
 #define RF_TX_START_DELAY_SECONDS 3
@@ -54,10 +59,13 @@
 #define RF_TX_KEYSTATE_DEMO_HOLD_TICKS   (RF_TX_TIMER_HZ / 20)
 #define RF_TX_KEYSTATE_DEMO_KEY_ID       58
 
+#define RF_SPI_BRIDGE_NKRO16_LEN         AIK_NKRO_REPORT_BYTES
+
 #define RF_SPI_BRIDGE_FRAME_MAGIC        0xB8
 #define RF_SPI_BRIDGE_FRAME_TYPE_REPORT  0x31
 #define RF_SPI_BRIDGE_FRAME_VERSION      1
 #define RF_SPI_BRIDGE_REPORT_LEN         8
+#define RF_SPI_BRIDGE_RX_LEN             AIK_SPI_HOST_CMD_SIZE
 
 #define RF_TX_PHASE_WAIT_START   0
 #define RF_TX_PHASE_SEND_RELEASE 1
@@ -115,6 +123,11 @@
 
 #define KVM_TARGET_1   1
 #define KVM_TARGET_2   2
+#define KVM_TARGET_BROADCAST 0
+
+#ifndef RF_TX_TARGET_ID
+#define RF_TX_TARGET_ID KVM_TARGET_BROADCAST
+#endif
 
 #define RF_KVM_ACTION_SWITCH_TARGET 0
 #define RF_KVM_ACTION_TAP_KEY       1
@@ -153,7 +166,7 @@ static volatile uint8_t gTxSeq;
 static volatile uint16_t gStressSeq;
 static volatile uint16_t gKeyStateSeq;
 
-static uint8_t gSpiBridgeRx[sizeof(rfSpiBridgeFrame_t)] __attribute__((aligned(4)));
+static uint8_t gSpiBridgeRx[RF_SPI_BRIDGE_RX_LEN] __attribute__((aligned(4)));
 static volatile uint8_t gSpiBridgeArmed;
 static volatile uint8_t gSpiBridgeLastSeq;
 static volatile uint8_t gSpiBridgeLastFlags;
@@ -162,6 +175,7 @@ static volatile uint32_t gSpiBridgeValidFrames;
 static volatile uint32_t gSpiBridgeCrcErrors;
 static volatile uint32_t gSpiBridgeMagicErrors;
 static uint8_t gSpiBridgeLastReport[RF_SPI_BRIDGE_REPORT_LEN];
+static uint8_t gSpiBridgeLastNkro16[RF_SPI_BRIDGE_NKRO16_LEN];
 
 #if RF_TX_MODE == RF_TX_MODE_LEGACY_DEMO
 static const rfKvmDemoAction_t gDemoActions[] = {
@@ -249,6 +263,96 @@ static uint16_t crc16_ccitt(const uint8_t *data, uint16_t len)
     return crc;
 }
 
+static void nkro16_clear(uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN])
+{
+    for(uint8_t i = 0; i < RF_SPI_BRIDGE_NKRO16_LEN; i++)
+    {
+        nkro16[i] = 0;
+    }
+}
+
+static void nkro16_set_usage(uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN], uint8_t usage)
+{
+    if((usage >= HID_MOD_MIN) && (usage <= HID_MOD_MAX))
+    {
+        nkro16[0] |= (uint8_t)(1u << (usage - HID_MOD_MIN));
+        return;
+    }
+
+    if(usage >= HID_KEY_MIN)
+    {
+        uint8_t bit_index = (uint8_t)(usage - HID_KEY_MIN);
+        uint8_t byte_index = (uint8_t)(bit_index >> 3);
+
+        if(byte_index < HID_NKRO_BYTES)
+        {
+            nkro16[2 + byte_index] |= (uint8_t)(1u << (bit_index & 7u));
+        }
+    }
+}
+
+static uint8_t nkro16_usage_down(const uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN], uint8_t usage)
+{
+    if((usage >= HID_MOD_MIN) && (usage <= HID_MOD_MAX))
+    {
+        return (nkro16[0] & (uint8_t)(1u << (usage - HID_MOD_MIN))) ? TRUE : FALSE;
+    }
+
+    if(usage >= HID_KEY_MIN)
+    {
+        uint8_t bit_index = (uint8_t)(usage - HID_KEY_MIN);
+        uint8_t byte_index = (uint8_t)(bit_index >> 3);
+
+        if(byte_index < HID_NKRO_BYTES)
+        {
+            return (nkro16[2 + byte_index] & (uint8_t)(1u << (bit_index & 7u))) ? TRUE : FALSE;
+        }
+    }
+
+    return FALSE;
+}
+
+static uint8_t nkro16_first_usage(const uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN])
+{
+    for(uint8_t mod = 0; mod < 8; mod++)
+    {
+        if(nkro16[0] & (uint8_t)(1u << mod))
+        {
+            return (uint8_t)(HID_MOD_MIN + mod);
+        }
+    }
+
+    for(uint8_t byte = 0; byte < HID_NKRO_BYTES; byte++)
+    {
+        uint8_t bits = nkro16[2 + byte];
+
+        for(uint8_t bit = 0; bit < 8; bit++)
+        {
+            if(bits & (uint8_t)(1u << bit))
+            {
+                return (uint8_t)(HID_KEY_MIN + (byte << 3) + bit);
+            }
+        }
+    }
+
+    return 0xFF;
+}
+
+static void boot_report_to_nkro16(const uint8_t report[RF_SPI_BRIDGE_REPORT_LEN],
+                                  uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN])
+{
+    nkro16_clear(nkro16);
+    nkro16[0] = report[0];
+
+    for(uint8_t i = 2; i < RF_SPI_BRIDGE_REPORT_LEN; i++)
+    {
+        if(report[i] != 0)
+        {
+            nkro16_set_usage(nkro16, report[i]);
+        }
+    }
+}
+
 static void spi_bridge_arm_rx(void)
 {
     R8_SPI0_CTRL_CFG &= ~RB_SPI_DMA_ENABLE;
@@ -260,6 +364,22 @@ static void spi_bridge_arm_rx(void)
                        RB_SPI_IF_FIFO_OV | RB_SPI_IF_BYTE_END;
     R8_SPI0_CTRL_CFG |= RB_SPI_DMA_ENABLE;
     gSpiBridgeArmed = TRUE;
+}
+
+static uint8_t spi_bridge_host_cmd_valid(const aik_spi_host_cmd_v1_t *cmd)
+{
+    if(aik_spi_host_cmd_valid(cmd) == 0U)
+    {
+        gSpiBridgeCrcErrors++;
+        return FALSE;
+    }
+
+    if(cmd->cmd != AIK_SPI_CMD_POLL_WITH_RF)
+    {
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 static uint8_t spi_bridge_frame_valid(const rfSpiBridgeFrame_t *frame)
@@ -285,6 +405,21 @@ static uint8_t spi_bridge_frame_valid(const rfSpiBridgeFrame_t *frame)
     return TRUE;
 }
 
+static void spi_bridge_handle_host_cmd(const aik_spi_host_cmd_v1_t *cmd)
+{
+    if(!spi_bridge_host_cmd_valid(cmd))
+    {
+        return;
+    }
+
+    memcpy(gSpiBridgeLastNkro16, cmd->nkro16, RF_SPI_BRIDGE_NKRO16_LEN);
+    memset(gSpiBridgeLastReport, 0, sizeof(gSpiBridgeLastReport));
+    gSpiBridgeLastSeq = (uint8_t)cmd->host_seq;
+    gSpiBridgeLastFlags = cmd->flags;
+    gSpiBridgeLastFirstKey = nkro16_first_usage(gSpiBridgeLastNkro16);
+    gSpiBridgeValidFrames++;
+}
+
 static void spi_bridge_handle_frame(const rfSpiBridgeFrame_t *frame)
 {
     if(!spi_bridge_frame_valid(frame))
@@ -293,16 +428,35 @@ static void spi_bridge_handle_frame(const rfSpiBridgeFrame_t *frame)
     }
 
     memcpy(gSpiBridgeLastReport, frame->report, RF_SPI_BRIDGE_REPORT_LEN);
+    boot_report_to_nkro16(gSpiBridgeLastReport, gSpiBridgeLastNkro16);
     gSpiBridgeLastSeq = frame->seq;
     gSpiBridgeLastFlags = frame->flags;
     gSpiBridgeLastFirstKey = frame->first_key;
     gSpiBridgeValidFrames++;
 }
 
+static void spi_bridge_handle_rx_buffer(const uint8_t *rx)
+{
+    if(rx[0] == AIK_SPI_HOST_MAGIC)
+    {
+        spi_bridge_handle_host_cmd((const aik_spi_host_cmd_v1_t *)rx);
+        return;
+    }
+
+    if(rx[0] == RF_SPI_BRIDGE_FRAME_MAGIC)
+    {
+        spi_bridge_handle_frame((const rfSpiBridgeFrame_t *)rx);
+        return;
+    }
+
+    gSpiBridgeMagicErrors++;
+}
+
 static void spi_bridge_init(void)
 {
     memset(gSpiBridgeRx, 0, sizeof(gSpiBridgeRx));
     memset(gSpiBridgeLastReport, 0, sizeof(gSpiBridgeLastReport));
+    memset(gSpiBridgeLastNkro16, 0, sizeof(gSpiBridgeLastNkro16));
     gSpiBridgeLastFirstKey = 0xFF;
 
     GPIOPinRemap(DISABLE, RB_PIN_SPI0);
@@ -311,47 +465,29 @@ static void spi_bridge_init(void)
     SetFirstData(0xA5);
     spi_bridge_arm_rx();
 
-    PRINT("RF TX SPI bridge ready: SPI0 PA12/PA13/PA14/PA15 frame=%u\r\n",
+    PRINT("RF TX SPI bridge ready: SPI0 PA12/PA13/PA14/PA15 host_cmd=%u boot=%u\r\n",
+          (unsigned int)sizeof(aik_spi_host_cmd_v1_t),
           (unsigned int)sizeof(rfSpiBridgeFrame_t));
 }
 
-static void set_down_bit_for_usage(uint8_t down_bits[8], uint8_t usage)
+static void spi_bridge_nkro16_to_down_bits(uint8_t down_bits[8])
 {
+    uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN];
+
+    memcpy(nkro16, gSpiBridgeLastNkro16, sizeof(nkro16));
+
     for(uint8_t key_id = 0; key_id < 64; key_id++)
     {
-        if(gRightKeyToHid[key_id] == usage)
+        uint8_t usage = gRightKeyToHid[key_id];
+
+        if((usage != 0) && nkro16_usage_down(nkro16, usage))
         {
             down_bits[key_id >> 3] |= (uint8_t)(1u << (key_id & 7u));
-            return;
         }
     }
 }
 
-static void spi_bridge_report_to_down_bits(uint8_t down_bits[8])
-{
-    uint8_t report[RF_SPI_BRIDGE_REPORT_LEN];
-
-    memcpy(report, gSpiBridgeLastReport, sizeof(report));
-
-    for(uint8_t mod = 0; mod < 8; mod++)
-    {
-        if(report[0] & (uint8_t)(1u << mod))
-        {
-            set_down_bit_for_usage(down_bits, (uint8_t)(HID_MOD_MIN + mod));
-        }
-    }
-
-    for(uint8_t i = 2; i < RF_SPI_BRIDGE_REPORT_LEN; i++)
-    {
-        if(report[i] != 0)
-        {
-            set_down_bit_for_usage(down_bits, report[i]);
-        }
-    }
-}
-
-#if RF_TX_MODE == RF_TX_MODE_LEGACY_DEMO
-static void fill_keyboard_frame(uint8_t target_id, uint8_t keycode, uint8_t key_down)
+static void fill_nkro_frame(uint8_t target_id, const uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN])
 {
     for(uint8_t i = 0; i < RF_FRAME_LEN; i++)
     {
@@ -360,26 +496,7 @@ static void fill_keyboard_frame(uint8_t target_id, uint8_t keycode, uint8_t key_
 
     TxBuf[0] = RF_FRAME_MAGIC;
     TxBuf[1] = RF_FRAME_LEN - 2;
-
-    /*
-     * 16B NKRO report layout:
-     * [modifier][reserved][bitmap14B].
-     * HID usage 0x04 is key 'a'. The NKRO bitmap starts from usage 0x04.
-     */
-    if(key_down)
-    {
-        if(keycode >= HID_KEY_MIN)
-        {
-            uint8_t bit_index = keycode - HID_KEY_MIN;
-            uint8_t byte_index = bit_index / 8;
-            uint8_t bit_mask = (uint8_t)(1u << (bit_index % 8));
-
-            if(byte_index < HID_NKRO_BYTES)
-            {
-                TxBuf[RF_KBD_OFFSET + 2 + byte_index] = bit_mask;
-            }
-        }
-    }
+    memcpy(&TxBuf[RF_KBD_OFFSET], nkro16, RF_SPI_BRIDGE_NKRO16_LEN);
 
     TxBuf[RF_CONSUMER_OFFSET] = 0x00;
     TxBuf[RF_CONSUMER_OFFSET + 1] = 0x00;
@@ -393,6 +510,29 @@ static void fill_keyboard_frame(uint8_t target_id, uint8_t keycode, uint8_t key_
     TxBuf[RF_SEQ_OFFSET] = gTxSeq++;
 
     TxBuf[RF_FRAME_LEN - 1] = frame_xor(TxBuf, RF_FRAME_LEN - 1);
+}
+
+static void fill_current_nkro_frame(void)
+{
+    uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN];
+
+    memcpy(nkro16, gSpiBridgeLastNkro16, sizeof(nkro16));
+    fill_nkro_frame(RF_TX_TARGET_ID, nkro16);
+}
+
+#if RF_TX_MODE == RF_TX_MODE_LEGACY_DEMO
+static void fill_keyboard_frame(uint8_t target_id, uint8_t keycode, uint8_t key_down)
+{
+    uint8_t nkro16[RF_SPI_BRIDGE_NKRO16_LEN];
+
+    nkro16_clear(nkro16);
+
+    if(key_down)
+    {
+        nkro16_set_usage(nkro16, keycode);
+    }
+
+    fill_nkro_frame(target_id, nkro16);
 }
 #endif
 
@@ -427,7 +567,7 @@ uint8_t RF_TX_GetDownBits(uint8_t down_bits[8])
 
     if(gSpiBridgeValidFrames != 0)
     {
-        spi_bridge_report_to_down_bits(down_bits);
+        spi_bridge_nkro16_to_down_bits(down_bits);
     }
 
 #if RF_TX_KEYSTATE_DEMO_ENABLE
@@ -460,10 +600,11 @@ void RFRole_Poll(void)
 
     R8_SPI0_CTRL_CFG &= ~RB_SPI_DMA_ENABLE;
     gSpiBridgeArmed = FALSE;
-    spi_bridge_handle_frame((const rfSpiBridgeFrame_t *)gSpiBridgeRx);
+    spi_bridge_handle_rx_buffer(gSpiBridgeRx);
     spi_bridge_arm_rx();
 }
 
+#if RF_TX_MODE == RF_TX_MODE_KEYSTATE
 static void fill_keystate_frame(void)
 {
     uint8_t down_bits[8];
@@ -486,6 +627,7 @@ static void fill_keystate_frame(void)
     }
     TxBuf[RF_KEYSTATE_FRAME_LEN - 1] = frame_xor(TxBuf, RF_KEYSTATE_FRAME_LEN - 1);
 }
+#endif
 
 #if RF_TX_MODE == RF_TX_MODE_LEGACY_DEMO
 static void tx_start_next_demo_key(void)
@@ -553,10 +695,12 @@ tmosEvents RFRole_ProcessEvent(tmosTaskID task_id, tmosEvents events)
     if(events & RF_TEST_TX_EVENT)
     {
         uint16_t seq =
-#if RF_TX_MODE == RF_TX_MODE_KEYSTATE_8K
+#if RF_TX_MODE == RF_TX_MODE_STRESS_8K
+            gStressSeq;
+#elif RF_TX_MODE == RF_TX_MODE_KEYSTATE
             gKeyStateSeq;
 #else
-            gStressSeq;
+            gTxSeq;
 #endif
 
         PRINT("rf tx gen=%lu done=%lu seq=%u hz=%u br=%lu br_crc=%lu br_magic=%lu hseq=%u first=%u\r\n",
@@ -589,8 +733,11 @@ void TMR0_IRQHandler(void)
 #if RF_TX_MODE == RF_TX_MODE_STRESS_8K
         fill_stress_frame();
         rf_tx_start(TxBuf);
-#elif RF_TX_MODE == RF_TX_MODE_KEYSTATE_8K
+#elif RF_TX_MODE == RF_TX_MODE_KEYSTATE
         fill_keystate_frame();
+        rf_tx_start(TxBuf);
+#elif RF_TX_MODE == RF_TX_MODE_LEGACY_NKRO
+        fill_current_nkro_frame();
         rf_tx_start(TxBuf);
 #else
         if(gTxPhase == RF_TX_PHASE_WAIT_START)
@@ -662,10 +809,15 @@ void RFRole_Init(void)
     PRINT("rf keyboard tx init.id=%d\r\n", rfTaskID);
 #if RF_TX_MODE == RF_TX_MODE_STRESS_8K
     PRINT("RF 2.4G 8K stress TX: %u-byte frame, no ACK, 2M PHY\r\n", RF_STRESS_FRAME_LEN);
-#elif RF_TX_MODE == RF_TX_MODE_KEYSTATE_8K
-    PRINT("RF 2.4G 8K key-state TX: %u-byte frame, down_bits[8], demo=%u\r\n",
+#elif RF_TX_MODE == RF_TX_MODE_KEYSTATE
+    PRINT("RF 2.4G 1K key-state TX: %u-byte frame, down_bits[8], demo=%u\r\n",
           RF_KEYSTATE_FRAME_LEN,
           RF_TX_KEYSTATE_DEMO_ENABLE);
+#elif RF_TX_MODE == RF_TX_MODE_LEGACY_NKRO
+    PRINT("RF 2.4G 1K legacy NKRO TX: %u-byte frame, host_cmd=%u, target=%u\r\n",
+          RF_FRAME_LEN,
+          AIK_SPI_HOST_CMD_SIZE,
+          RF_TX_TARGET_ID);
 #else
     PRINT("KVM demo: target1=a1/enter, target2=b2/enter, target1=c1/enter after %d seconds\r\n",
           RF_TX_START_DELAY_SECONDS);

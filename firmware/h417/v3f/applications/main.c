@@ -1,335 +1,466 @@
-#include "ch32h417.h"
-#include "ch32h417_usb.h"
-#include "ch32h417_dbgmcu.h"
-#include "debug.h"
+#include <string.h>
+#include <stdio.h>
 
-#if defined(__GNUC__)
-#define V3F_MAYBE_UNUSED __attribute__((unused))
+#include "aik_spi_protocol.h"
+#include "board_init.h"
+#include "ch585_link.h"
+#include "default_profile.h"
+#include "half_state.h"
+#include "rf_report_bridge.h"
+#include "rgb_status.h"
+
+#ifndef V3F_ENABLE_USBHS_8K
+#define V3F_ENABLE_USBHS_8K 0
+#endif
+
+#if V3F_ENABLE_USBHS_8K
+#include "ch32h417_usbhs_hid_nkro.h"
+typedef ch32h417_usbhs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
+#define v3f_usb_hid_nkro_init ch32h417_usbhs_hid_nkro_init
+#define v3f_usb_hid_nkro_send ch32h417_usbhs_hid_nkro_send
+#define v3f_usb_hid_nkro_pending_empty ch32h417_usbhs_hid_nkro_pending_empty
+#define v3f_usb_hid_nkro_submit ch32h417_usbhs_hid_nkro_submit
+#define v3f_usb_hid_nkro_reports ch32h417_usbhs_hid_nkro_reports
+#define v3f_usb_hid_nkro_debug_write ch32h417_usbhs_hid_nkro_debug_write
+#define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbhs_hid_nkro_diag_snapshot
 #else
-#define V3F_MAYBE_UNUSED
+#include "ch32h417_usbfs_hid_nkro.h"
+typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
+#define v3f_usb_hid_nkro_init ch32h417_usbfs_hid_nkro_init
+#define v3f_usb_hid_nkro_send ch32h417_usbfs_hid_nkro_send
+#define v3f_usb_hid_nkro_pending_empty ch32h417_usbfs_hid_nkro_pending_empty
+#define v3f_usb_hid_nkro_submit ch32h417_usbfs_hid_nkro_submit
+#define v3f_usb_hid_nkro_reports ch32h417_usbfs_hid_nkro_reports
+#define v3f_usb_hid_nkro_debug_write ch32h417_usbfs_hid_nkro_debug_write
+#define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbfs_hid_nkro_diag_snapshot
 #endif
 
-#if defined(V3F_USBSS_OFFICIAL_OWNER) && (V3F_USBSS_OFFICIAL_OWNER != 0)
-#include "ch32h417_usbss_device.h"
-#include "ch32h417_usbhs_device.h"
+#ifndef V3F_USB_REPORT_INTERVAL_US
+#define V3F_USB_REPORT_INTERVAL_US 1000U
 #endif
 
-#define V5F_START_ADDR      0x00010000u
-#define V3F_TRACE_BASE ((volatile uint32_t *)0x20178000u)
-#define V3F_TRACE_MAGIC 0x56334646u /* "V3FF" */
+#if V3F_USB_REPORT_INTERVAL_US == 0
+#error "V3F_USB_REPORT_INTERVAL_US must be non-zero"
+#endif
 
-/* Shared-SRAM USBSS-PLL-ready flag polled by V5F before touching USBSSD.
-   Magic chosen to be obvious in `mdw 0x20178020 1`. Distinct from the
-   V3F runtime trace block above. */
-#define V3F_USBSS_FLAG_ADDR ((volatile uint32_t *)0x20178020u)
-#define V3F_USBSS_READY     0xABCD1234u
-#define V3F_USBSS_FAILED    0xDEADBEEFu
-#define V3F_USBFS_CFGR2_MASK  (RCC_USBFSSRC | RCC_USBFSDIV)
-#define V3F_USBFS_CFGR2_48M   (RCC_USBFSSRC_USBHSPLL | RCC_USBFSDIV_DIV10)
-#define V3F_USBSS_PHY_CFG_CR  (*((__IO uint32_t *)0x400341F8U))
-#define V3F_USBSS_PHY_CFG_DAT (*((__IO uint32_t *)0x400341FCU))
+#define V3F_LINK_STALE_US 5000U
+#define V3F_LINK_STALE_TICKS \
+    ((uint8_t)((V3F_LINK_STALE_US + V3F_USB_REPORT_INTERVAL_US - 1U) / \
+               V3F_USB_REPORT_INTERVAL_US))
 
-/* Sized to ~50 ms at V3F 100 MHz; official examples poll without bound. */
-#define V3F_USBSS_PLL_TIMEOUT 0x00200000u
-#define V3F_USBSS_LINK_PROBE_DELAY 0x00100000u
-#define V3F_USBSS_SWJ_DELAY_LOOPS 16u
-#define V3F_USBSS_SWJ_DELAY_CYCLES 50000000u
+#ifndef V3F_ENABLE_RF_BRIDGE
+#define V3F_ENABLE_RF_BRIDGE 0
+#endif
 
-#ifndef V3F_ENABLE_USBFS_CLOCK_INIT
-#define V3F_ENABLE_USBFS_CLOCK_INIT 0
+#ifndef V3F_ENABLE_SPI_HOST_CMD
+#define V3F_ENABLE_SPI_HOST_CMD 0
+#endif
+
+#ifndef V3F_ENABLE_USBFS_CDC_DEBUG
+#define V3F_ENABLE_USBFS_CDC_DEBUG 0
+#endif
+
+#ifndef V3F_CDC_DEBUG_PERIOD_TICKS
+#define V3F_CDC_DEBUG_PERIOD_TICKS 25U
 #endif
 
 enum
 {
-    V3F_STAGE_ENTER_MAIN = 1,
-    V3F_STAGE_SYSTEM_INIT_DONE,
-    V3F_STAGE_PWR_CLOCK_DONE,
-    V3F_STAGE_V5F_WAKE_DONE,
-    V3F_STAGE_SCTLR_DEBUG_DONE,
-    V3F_STAGE_USBSS_PLL_BEGIN,
-    V3F_STAGE_USBSS_PLL_DONE,
-    V3F_STAGE_USBSS_PLL_TIMEOUT,
-    V3F_STAGE_USBFS_CLOCK_DONE,
-    V3F_STAGE_USBFS_CLOCK_TIMEOUT,
-    V3F_STAGE_USBFS_CLOCK_SKIPPED,
-    V3F_STAGE_IDLE_LOOP,
-    V3F_STAGE_USBSS_LINK_PROBE_DONE,
-    V3F_STAGE_USBSS_SWJ_DISABLED,
-    V3F_STAGE_USBSS_SWJ_DELAY,
-    V3F_STAGE_USBSS_OFFICIAL_OWNER_DONE,
+    V3F_TRACE_TICK = 4,
+    V3F_TRACE_LEFT_OK = 5,
+    V3F_TRACE_RIGHT_OK = 6,
+    V3F_TRACE_LEFT_STALE = 7,
+    V3F_TRACE_RIGHT_STALE = 8,
+    V3F_TRACE_USB_REPORTS = 9,
+    V3F_TRACE_USB_IRQ = 10,
+    V3F_TRACE_USB_SETUP = 11,
+    V3F_TRACE_USB_RESET = 12,
+    V3F_TRACE_USB_LAST_REQ = 13,
+    V3F_TRACE_USB_LAST_VALUE = 14,
+    V3F_TRACE_USB_CLOCK_READY = 15,
+    V3F_TRACE_USB_CLOCK_ERROR = 16,
+    V3F_TRACE_USB_RCC_CFGR2 = 17,
+    V3F_TRACE_USB_RCC_CTLR = 18,
+    V3F_TRACE_USB_RCC_PLLCFGR2 = 19,
+    V3F_TRACE_USB_BASE_CTRL = 20,
+    V3F_TRACE_USB_UDEV_CTRL = 21,
+    V3F_TRACE_USB_INT_EN = 22,
+    V3F_TRACE_USB_UEP0_DMA = 23,
+    V3F_TRACE_USB_XFER_BUF0 = 24,
+    V3F_TRACE_USB_XFER_BUF1 = 25,
+    V3F_TRACE_USB_RESP0 = 26,
+    V3F_TRACE_USB_TX_LEN = 27,
+    V3F_TRACE_USB_RX_LEN = 28,
+    V3F_TRACE_LEFT_LINK_ERRORS = 29,
+    V3F_TRACE_RIGHT_LINK_ERRORS = 30,
+    V3F_TRACE_LEFT_INVALID_FRAMES = 31,
+    V3F_TRACE_RIGHT_INVALID_FRAMES = 32,
+    V3F_TRACE_LEFT_RX_HEADER = 33,
+    V3F_TRACE_RIGHT_RX_HEADER = 34,
+    V3F_TRACE_LEFT_RX_CRC = 35,
+    V3F_TRACE_RIGHT_RX_CRC = 36,
+    V3F_TRACE_LEFT_DOWN0 = 37,
+    V3F_TRACE_RIGHT_DOWN0 = 38,
+    V3F_TRACE_KEYS_DOWN01 = 39,
+    V3F_TRACE_NKRO_0205 = 40,
+    V3F_TRACE_NKRO_0609 = 41,
 };
 
-/* Symbols required by core_riscv.h __WFE() when linked with ch32h417_pwr.c */
-volatile uint32_t WFE_MASK = 0;
-volatile uint32_t WFE_WkupSource = 0;
-
-static void V3F_TraceStage(uint32_t stage)
+typedef struct
 {
-    V3F_TRACE_BASE[0] = V3F_TRACE_MAGIC;
-    V3F_TRACE_BASE[1] = stage;
-    V3F_TRACE_BASE[2] = NVIC->WAKEIP[1];
-    V3F_TRACE_BASE[3] = NVIC->SCTLR;
-}
+    aik_spi_half_state_v1_t frame;
+    uint8_t valid;
+    uint8_t stale_ticks;
+} v3f_half_cache_t;
 
-static void V3F_ClearUsbTrace(void)
+static void update_half_cache(v3f_half_cache_t *cache,
+                              uint8_t got_frame,
+                              const aik_spi_half_state_v1_t *next)
 {
-    uint32_t i;
-
-    for (i = 5U; i <= 23U; i++)
+    if(got_frame != 0U)
     {
-        V3F_TRACE_BASE[i] = 0U;
+        cache->frame = *next;
+        cache->valid = 1U;
+        cache->stale_ticks = 0U;
+        return;
     }
 }
 
-/* Bring up the USBSS PLL / PHY clock tree on V3F.
-   Mirrors Common/ch32h417_usbss_device.c::USBSS_RCC_Init(ENABLE). The PLL
-   refer clock (25 MHz HSE) was already programmed by SystemInit() via
-   RCC->PLLCFGR2 |= 0x20. Returns 1 on PLL lock, 0 on timeout. */
-static int V3F_MAYBE_UNUSED V3F_USBSS_PLL_Init(void)
+static void age_half_cache_on_usb_report(v3f_half_cache_t *cache,
+                                         uint8_t got_frame)
 {
-    uint32_t timeout;
-
-    /* USBSS_PLL_Init(ENABLE): start PLL and wait for lock. Bounded wait so
-       a missing crystal / wrong refer config does not hang V3F forever. */
-    RCC->CTLR |= (uint32_t)RCC_USBSS_PLLON;
-    for (timeout = 0; timeout < V3F_USBSS_PLL_TIMEOUT; timeout++)
+    if((cache == 0) || (got_frame != 0U))
     {
-        if ((RCC->CTLR & (uint32_t)RCC_USBSS_PLLRDY) == (uint32_t)RCC_USBSS_PLLRDY)
-        {
-            break;
-        }
+        return;
     }
-    if (timeout >= V3F_USBSS_PLL_TIMEOUT)
+    if(cache->stale_ticks < V3F_LINK_STALE_TICKS)
     {
-        return 0;
+        cache->stale_ticks++;
     }
-
-    /* HBPeriph USBSS clock + PIPE + UTMI + USBSS PLL output */
-    RCC_HBPeriphClockCmd(RCC_HBPeriph_USBSS, ENABLE);
-    RCC_PIPECmd(ENABLE);
-    RCC_UTMIcmd(ENABLE);
-    RCC_USBSS_PLLCmd(ENABLE);
-    return 1;
-}
-
-static uint32_t V3F_USBSS_PHY_Cfg(uint8_t port_num, uint8_t addr, uint16_t data)
-{
-    if (port_num != 0U)
+    if(cache->stale_ticks >= V3F_LINK_STALE_TICKS)
     {
-        return 0U;
-    }
-
-    V3F_USBSS_PHY_CFG_CR = (1UL << 23) | ((uint32_t)addr << 16) | data;
-    V3F_USBSS_PHY_CFG_DAT = 0x01U;
-    return V3F_USBSS_PHY_CFG_DAT;
-}
-
-static void V3F_USBSS_CFG_MOD(void)
-{
-    V3F_USBSS_PHY_Cfg(0U, 0x03U, 0x7C12U);
-    V3F_USBSS_PHY_Cfg(0U, 0x0DU, 0x79AAU);
-    V3F_USBSS_PHY_Cfg(0U, 0x15U, 0x4430U);
-    V3F_USBSS_PHY_Cfg(0U, 0x13U, 0x0010U);
-    *((__IO uint32_t *)0x5003C018U) = 0xB0054000U;
-
-    V3F_TRACE_BASE[9] = V3F_USBSS_PHY_CFG_DAT;
-    V3F_TRACE_BASE[10] = *((__IO uint32_t *)0x5003C018U);
-}
-
-static void V3F_MAYBE_UNUSED V3F_USBSS_Disable_SWJ(void)
-{
-    RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO | RCC_HB2Periph_GPIOB, ENABLE);
-    GPIO_PinRemapConfig(GPIO_Remap_SWJ_Disable, ENABLE);
-    V3F_TraceStage(V3F_STAGE_USBSS_SWJ_DISABLED);
-}
-
-static void V3F_MAYBE_UNUSED V3F_USBSS_LinkProbe(void)
-{
-    uint32_t delay;
-    uint32_t chip;
-
-    USBSSD->LINK_CFG = LINK_RX_EQ_EN | LINK_TX_DEEMPH_MASK | LINK_PHY_RESET;
-    USBSSD->LINK_CTRL = LINK_P2_MODE | LINK_GO_DISABLED;
-    USBSSD->LINK_CFG = LINK_RX_EQ_EN | LINK_TX_DEEMPH_MASK | LINK_LTSSM_MODE |
-                       LINK_TOUT_MODE;
-    USBSSD->LINK_LPM_CR |= LINK_LPM_EN;
-    chip = (DBGMCU_GetCHIPID() >> 4) & 0x0FU;
-    V3F_TRACE_BASE[19] = chip;
-    V3F_TRACE_BASE[20] = USBSSD->LINK_STATUS;
-
-    USBSSD->LINK_CFG |= LINK_RX_TERM_EN;
-    V3F_TRACE_BASE[21] = USBSSD->LINK_STATUS;
-    USBSSD->LINK_INT_CTRL = LINK_IE_TX_LMP | LINK_IE_RX_LMP | LINK_IE_RX_LMP_TOUT |
-                            LINK_IE_STATE_CHG | LINK_IE_WARM_RST | LINK_IE_TERM_PRES;
-    if (chip >= 3U)
-    {
-        USBSSD->LINK_INT_CTRL |= LINK_IE_RX_SET_FC;
-    }
-    V3F_TRACE_BASE[23] = USBSSD->LINK_INT_CTRL;
-    USBSSD->LINK_CTRL = LINK_P2_MODE;
-    USBSSD->LINK_U1_WKUP_TMR = 120U;
-    USBSSD->LINK_U1_WKUP_FILTER = 50U;
-    USBSSD->LINK_U2_WKUP_FILTER = 0U;
-    USBSSD->LINK_U3_WKUP_FILTER = 0U;
-    USBSSD->USB_CONTROL |= USBSS_FORCE_RST;
-    USBSSD->USB_STATUS = USBSS_UIF_TRANSFER;
-    USBSSD->USB_CONTROL = USBSS_UIE_TRANSFER | USBSS_UDIE_SETUP | USBSS_UDIE_STATUS |
-                          USBSS_DMA_EN | USBSS_SETUP_FLOW;
-    V3F_USBSS_CFG_MOD();
-
-    V3F_TRACE_BASE[11] = USBSSD->LINK_CFG;
-    V3F_TRACE_BASE[12] = USBSSD->LINK_CTRL;
-    V3F_TRACE_BASE[13] = USBSSD->LINK_STATUS;
-
-    for (delay = 0U; delay < V3F_USBSS_LINK_PROBE_DELAY; delay++)
-    {
-        __NOP();
-    }
-
-    V3F_TRACE_BASE[14] = USBSSD->LINK_STATUS;
-    V3F_TRACE_BASE[15] = USBSSD->LINK_INT_FLAG;
-    V3F_TRACE_BASE[16] = USBSSD->LINK_LPM_CR;
-    V3F_TRACE_BASE[17] = USBSSD->USB_CONTROL;
-    V3F_TRACE_BASE[18] = USBSSD->USB_STATUS;
-    V3F_TraceStage(V3F_STAGE_USBSS_LINK_PROBE_DONE);
-}
-
-static int V3F_MAYBE_UNUSED V3F_USBFS_Clock_Init(void)
-{
-    uint32_t timeout;
-
-    if ((RCC->CTLR & (uint32_t)RCC_USBHS_PLLRDY) == 0U)
-    {
-        RCC->CTLR |= (uint32_t)RCC_USBHS_PLLON;
-        for (timeout = 0; timeout < V3F_USBSS_PLL_TIMEOUT; timeout++)
-        {
-            if ((RCC->CTLR & (uint32_t)RCC_USBHS_PLLRDY) == (uint32_t)RCC_USBHS_PLLRDY)
-            {
-                break;
-            }
-        }
-        if (timeout >= V3F_USBSS_PLL_TIMEOUT)
-        {
-            return 0;
-        }
-    }
-
-    RCC->CFGR2 = (RCC->CFGR2 & (uint32_t)~V3F_USBFS_CFGR2_MASK) | (uint32_t)V3F_USBFS_CFGR2_48M;
-    RCC_HBPeriphClockCmd(RCC_HBPeriph_OTG_FS, ENABLE);
-
-    V3F_TRACE_BASE[5] = RCC->CFGR2;
-    V3F_TRACE_BASE[6] = RCC->CTLR;
-    V3F_TRACE_BASE[7] = RCC->HBPCENR;
-    return ((RCC->CFGR2 & (uint32_t)V3F_USBFS_CFGR2_MASK) == (uint32_t)V3F_USBFS_CFGR2_48M);
-}
-
-static void V3F_Delay(uint32_t cycles)
-{
-    volatile uint32_t i;
-
-    for (i = 0; i < cycles; i++)
-    {
-        __NOP();
+        cache->valid = 0U;
     }
 }
 
-static void V3F_MAYBE_UNUSED V3F_USBSS_SWJ_DownloadWindow(void)
+static void v3f_usb_diag_trace(void)
 {
-    uint32_t i;
+    v3f_usb_hid_nkro_diag_t usb_diag;
 
-    V3F_TraceStage(V3F_STAGE_USBSS_SWJ_DELAY);
-    for (i = 0U; i < V3F_USBSS_SWJ_DELAY_LOOPS; i++)
-    {
-        V3F_TRACE_BASE[22] = i + 1U;
-        V3F_Delay(V3F_USBSS_SWJ_DELAY_CYCLES);
-    }
+    v3f_usb_hid_nkro_diag_snapshot(&usb_diag);
+    v3f_trace_set(V3F_TRACE_USB_REPORTS, v3f_usb_hid_nkro_reports());
+    v3f_trace_set(V3F_TRACE_USB_IRQ, usb_diag.irq_count);
+    v3f_trace_set(V3F_TRACE_USB_SETUP, usb_diag.setup_count);
+    v3f_trace_set(V3F_TRACE_USB_RESET, usb_diag.bus_reset_count);
+    v3f_trace_set(V3F_TRACE_USB_LAST_REQ, usb_diag.last_setup_request);
+    v3f_trace_set(V3F_TRACE_USB_LAST_VALUE, usb_diag.last_setup_value);
+    v3f_trace_set(V3F_TRACE_USB_CLOCK_READY, usb_diag.clock_ready);
+    v3f_trace_set(V3F_TRACE_USB_CLOCK_ERROR, usb_diag.clock_error);
+    v3f_trace_set(V3F_TRACE_USB_RCC_CFGR2, usb_diag.rcc_cfgr2);
+    v3f_trace_set(V3F_TRACE_USB_RCC_CTLR, usb_diag.rcc_ctlr);
+    v3f_trace_set(V3F_TRACE_USB_RCC_PLLCFGR2, usb_diag.rcc_pllcfgr2);
+    v3f_trace_set(V3F_TRACE_USB_BASE_CTRL, usb_diag.usb_base_ctrl);
+    v3f_trace_set(V3F_TRACE_USB_UDEV_CTRL, usb_diag.usb_udev_ctrl);
+    v3f_trace_set(V3F_TRACE_USB_INT_EN, usb_diag.usb_int_en);
+    v3f_trace_set(V3F_TRACE_USB_UEP0_DMA, usb_diag.uep0_dma);
+    v3f_trace_set(V3F_TRACE_USB_XFER_BUF0, usb_diag.last_xfer_buf0);
+    v3f_trace_set(V3F_TRACE_USB_XFER_BUF1, usb_diag.last_xfer_buf1);
+    v3f_trace_set(V3F_TRACE_USB_RESP0, usb_diag.last_resp0);
+    v3f_trace_set(V3F_TRACE_USB_TX_LEN, usb_diag.last_tx_len);
+    v3f_trace_set(V3F_TRACE_USB_RX_LEN, usb_diag.last_rx_len);
 }
 
-#if defined(V3F_USBSS_OFFICIAL_OWNER) && (V3F_USBSS_OFFICIAL_OWNER != 0)
-static void V3F_USBSS_OfficialService(void)
+static uint32_t pack4(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3)
 {
-    if (USBHS_DevEnumStatus != 0U)
-    {
-        if (RingBuffer_Comm.RemainPack != 0U)
-        {
-            if ((USBHSD->UEP1_TX_CTRL & USBHS_UEP_T_RES_MASK) == USBHS_UEP_T_RES_NAK)
-            {
-                USBHSD->UEP1_TX_DMA =
-                    (uint32_t)&Data_Buffer[(RingBuffer_Comm.DealPtr) * DEF_USBD_HS_PACK_SIZE];
-                USBHSD->UEP1_TX_LEN = RingBuffer_Comm.PackLen[RingBuffer_Comm.DealPtr];
-                USBHSD->UEP1_TX_CTRL =
-                    (USBHSD->UEP1_TX_CTRL & (uint8_t)~USBHS_UEP_T_RES_MASK) |
-                    USBHS_UEP_T_RES_ACK;
-
-                NVIC_DisableIRQ(USBHS_IRQn);
-                RingBuffer_Comm.RemainPack--;
-                RingBuffer_Comm.DealPtr++;
-                if (RingBuffer_Comm.DealPtr == DEF_Ring_Buffer_Max_Blks)
-                {
-                    RingBuffer_Comm.DealPtr = 0;
-                }
-                NVIC_EnableIRQ(USBHS_IRQn);
-            }
-        }
-
-        if (RingBuffer_Comm.RemainPack < (DEF_Ring_Buffer_Max_Blks - DEF_RING_BUFFER_RESTART))
-        {
-            if (RingBuffer_Comm.StopFlag != 0U)
-            {
-                RingBuffer_Comm.StopFlag = 0;
-                USBHSD->UEP1_RX_CTRL =
-                    (USBHSD->UEP1_RX_CTRL & (uint8_t)~USBHS_UEP_R_RES_MASK) |
-                    USBHS_UEP_R_RES_ACK;
-            }
-        }
-    }
+    return ((uint32_t)b0) |
+           ((uint32_t)b1 << 8) |
+           ((uint32_t)b2 << 16) |
+           ((uint32_t)b3 << 24);
 }
+
+static void v3f_link_diag_trace(const v3f_half_cache_t *left,
+                                const v3f_half_cache_t *right)
+{
+    v3f_ch585_link_stats_t left_stats;
+    v3f_ch585_link_stats_t right_stats;
+
+    memset(&left_stats, 0, sizeof(left_stats));
+    memset(&right_stats, 0, sizeof(right_stats));
+    v3f_ch585_link_stats(AIK_HALF_ID_LEFT, &left_stats);
+    v3f_ch585_link_stats(AIK_HALF_ID_RIGHT, &right_stats);
+
+    v3f_trace_set(V3F_TRACE_LEFT_LINK_ERRORS, left_stats.link_errors);
+    v3f_trace_set(V3F_TRACE_RIGHT_LINK_ERRORS, right_stats.link_errors);
+    v3f_trace_set(V3F_TRACE_LEFT_INVALID_FRAMES, left_stats.invalid_frames);
+    v3f_trace_set(V3F_TRACE_RIGHT_INVALID_FRAMES, right_stats.invalid_frames);
+    v3f_trace_set(V3F_TRACE_LEFT_RX_HEADER,
+                  pack4(left_stats.last_magic,
+                        left_stats.last_type,
+                        (uint8_t)(left_stats.last_seq & 0xFFU),
+                        (uint8_t)(left_stats.last_seq >> 8)));
+    v3f_trace_set(V3F_TRACE_RIGHT_RX_HEADER,
+                  pack4(right_stats.last_magic,
+                        right_stats.last_type,
+                        (uint8_t)(right_stats.last_seq & 0xFFU),
+                        (uint8_t)(right_stats.last_seq >> 8)));
+    v3f_trace_set(V3F_TRACE_LEFT_RX_CRC,
+                  ((uint32_t)left_stats.last_crc) |
+                  ((uint32_t)left_stats.last_calc_crc << 16));
+    v3f_trace_set(V3F_TRACE_RIGHT_RX_CRC,
+                  ((uint32_t)right_stats.last_crc) |
+                  ((uint32_t)right_stats.last_calc_crc << 16));
+    v3f_trace_set(V3F_TRACE_LEFT_DOWN0,
+                  (left != 0 && left->valid != 0U) ?
+                  pack4(left->frame.down_bits[0],
+                        left->frame.down_bits[1],
+                        left->frame.down_bits[2],
+                        left->frame.down_bits[3]) : 0U);
+    v3f_trace_set(V3F_TRACE_RIGHT_DOWN0,
+                  (right != 0 && right->valid != 0U) ?
+                  pack4(right->frame.down_bits[0],
+                        right->frame.down_bits[1],
+                        right->frame.down_bits[2],
+                        right->frame.down_bits[3]) : 0U);
+}
+
+static void v3f_report_diag_trace(const v3f_global_key_state_t *keys,
+                                  const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
+{
+    if((keys == 0) || (nkro16 == 0))
+    {
+        return;
+    }
+
+    v3f_trace_set(V3F_TRACE_KEYS_DOWN01,
+                  pack4(keys->down[0],
+                        keys->down[1],
+                        keys->down[2],
+                        keys->down[3]));
+    v3f_trace_set(V3F_TRACE_NKRO_0205,
+                  pack4(nkro16[2], nkro16[3], nkro16[4], nkro16[5]));
+    v3f_trace_set(V3F_TRACE_NKRO_0609,
+                  pack4(nkro16[6], nkro16[7], nkro16[8], nkro16[9]));
+}
+
+static void v3f_prepare_spi_poll_tx(aik_spi_host_cmd_v1_t *cmd,
+                                    uint16_t host_seq,
+                                    const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
+                                    uint8_t enable_rf)
+{
+    if(cmd == 0)
+    {
+        return;
+    }
+
+#if V3F_ENABLE_SPI_HOST_CMD
+    v3f_rf_report_bridge_prepare_cmd(cmd, host_seq, nkro16, enable_rf);
+#else
+    (void)host_seq;
+    (void)nkro16;
+    (void)enable_rf;
+    memset(cmd, 0, sizeof(*cmd));
 #endif
+}
+
+static void v3f_cdc_debug_poll(uint16_t tick,
+                               const v3f_half_cache_t *left,
+                               const v3f_half_cache_t *right,
+                               const v3f_global_key_state_t *keys,
+                               const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
+{
+#if V3F_ENABLE_USBFS_CDC_DEBUG
+    static uint16_t last_tick;
+    static uint8_t phase;
+    v3f_ch585_link_stats_t left_stats;
+    v3f_ch585_link_stats_t right_stats;
+    char line[96];
+    int len;
+
+    if((uint16_t)(tick - last_tick) < V3F_CDC_DEBUG_PERIOD_TICKS)
+    {
+        return;
+    }
+    last_tick = tick;
+
+    memset(&left_stats, 0, sizeof(left_stats));
+    memset(&right_stats, 0, sizeof(right_stats));
+    v3f_ch585_link_stats(AIK_HALF_ID_LEFT, &left_stats);
+    v3f_ch585_link_stats(AIK_HALF_ID_RIGHT, &right_stats);
+
+    switch(phase)
+    {
+        case 0:
+            len = snprintf(line, sizeof(line),
+                           "L ok=%u st=%u err=%lu inv=%lu h=%02x%02x s=%u\r\n",
+                           (unsigned int)((left != 0) ? left->valid : 0U),
+                           (unsigned int)((left != 0) ? left->stale_ticks : 0U),
+                           (unsigned long)left_stats.link_errors,
+                           (unsigned long)left_stats.invalid_frames,
+                           (unsigned int)left_stats.last_magic,
+                           (unsigned int)left_stats.last_type,
+                           (unsigned int)left_stats.last_seq);
+            break;
+
+        case 1:
+            len = snprintf(line, sizeof(line),
+                           "L raw=%02x%02x%02x%02x bits=%02x%02x%02x%02x%02x%02x crc=%04x/%04x diag=%08lx\r\n",
+                           (unsigned int)left_stats.last_rx_head[0],
+                           (unsigned int)left_stats.last_rx_head[1],
+                           (unsigned int)left_stats.last_rx_head[2],
+                           (unsigned int)left_stats.last_rx_head[3],
+                           (unsigned int)left_stats.last_rx_down[0],
+                           (unsigned int)left_stats.last_rx_down[1],
+                           (unsigned int)left_stats.last_rx_down[2],
+                           (unsigned int)left_stats.last_rx_down[3],
+                           (unsigned int)left_stats.last_rx_down[4],
+                           (unsigned int)left_stats.last_rx_down[5],
+                           (unsigned int)left_stats.last_crc,
+                           (unsigned int)left_stats.last_calc_crc,
+                           (unsigned long)left_stats.last_diag);
+            break;
+
+        case 2:
+            len = snprintf(line, sizeof(line),
+                           "L d=%02x%02x%02x%02x\r\n",
+                           (unsigned int)((left != 0 && left->valid) ? left->frame.down_bits[0] : 0U),
+                           (unsigned int)((left != 0 && left->valid) ? left->frame.down_bits[1] : 0U),
+                           (unsigned int)((left != 0 && left->valid) ? left->frame.down_bits[2] : 0U),
+                           (unsigned int)((left != 0 && left->valid) ? left->frame.down_bits[3] : 0U));
+            break;
+
+        case 3:
+            len = snprintf(line, sizeof(line),
+                           "R ok=%u st=%u err=%lu inv=%lu h=%02x%02x s=%u\r\n",
+                           (unsigned int)((right != 0) ? right->valid : 0U),
+                           (unsigned int)((right != 0) ? right->stale_ticks : 0U),
+                           (unsigned long)right_stats.link_errors,
+                           (unsigned long)right_stats.invalid_frames,
+                           (unsigned int)right_stats.last_magic,
+                           (unsigned int)right_stats.last_type,
+                           (unsigned int)right_stats.last_seq);
+            break;
+
+        case 4:
+            len = snprintf(line, sizeof(line),
+                           "R raw=%02x%02x%02x%02x bits=%02x%02x%02x%02x%02x%02x crc=%04x/%04x diag=%08lx\r\n",
+                           (unsigned int)right_stats.last_rx_head[0],
+                           (unsigned int)right_stats.last_rx_head[1],
+                           (unsigned int)right_stats.last_rx_head[2],
+                           (unsigned int)right_stats.last_rx_head[3],
+                           (unsigned int)right_stats.last_rx_down[0],
+                           (unsigned int)right_stats.last_rx_down[1],
+                           (unsigned int)right_stats.last_rx_down[2],
+                           (unsigned int)right_stats.last_rx_down[3],
+                           (unsigned int)right_stats.last_rx_down[4],
+                           (unsigned int)right_stats.last_rx_down[5],
+                           (unsigned int)right_stats.last_crc,
+                           (unsigned int)right_stats.last_calc_crc,
+                           (unsigned long)right_stats.last_diag);
+            break;
+
+        case 5:
+            len = snprintf(line, sizeof(line),
+                           "R d=%02x%02x%02x%02x\r\n",
+                           (unsigned int)((right != 0 && right->valid) ? right->frame.down_bits[0] : 0U),
+                           (unsigned int)((right != 0 && right->valid) ? right->frame.down_bits[1] : 0U),
+                           (unsigned int)((right != 0 && right->valid) ? right->frame.down_bits[2] : 0U),
+                           (unsigned int)((right != 0 && right->valid) ? right->frame.down_bits[3] : 0U));
+            break;
+
+        default:
+            len = snprintf(line, sizeof(line),
+                           "K d=%02x%02x%02x%02x n=%02x%02x%02x%02x rpt=%lu\r\n",
+                           (unsigned int)((keys != 0) ? keys->down[0] : 0U),
+                           (unsigned int)((keys != 0) ? keys->down[1] : 0U),
+                           (unsigned int)((keys != 0) ? keys->down[2] : 0U),
+                           (unsigned int)((keys != 0) ? keys->down[3] : 0U),
+                           (unsigned int)((nkro16 != 0) ? nkro16[2] : 0U),
+                           (unsigned int)((nkro16 != 0) ? nkro16[3] : 0U),
+                           (unsigned int)((nkro16 != 0) ? nkro16[4] : 0U),
+                           (unsigned int)((nkro16 != 0) ? nkro16[5] : 0U),
+                           (unsigned long)v3f_usb_hid_nkro_reports());
+            break;
+    }
+
+    phase = (uint8_t)((phase + 1U) % 7U);
+    if(len > 0)
+    {
+        (void)v3f_usb_hid_nkro_debug_write(line);
+    }
+#else
+    (void)tick;
+    (void)left;
+    (void)right;
+    (void)keys;
+    (void)nkro16;
+#endif
+}
 
 int main(void)
 {
-    V3F_TRACE_BASE[4] = 0;
-    V3F_ClearUsbTrace();
-    *V3F_USBSS_FLAG_ADDR = 0;
-    V3F_TraceStage(V3F_STAGE_ENTER_MAIN);
+    v3f_half_cache_t left;
+    v3f_half_cache_t right;
+    aik_spi_half_state_v1_t rx;
+    aik_spi_host_cmd_v1_t left_cmd;
+    aik_spi_host_cmd_v1_t right_cmd;
+    v3f_global_key_state_t keys;
+    uint8_t nkro16[AIK_NKRO_REPORT_BYTES];
+    uint16_t host_seq = 0U;
 
-    /* Current V3F runtime path: keep the task set narrow until V5F UART logs
-       are proven. USBSS ownership and SWJ remap will be reintroduced after
-       the dual-core startup flow is stable on hardware. */
-    SystemInit();
-    V3F_TraceStage(V3F_STAGE_SYSTEM_INIT_DONE);
+    memset(&left, 0, sizeof(left));
+    memset(&right, 0, sizeof(right));
+    memset(nkro16, 0, sizeof(nkro16));
 
-    RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE);
-    V3F_TraceStage(V3F_STAGE_PWR_CLOCK_DONE);
+    v3f_board_init();
+    v3f_usb_hid_nkro_init();
+    v3f_ch585_link_init();
+    v3f_rgb_status_init();
+    v3f_rgb_status_red_once();
 
-#if V3F_ENABLE_USBFS_CLOCK_INIT
-    if (V3F_USBFS_Clock_Init() != 0)
+    while(1)
     {
-        V3F_TraceStage(V3F_STAGE_USBFS_CLOCK_DONE);
+        uint8_t got_left;
+        uint8_t got_right;
+
+        if(v3f_usb_hid_nkro_pending_empty() == 0U)
+        {
+            continue;
+        }
+
+        v3f_prepare_spi_poll_tx(&left_cmd,
+                                host_seq,
+                                nkro16,
+                                (uint8_t)V3F_ENABLE_RF_BRIDGE);
+        v3f_prepare_spi_poll_tx(&right_cmd,
+                                host_seq,
+                                nkro16,
+                                0U);
+
+        got_left = v3f_ch585_link_poll(AIK_HALF_ID_LEFT, &left_cmd, &rx);
+        update_half_cache(&left, got_left, &rx);
+
+        got_right = v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx);
+        update_half_cache(&right, got_right, &rx);
+
+        age_half_cache_on_usb_report(&left, got_left);
+        age_half_cache_on_usb_report(&right, got_right);
+
+        v3f_half_state_merge(left.valid ? &left.frame : 0,
+                             right.valid ? &right.frame : 0,
+                             &keys);
+        v3f_default_profile_build_nkro16(&keys, nkro16);
+        (void)v3f_usb_hid_nkro_submit(nkro16);
+
+        v3f_trace_inc(V3F_TRACE_TICK);
+        v3f_trace_set(V3F_TRACE_LEFT_OK, left.valid);
+        v3f_trace_set(V3F_TRACE_RIGHT_OK, right.valid);
+        v3f_trace_set(V3F_TRACE_LEFT_STALE, left.stale_ticks);
+        v3f_trace_set(V3F_TRACE_RIGHT_STALE, right.stale_ticks);
+        v3f_link_diag_trace(&left, &right);
+        v3f_report_diag_trace(&keys, nkro16);
+        v3f_usb_diag_trace();
+        v3f_cdc_debug_poll(host_seq, &left, &right, &keys, nkro16);
+
+        host_seq++;
     }
-    else
-    {
-        V3F_TraceStage(V3F_STAGE_USBFS_CLOCK_TIMEOUT);
-    }
-#else
-    V3F_TRACE_BASE[5] = RCC->CFGR2;
-    V3F_TRACE_BASE[6] = RCC->CTLR;
-    V3F_TRACE_BASE[7] = RCC->HBPCENR;
-    V3F_TraceStage(V3F_STAGE_USBFS_CLOCK_SKIPPED);
-#endif
-
-    NVIC_WakeUp_V5F(V5F_START_ADDR);
-    V3F_TraceStage(V3F_STAGE_V5F_WAKE_DONE);
-
-    NVIC->SCTLR |= 1 << 4;
-    V3F_TraceStage(V3F_STAGE_SCTLR_DEBUG_DONE);
-
-    while (1)
-    {
-        V3F_TRACE_BASE[1] = V3F_STAGE_IDLE_LOOP;
-        V3F_TRACE_BASE[4]++;
-        __NOP();
-    }
-
-    return 0;
 }

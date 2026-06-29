@@ -8,11 +8,20 @@
 #include "ch32h417_ltdc_rgb.h"
 #include "ch32h417_pwr.h"
 
-#if APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_SPI_SPEED
+#if (APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_SPI_SPEED) || \
+    (APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_ADC_KEY_CAL)
+#include "ch32h417_ch585_spi_link.h"
 #include "ch32h417_gpio.h"
 #include "ch32h417_rcc.h"
 #include "ch32h417_spi.h"
+#endif
+
+#if APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_SPI_SPEED
 #include "ch585_h417_spi_speed_proto.h"
+#endif
+
+#if APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_ADC_KEY_CAL
+#include "ch585_h417_adc_key_cal_proto.h"
 #endif
 
 #if APP_V5F_HW_TEST == APP_V5F_HW_TEST_LTDC
@@ -164,12 +173,14 @@ volatile v5f_hw_test_diag_t g_v5f_hw_test_diag;
 #define CH585_SPI_SPEED_CS_PIN GPIO_Pin_9
 #define CH585_SPI_SPEED_OTHER_CS_PORT GPIOF
 #define CH585_SPI_SPEED_OTHER_CS_PIN GPIO_Pin_2
+#define CH585_SPI_SPEED_LINK_SIDE CH32H417_CH585_SPI_LINK_SIDE_RIGHT
 #else
 #define CH585_SPI_SPEED_SOURCE_DESC "left/U2 CS=PF2 other=PD9"
 #define CH585_SPI_SPEED_CS_PORT GPIOF
 #define CH585_SPI_SPEED_CS_PIN GPIO_Pin_2
 #define CH585_SPI_SPEED_OTHER_CS_PORT GPIOD
 #define CH585_SPI_SPEED_OTHER_CS_PIN GPIO_Pin_9
+#define CH585_SPI_SPEED_LINK_SIDE CH32H417_CH585_SPI_LINK_SIDE_LEFT
 #endif
 
 #ifndef CH585_SPI_SPEED_FRAMES_PER_RATE
@@ -188,6 +199,14 @@ volatile v5f_hw_test_diag_t g_v5f_hw_test_diag;
 #define CH585_SPI_SPEED_CS_GAP_CYCLES 1024U
 #endif
 
+#ifndef CH585_SPI_SPEED_MAX_ATTEMPTS_PER_RATE
+#define CH585_SPI_SPEED_MAX_ATTEMPTS_PER_RATE (CH585_SPI_SPEED_FRAMES_PER_RATE * 8U)
+#endif
+
+#ifndef CH585_SPI_SPEED_SYNC_RETRY_CYCLES
+#define CH585_SPI_SPEED_SYNC_RETRY_CYCLES 48000U
+#endif
+
 #define CH585_SPI_SPEED_LINE_BYTES 512U
 #define CH585_SPI_SPEED_CMD_BYTES 64U
 #define CH585_SPI_SPEED_DIV2_DIAG_SAMPLES 4U
@@ -198,6 +217,7 @@ typedef enum
     CH585_SPI_SPEED_CMD_AUTO = 0,
     CH585_SPI_SPEED_CMD_RATE = 1,
     CH585_SPI_SPEED_CMD_STOP = 2,
+    CH585_SPI_SPEED_CMD_HF = 3,
 } ch585_spi_speed_cmd_mode_t;
 
 typedef struct
@@ -232,10 +252,12 @@ typedef struct
     ch585_spi_speed_cmd_mode_t mode;
     const ch585_spi_speed_rate_t *rate;
     uint8_t once_pending;
+    uint8_t once_hf_pending;
 } ch585_spi_speed_cmd_state_t;
 
 static uint8_t s_ch585_spi_speed_tx[CH585_H417_SPI_SPEED_TRANSFER_BYTES] __attribute__((aligned(4)));
 static uint8_t s_ch585_spi_speed_rx[CH585_H417_SPI_SPEED_TRANSFER_BYTES] __attribute__((aligned(4)));
+static ch32h417_ch585_spi_link_config_t s_ch585_spi_speed_stable_link;
 
 static const ch585_spi_speed_rate_t s_ch585_spi_speed_rates[] =
 {
@@ -244,10 +266,12 @@ static const ch585_spi_speed_rate_t s_ch585_spi_speed_rates[] =
     { SPI_BaudRatePrescaler_Mode2, SPI_CPHA_2Edge, 8U, 1U, "div8-hsrx1-cpha2" },
     { SPI_BaudRatePrescaler_Mode2, SPI_CPHA_1Edge, 8U, 2U, "div8-hsrx2" },
     { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_1Edge, 4U, 0U, "div4" },
+    { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_2Edge, 4U, 0U, "div4-cpha2" },
     { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_1Edge, 4U, 1U, "div4-hsrx1" },
     { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_2Edge, 4U, 1U, "div4-hsrx1-cpha2" },
     { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_1Edge, 4U, 2U, "div4-hsrx2" },
     { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_1Edge, 2U, 0U, "div2" },
+    { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_2Edge, 2U, 0U, "div2-cpha2" },
     { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_1Edge, 2U, 1U, "div2-hsrx1" },
     { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_1Edge, 2U, 2U, "div2-hsrx2" },
     { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_2Edge, 2U, 2U, "div2-hsrx2-cpha2" },
@@ -319,9 +343,31 @@ static void ch585_spi_speed_log_line(const char *line)
     (void)ch585_spi_speed_cdc_write_full("\r\n", 2u);
 }
 
+static uint8_t ch585_spi_speed_is_stable_12m5(const ch585_spi_speed_rate_t *rate)
+{
+    if(rate == RT_NULL)
+    {
+        return 0U;
+    }
+
+    if((rate->div == 8U) &&
+       (rate->hsrx == 0U) &&
+       (rate->cpha == SPI_CPHA_1Edge))
+    {
+        return 1U;
+    }
+
+    return 0U;
+}
+
 static uint32_t ch585_spi_speed_rate_khz(const ch585_spi_speed_rate_t *rate)
 {
     uint32_t hclk = (HCLKClock != 0U) ? HCLKClock : SystemCoreClock;
+
+    if(ch585_spi_speed_is_stable_12m5(rate) != 0U)
+    {
+        return CH32H417_CH585_SPI_LINK_SPI_KHZ;
+    }
 
     if(rate->div == 0U)
     {
@@ -334,6 +380,21 @@ static uint32_t ch585_spi_speed_rate_khz(const ch585_spi_speed_rate_t *rate)
 static uint8_t ch585_spi_speed_is_div2(const ch585_spi_speed_rate_t *rate)
 {
     return (rate->div == 2U) ? 1U : 0U;
+}
+
+static uint8_t ch585_spi_speed_is_high_frequency(const ch585_spi_speed_rate_t *rate)
+{
+    if(rate == RT_NULL)
+    {
+        return 0U;
+    }
+
+    if((rate->div == 4U) || (rate->div == 2U))
+    {
+        return 1U;
+    }
+
+    return 0U;
 }
 
 static char *ch585_spi_speed_trim_command(char *line)
@@ -395,8 +456,8 @@ static const ch585_spi_speed_rate_t *ch585_spi_speed_find_rate(const char *name)
 
 static void ch585_spi_speed_log_help(void)
 {
-    ch585_spi_speed_log_line("SPI_CMD help commands: auto | stop | rate <name> | once <name> | go <name> | help");
-    ch585_spi_speed_log_line("SPI_CMD rates: div8 div8-hsrx1 div8-hsrx1-cpha2 div8-hsrx2 div4 div4-hsrx1 div4-hsrx1-cpha2 div4-hsrx2 div2 div2-hsrx1 div2-hsrx2 div2-hsrx2-cpha2");
+    ch585_spi_speed_log_line("SPI_CMD help commands: auto | hf | oncehf | stop | rate <name> | once <name> | go <name> | help");
+    ch585_spi_speed_log_line("SPI_CMD rates: div8 div8-hsrx1 div8-hsrx1-cpha2 div8-hsrx2 div4 div4-cpha2 div4-hsrx1 div4-hsrx1-cpha2 div4-hsrx2 div2 div2-cpha2 div2-hsrx1 div2-hsrx2 div2-hsrx2-cpha2");
 }
 
 static void ch585_spi_speed_log_command(const char *status,
@@ -416,6 +477,10 @@ static void ch585_spi_speed_log_command(const char *status,
         {
             mode = "stop";
         }
+        else if(cmd->mode == CH585_SPI_SPEED_CMD_HF)
+        {
+            mode = "hf";
+        }
 
         if(cmd->rate != RT_NULL)
         {
@@ -425,11 +490,12 @@ static void ch585_spi_speed_log_command(const char *status,
 
     (void)rt_snprintf(line,
                       sizeof(line),
-                      "SPI_CMD %s mode=%s rate=%s once=%u",
+                      "SPI_CMD %s mode=%s rate=%s once=%u oncehf=%u",
                       status,
                       mode,
                       rate,
-                      (cmd != RT_NULL) ? (unsigned int)cmd->once_pending : 0U);
+                      (cmd != RT_NULL) ? (unsigned int)cmd->once_pending : 0U,
+                      (cmd != RT_NULL) ? (unsigned int)cmd->once_hf_pending : 0U);
     ch585_spi_speed_log_line(line);
 }
 
@@ -455,6 +521,25 @@ static void ch585_spi_speed_handle_command(ch585_spi_speed_cmd_state_t *cmd,
     {
         cmd->mode = CH585_SPI_SPEED_CMD_AUTO;
         cmd->once_pending = 0U;
+        cmd->once_hf_pending = 0U;
+        ch585_spi_speed_log_command("ok", cmd);
+        return;
+    }
+
+    if(strcmp(line, "hf") == 0)
+    {
+        cmd->mode = CH585_SPI_SPEED_CMD_HF;
+        cmd->once_pending = 0U;
+        cmd->once_hf_pending = 0U;
+        ch585_spi_speed_log_command("ok", cmd);
+        return;
+    }
+
+    if(strcmp(line, "oncehf") == 0)
+    {
+        cmd->mode = CH585_SPI_SPEED_CMD_STOP;
+        cmd->once_pending = 0U;
+        cmd->once_hf_pending = 1U;
         ch585_spi_speed_log_command("ok", cmd);
         return;
     }
@@ -463,6 +548,7 @@ static void ch585_spi_speed_handle_command(ch585_spi_speed_cmd_state_t *cmd,
     {
         cmd->mode = CH585_SPI_SPEED_CMD_STOP;
         cmd->once_pending = 0U;
+        cmd->once_hf_pending = 0U;
         ch585_spi_speed_log_command("ok", cmd);
         return;
     }
@@ -480,6 +566,7 @@ static void ch585_spi_speed_handle_command(ch585_spi_speed_cmd_state_t *cmd,
         cmd->rate = rate;
         cmd->mode = CH585_SPI_SPEED_CMD_RATE;
         cmd->once_pending = 0U;
+        cmd->once_hf_pending = 0U;
         ch585_spi_speed_log_command("ok", cmd);
         return;
     }
@@ -498,6 +585,7 @@ static void ch585_spi_speed_handle_command(ch585_spi_speed_cmd_state_t *cmd,
         cmd->rate = rate;
         cmd->mode = CH585_SPI_SPEED_CMD_STOP;
         cmd->once_pending = 1U;
+        cmd->once_hf_pending = 0U;
         ch585_spi_speed_log_command("ok", cmd);
         return;
     }
@@ -777,6 +865,21 @@ static uint32_t ch585_spi_speed_error_total(const ch585_spi_speed_stats_t *stats
     return stats->bad_ready + stats->timeout + stats->bad_fixed;
 }
 
+static uint8_t ch585_spi_speed_rate_success(const ch585_spi_speed_stats_t *stats)
+{
+    if(stats->ok != CH585_SPI_SPEED_FRAMES_PER_RATE)
+    {
+        return 0U;
+    }
+
+    if((stats->timeout != 0U) || (stats->bad_fixed != 0U))
+    {
+        return 0U;
+    }
+
+    return 1U;
+}
+
 static void ch585_spi_speed_log_div2_diag(const ch585_spi_speed_rate_t *rate,
                                           const ch585_spi_speed_stats_t *stats)
 {
@@ -846,21 +949,43 @@ static void ch585_spi_speed_run_rate(const ch585_spi_speed_rate_t *rate,
     uint32_t start_cycle;
     uint32_t elapsed_cycles;
     uint32_t khz;
-    uint32_t i;
+    uint32_t attempts;
     char line[CH585_SPI_SPEED_LINE_BYTES];
     int used;
 
     memset(&stats, 0, sizeof(stats));
     ch585_spi_speed_div2_diag_reset(&stats);
     memset(s_ch585_spi_speed_rx, 0, sizeof(s_ch585_spi_speed_rx));
-    ch585_spi_speed_spi_apply(rate);
+    if(ch585_spi_speed_is_stable_12m5(rate) != 0U)
+    {
+        ch32h417_ch585_spi_link_init(&s_ch585_spi_speed_stable_link);
+    }
+    else
+    {
+        ch585_spi_speed_spi_apply(rate);
+    }
     rt_thread_mdelay(2);
 
     start_cycle = ch585_spi_speed_mcycle();
-    for(i = 0U; i < CH585_SPI_SPEED_FRAMES_PER_RATE; i++)
+    attempts = 0U;
+    while((stats.ok < CH585_SPI_SPEED_FRAMES_PER_RATE) &&
+          (attempts < CH585_SPI_SPEED_MAX_ATTEMPTS_PER_RATE))
     {
-        int ret = ch585_spi_speed_transfer_frame(s_ch585_spi_speed_rx,
+        int ret;
+
+        if(ch585_spi_speed_is_stable_12m5(rate) != 0U)
+        {
+            ret = ch32h417_ch585_spi_link_transfer(
+                s_ch585_spi_speed_tx,
+                s_ch585_spi_speed_rx,
+                (uint16_t)CH585_H417_SPI_SPEED_TRANSFER_BYTES);
+        }
+        else
+        {
+            ret = ch585_spi_speed_transfer_frame(s_ch585_spi_speed_rx,
                                                  s_ch585_spi_speed_tx);
+        }
+        attempts++;
         if(ret != 0)
         {
             stats.timeout++;
@@ -875,15 +1000,18 @@ static void ch585_spi_speed_run_rate(const ch585_spi_speed_rate_t *rate,
                 ch585_spi_speed_div2_diag_capture(s_ch585_spi_speed_rx,
                                                   &stats);
             }
+
+            if(s_ch585_spi_speed_rx[0] != (uint8_t)CH585_H417_SPI_SPEED_READY_BYTE)
+            {
+                ch585_spi_speed_delay_cycles(CH585_SPI_SPEED_SYNC_RETRY_CYCLES);
+            }
         }
         g_v5f_hw_test_diag.frame_count++;
     }
     elapsed_cycles = ch585_spi_speed_mcycle() - start_cycle;
     khz = ch585_spi_speed_rate_khz(rate);
 
-    if((stats.ok == CH585_SPI_SPEED_FRAMES_PER_RATE) &&
-       (ch585_spi_speed_error_total(&stats) == 0U) &&
-       (khz >= *best_khz))
+    if((ch585_spi_speed_rate_success(&stats) != 0U) && (khz >= *best_khz))
     {
         *best_khz = khz;
         *best_name = rate->name;
@@ -891,13 +1019,15 @@ static void ch585_spi_speed_run_rate(const ch585_spi_speed_rate_t *rate,
 
     g_v5f_hw_test_diag.spi_timeout_count += stats.timeout;
     g_v5f_hw_test_diag.gpha_ok_count = stats.ok;
-    g_v5f_hw_test_diag.gpha_fail_count = ch585_spi_speed_error_total(&stats);
+    g_v5f_hw_test_diag.gpha_fail_count =
+        (ch585_spi_speed_rate_success(&stats) != 0U) ? 0U :
+        ch585_spi_speed_error_total(&stats);
     g_v5f_hw_test_diag.last_error =
-        (ch585_spi_speed_error_total(&stats) == 0U) ? 0 : -300;
+        (ch585_spi_speed_rate_success(&stats) != 0U) ? 0 : -300;
 
     used = rt_snprintf(line,
                        sizeof(line),
-                       "SPI_RATE name=%s div=%u hsrx=%u cpha=%u khz=%u bytes=%u frames=%u ok=%u bad_ready=%u timeout=%u bad_fixed=%u first_bad_off=%u first_bad=%02x%02x%02x%02x first_exp=%02x%02x%02x%02x cycles=%u best_khz=%u",
+                       "SPI_RATE name=%s div=%u hsrx=%u cpha=%u khz=%u bytes=%u frames=%u attempts=%u ok=%u bad_ready=%u timeout=%u bad_fixed=%u first_bad_off=%u first_bad=%02x%02x%02x%02x first_exp=%02x%02x%02x%02x cycles=%u best_khz=%u",
                        rate->name,
                        (unsigned int)rate->div,
                        (unsigned int)rate->hsrx,
@@ -905,6 +1035,7 @@ static void ch585_spi_speed_run_rate(const ch585_spi_speed_rate_t *rate,
                        (unsigned int)khz,
                        (unsigned int)CH585_H417_SPI_SPEED_TRANSFER_BYTES,
                        (unsigned int)CH585_SPI_SPEED_FRAMES_PER_RATE,
+                       (unsigned int)attempts,
                        (unsigned int)stats.ok,
                        (unsigned int)stats.bad_ready,
                        (unsigned int)stats.timeout,
@@ -931,6 +1062,35 @@ static void ch585_spi_speed_run_rate(const ch585_spi_speed_rate_t *rate,
     }
 }
 
+static void ch585_spi_speed_run_high_frequency(ch585_spi_speed_cmd_state_t *cmd,
+                                               uint32_t *best_khz,
+                                               const char **best_name,
+                                               uint8_t stop_on_command)
+{
+    uint32_t i;
+
+    for(i = 0U; i < ch585_spi_speed_rate_count(); i++)
+    {
+        const ch585_spi_speed_rate_t *rate = &s_ch585_spi_speed_rates[i];
+
+        if(ch585_spi_speed_is_high_frequency(rate) == 0U)
+        {
+            continue;
+        }
+
+        if(stop_on_command != 0U)
+        {
+            ch585_spi_speed_poll_command(cmd);
+            if((cmd == RT_NULL) || (cmd->mode != CH585_SPI_SPEED_CMD_HF))
+            {
+                break;
+            }
+        }
+
+        ch585_spi_speed_run_rate(rate, best_khz, best_name);
+    }
+}
+
 static void run_ch585_spi_speed_test(void)
 {
     ch585_spi_speed_cmd_state_t cmd;
@@ -948,20 +1108,25 @@ static void run_ch585_spi_speed_test(void)
 
     (void)ch32h417_dual_cdc_init();
     rt_thread_mdelay(300);
+    ch32h417_ch585_spi_link_config_for_side(CH585_SPI_SPEED_LINK_SIDE,
+                                            &s_ch585_spi_speed_stable_link);
     ch585_spi_speed_gpio_init();
     g_v5f_hw_test_diag.phase = V5F_HW_PHASE_RUNNING;
 
     (void)rt_snprintf(line,
                       sizeof(line),
-                      "CH585_SPI_SPEED START source=%s pins=PB3_SCK_PB5_MOSI_PB4_MISO mode=fixed transfer_bytes=%u frame_bytes=%u hclk=%u sys=%u ready_byte=0x%02x frame_off=%u cs_gap_cycles=%u",
+                      "CH585_SPI_SPEED START source=%s pins=PB3_SCK_PB5_MOSI_PB4_MISO mode=fixed-sync stable_khz=%u transfer_bytes=%u frame_bytes=%u hclk=%u sys=%u ready_byte=0x%02x frame_off=%u cs_gap_cycles=%u sync_retry_cycles=%u max_attempts=%u",
                       CH585_SPI_SPEED_SOURCE_DESC,
+                      (unsigned int)CH32H417_CH585_SPI_LINK_SPI_KHZ,
                       (unsigned int)CH585_H417_SPI_SPEED_TRANSFER_BYTES,
                       (unsigned int)CH585_H417_SPI_SPEED_FRAME_BYTES,
                       (unsigned int)HCLKClock,
                       (unsigned int)SystemClock,
                       (unsigned int)CH585_H417_SPI_SPEED_READY_BYTE,
                       (unsigned int)CH585_H417_SPI_SPEED_FRAME_OFF,
-                      (unsigned int)CH585_SPI_SPEED_CS_GAP_CYCLES);
+                      (unsigned int)CH585_SPI_SPEED_CS_GAP_CYCLES,
+                      (unsigned int)CH585_SPI_SPEED_SYNC_RETRY_CYCLES,
+                      (unsigned int)CH585_SPI_SPEED_MAX_ATTEMPTS_PER_RATE);
     ch585_spi_speed_log_line(line);
     ch585_spi_speed_log_help();
 
@@ -971,6 +1136,24 @@ static void run_ch585_spi_speed_test(void)
         const char *best_name = "none";
 
         ch585_spi_speed_poll_command(&cmd);
+
+        if(cmd.once_hf_pending != 0U)
+        {
+            cmd.once_hf_pending = 0U;
+            ch585_spi_speed_run_high_frequency(&cmd,
+                                               &best_khz,
+                                               &best_name,
+                                               0U);
+            (void)rt_snprintf(line,
+                              sizeof(line),
+                              "SPI_MAX best_khz=%u best_name=%s source=%s mode=oncehf",
+                              (unsigned int)best_khz,
+                              best_name,
+                              CH585_SPI_SPEED_SOURCE_DESC);
+            ch585_spi_speed_log_line(line);
+            ch585_spi_speed_poll_command(&cmd);
+            continue;
+        }
 
         if(cmd.once_pending != 0U)
         {
@@ -993,6 +1176,26 @@ static void run_ch585_spi_speed_test(void)
         if(cmd.mode == CH585_SPI_SPEED_CMD_STOP)
         {
             ch585_spi_speed_poll_delay(&cmd, 50U);
+            continue;
+        }
+
+        if(cmd.mode == CH585_SPI_SPEED_CMD_HF)
+        {
+            ch585_spi_speed_run_high_frequency(&cmd,
+                                               &best_khz,
+                                               &best_name,
+                                               1U);
+            if(cmd.mode == CH585_SPI_SPEED_CMD_HF)
+            {
+                (void)rt_snprintf(line,
+                                  sizeof(line),
+                                  "SPI_MAX best_khz=%u best_name=%s source=%s mode=hf",
+                                  (unsigned int)best_khz,
+                                  best_name,
+                                  CH585_SPI_SPEED_SOURCE_DESC);
+                ch585_spi_speed_log_line(line);
+                ch585_spi_speed_poll_delay(&cmd, 250U);
+            }
             continue;
         }
 
@@ -1037,6 +1240,431 @@ static void run_ch585_spi_speed_test(void)
             ch585_spi_speed_log_line(line);
             ch585_spi_speed_poll_delay(&cmd, 1000U);
         }
+    }
+}
+#endif
+
+#if APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_ADC_KEY_CAL
+#if !APP_ENABLE_USB_TEST
+#error "ch585_adc_key_cal hw_test requires APP_ENABLE_USB_TEST for CDC output"
+#endif
+
+#if !defined(APP_CH585_ADC_KEY_CAL_SOURCE_LEFT) && \
+    !defined(APP_CH585_ADC_KEY_CAL_SOURCE_RIGHT)
+#define APP_CH585_ADC_KEY_CAL_SOURCE_LEFT 1
+#endif
+
+#if defined(APP_CH585_ADC_KEY_CAL_SOURCE_LEFT) && \
+    defined(APP_CH585_ADC_KEY_CAL_SOURCE_RIGHT)
+#error "Select only one CH585 ADC key calibration source"
+#endif
+
+#if defined(APP_CH585_ADC_KEY_CAL_SOURCE_RIGHT)
+#define CH585_ADC_KEY_CAL_SOURCE_DESC "right/U3 CS=PD9 other=PF2"
+#define CH585_ADC_KEY_CAL_SOURCE_TEXT "right"
+#define CH585_ADC_KEY_CAL_LINK_SIDE CH32H417_CH585_SPI_LINK_SIDE_RIGHT
+#define CH585_ADC_KEY_CAL_DEFAULT_KEYS 41U
+#else
+#define CH585_ADC_KEY_CAL_SOURCE_DESC "left/U2 CS=PF2 other=PD9"
+#define CH585_ADC_KEY_CAL_SOURCE_TEXT "left"
+#define CH585_ADC_KEY_CAL_LINK_SIDE CH32H417_CH585_SPI_LINK_SIDE_LEFT
+#define CH585_ADC_KEY_CAL_DEFAULT_KEYS 36U
+#endif
+
+#define CH585_ADC_KEY_CAL_LINE_BYTES 192U
+#define CH585_ADC_KEY_CAL_CMD_BYTES 64U
+
+typedef struct
+{
+    uint8_t key;
+    uint8_t key_count;
+    uint8_t stream;
+    uint8_t reset_pending;
+    uint16_t host_seq;
+    uint32_t valid_samples;
+    uint32_t stale_samples;
+    uint32_t bad_crc;
+    uint32_t spi_errors;
+} ch585_adc_key_cal_state_t;
+
+static ch585_h417_adc_key_cal_cmd_t s_ch585_adc_key_cal_tx
+    __attribute__((aligned(4)));
+static ch585_h417_adc_key_cal_sample_t s_ch585_adc_key_cal_rx
+    __attribute__((aligned(4)));
+static ch32h417_ch585_spi_link_config_t s_ch585_adc_key_cal_link;
+
+static int ch585_adc_key_cal_cdc_write_full(const char *data, rt_size_t len)
+{
+    rt_size_t offset = 0u;
+    uint8_t retries = 0u;
+
+    if(data == RT_NULL)
+    {
+        return -1;
+    }
+
+    while(offset < len)
+    {
+        int wrote = ch32h417_usb_cdc_write(&data[offset],
+                                           (rt_uint32_t)(len - offset));
+
+        if(wrote > 0)
+        {
+            offset += (rt_size_t)wrote;
+            retries = 0u;
+            continue;
+        }
+
+        if((wrote == -2) || (retries >= 16u))
+        {
+            return (offset > 0u) ? (int)offset : wrote;
+        }
+
+        retries++;
+        rt_thread_mdelay(1);
+    }
+
+    return (int)offset;
+}
+
+static void ch585_adc_key_cal_cdc_line(const char *line)
+{
+    if(line == RT_NULL)
+    {
+        return;
+    }
+
+    (void)ch585_adc_key_cal_cdc_write_full(line, (rt_size_t)strlen(line));
+    (void)ch585_adc_key_cal_cdc_write_full("\r\n", 2u);
+}
+
+static void ch585_adc_key_cal_log_line(const char *line)
+{
+    if(line == RT_NULL)
+    {
+        return;
+    }
+
+    rt_kprintf("%s\n", line);
+    ch585_adc_key_cal_cdc_line(line);
+}
+
+static char *ch585_adc_key_cal_trim_command(char *line)
+{
+    char *end;
+
+    if(line == RT_NULL)
+    {
+        return RT_NULL;
+    }
+
+    while((*line == ' ') || (*line == '\t') ||
+          (*line == '\r') || (*line == '\n'))
+    {
+        line++;
+    }
+
+    end = line + strlen(line);
+    while(end > line)
+    {
+        char ch = *(end - 1);
+        if((ch != ' ') && (ch != '\t') &&
+           (ch != '\r') && (ch != '\n'))
+        {
+            break;
+        }
+        end--;
+        *end = '\0';
+    }
+
+    return line;
+}
+
+static int ch585_adc_key_cal_parse_u8(const char *text,
+                                      uint8_t max_value,
+                                      uint8_t *out)
+{
+    uint32_t value = 0U;
+    uint8_t have_digit = 0U;
+
+    if((text == RT_NULL) || (out == RT_NULL))
+    {
+        return -1;
+    }
+
+    while((*text == ' ') || (*text == '\t'))
+    {
+        text++;
+    }
+
+    while((*text >= '0') && (*text <= '9'))
+    {
+        value = (value * 10U) + (uint32_t)(*text - '0');
+        if(value > max_value)
+        {
+            return -1;
+        }
+        have_digit = 1U;
+        text++;
+    }
+
+    if(have_digit == 0U)
+    {
+        return -1;
+    }
+
+    *out = (uint8_t)value;
+    return 0;
+}
+
+static void ch585_adc_key_cal_log_help(void)
+{
+    ch585_adc_key_cal_log_line(
+        "CAL_CMD help commands: key <n> [reset] | reset | start | stop | help");
+}
+
+static void ch585_adc_key_cal_log_state(const char *status,
+                                        const ch585_adc_key_cal_state_t *state)
+{
+    char line[CH585_ADC_KEY_CAL_LINE_BYTES];
+
+    if(state == RT_NULL)
+    {
+        return;
+    }
+
+    (void)rt_snprintf(line,
+                      sizeof(line),
+                      "CAL_CMD %s side=%s key=%u key_count=%u stream=%u reset=%u",
+                      status,
+                      CH585_ADC_KEY_CAL_SOURCE_TEXT,
+                      (unsigned int)state->key,
+                      (unsigned int)state->key_count,
+                      (unsigned int)state->stream,
+                      (unsigned int)state->reset_pending);
+    ch585_adc_key_cal_log_line(line);
+}
+
+static void ch585_adc_key_cal_handle_command(
+    ch585_adc_key_cal_state_t *state,
+    char *line)
+{
+    uint8_t key;
+
+    if((state == RT_NULL) || (line == RT_NULL))
+    {
+        return;
+    }
+
+    line = ch585_adc_key_cal_trim_command(line);
+
+    if((strcmp(line, "help") == 0) || (strcmp(line, "?") == 0))
+    {
+        ch585_adc_key_cal_log_help();
+        return;
+    }
+
+    if(strcmp(line, "start") == 0)
+    {
+        state->stream = 1U;
+        ch585_adc_key_cal_log_state("ok", state);
+        return;
+    }
+
+    if(strcmp(line, "stop") == 0)
+    {
+        state->stream = 0U;
+        ch585_adc_key_cal_log_state("ok", state);
+        return;
+    }
+
+    if(strcmp(line, "reset") == 0)
+    {
+        state->reset_pending = 1U;
+        ch585_adc_key_cal_log_state("ok", state);
+        return;
+    }
+
+    if(strncmp(line, "key ", 4U) == 0)
+    {
+        uint8_t reset = (strstr(line, " reset") != RT_NULL) ? 1U : 0U;
+        if(ch585_adc_key_cal_parse_u8(&line[4], 63U, &key) != 0)
+        {
+            ch585_adc_key_cal_log_line("CAL_CMD err bad key");
+            return;
+        }
+
+        state->key = key;
+        state->stream = 1U;
+        if(reset != 0U)
+        {
+            state->reset_pending = 1U;
+        }
+        ch585_adc_key_cal_log_state("ok", state);
+        return;
+    }
+
+    ch585_adc_key_cal_log_line("CAL_CMD err unknown command");
+    ch585_adc_key_cal_log_help();
+}
+
+static void ch585_adc_key_cal_poll_command(ch585_adc_key_cal_state_t *state)
+{
+    char line[CH585_ADC_KEY_CAL_CMD_BYTES];
+    int len;
+
+    ch32h417_dual_cdc_poll();
+    do
+    {
+        len = ch32h417_usb_cdc_read_line(line, sizeof(line));
+        if(len > 0)
+        {
+            ch585_adc_key_cal_handle_command(state, line);
+        }
+    } while(len > 0);
+}
+
+static void ch585_adc_key_cal_build_cmd(ch585_adc_key_cal_state_t *state)
+{
+    memset(&s_ch585_adc_key_cal_tx, 0, sizeof(s_ch585_adc_key_cal_tx));
+    s_ch585_adc_key_cal_tx.magic = CH585_H417_ADC_KEY_CAL_CMD_MAGIC;
+    s_ch585_adc_key_cal_tx.version = CH585_H417_ADC_KEY_CAL_VERSION;
+    s_ch585_adc_key_cal_tx.cmd = CH585_H417_ADC_KEY_CAL_CMD_SELECT;
+    s_ch585_adc_key_cal_tx.key_id = state->key;
+    s_ch585_adc_key_cal_tx.host_seq = state->host_seq++;
+    if(state->reset_pending != 0U)
+    {
+        s_ch585_adc_key_cal_tx.flags =
+            CH585_H417_ADC_KEY_CAL_FLAG_RESET_STATS;
+        state->reset_pending = 0U;
+    }
+    ch585_h417_adc_key_cal_finish_cmd(&s_ch585_adc_key_cal_tx);
+}
+
+static void ch585_adc_key_cal_emit_sample(ch585_adc_key_cal_state_t *state,
+                                          int spi_rc,
+                                          uint32_t diag)
+{
+    char line[CH585_ADC_KEY_CAL_LINE_BYTES];
+    const ch585_h417_adc_key_cal_sample_t *sample = &s_ch585_adc_key_cal_rx;
+
+    if(ch585_h417_adc_key_cal_sample_valid(sample) == 0U)
+    {
+        state->bad_crc++;
+        if((state->bad_crc & 0x3FU) == 1U)
+        {
+            (void)rt_snprintf(line,
+                              sizeof(line),
+                              "CAL_ERR side=%s spi=%d bad_crc=%u h=%02x%02x diag=0x%08x",
+                              CH585_ADC_KEY_CAL_SOURCE_TEXT,
+                              spi_rc,
+                              (unsigned int)state->bad_crc,
+                              (unsigned int)((const uint8_t *)sample)[0],
+                              (unsigned int)((const uint8_t *)sample)[1],
+                              (unsigned int)diag);
+            ch585_adc_key_cal_log_line(line);
+        }
+        return;
+    }
+
+    if(sample->key_count != 0U)
+    {
+        state->key_count = sample->key_count;
+    }
+
+    if(sample->key_id != state->key)
+    {
+        state->stale_samples++;
+        return;
+    }
+
+    state->valid_samples++;
+    (void)rt_snprintf(line,
+                      sizeof(line),
+                      "CAL_SAMPLE side=%s key=%u seq=%u raw=%04u min=%04u max=%04u count=%u status=%u spi=%d diag=0x%08x",
+                      CH585_ADC_KEY_CAL_SOURCE_TEXT,
+                      (unsigned int)sample->key_id,
+                      (unsigned int)sample->sample_seq,
+                      (unsigned int)sample->raw,
+                      (unsigned int)sample->min_raw,
+                      (unsigned int)sample->max_raw,
+                      (unsigned int)sample->sample_count,
+                      (unsigned int)sample->status,
+                      spi_rc,
+                      (unsigned int)diag);
+    ch585_adc_key_cal_cdc_line(line);
+}
+
+static void run_ch585_adc_key_cal_test(void)
+{
+    ch585_adc_key_cal_state_t state;
+    char line[CH585_ADC_KEY_CAL_LINE_BYTES];
+
+    memset(&state, 0, sizeof(state));
+    state.key = 0U;
+    state.key_count = CH585_ADC_KEY_CAL_DEFAULT_KEYS;
+    state.stream = 1U;
+    state.reset_pending = 1U;
+
+    (void)ch32h417_dual_cdc_init();
+    rt_thread_mdelay(300);
+    ch32h417_ch585_spi_link_config_for_side(CH585_ADC_KEY_CAL_LINK_SIDE,
+                                            &s_ch585_adc_key_cal_link);
+    ch32h417_ch585_spi_link_init(&s_ch585_adc_key_cal_link);
+    g_v5f_hw_test_diag.phase = V5F_HW_PHASE_RUNNING;
+
+    (void)rt_snprintf(line,
+                      sizeof(line),
+                      "CH585_ADC_KEY_CAL START source=%s frame_bytes=%u default_keys=%u spi_khz=%u",
+                      CH585_ADC_KEY_CAL_SOURCE_DESC,
+                      (unsigned int)CH585_H417_ADC_KEY_CAL_FRAME_BYTES,
+                      (unsigned int)CH585_ADC_KEY_CAL_DEFAULT_KEYS,
+                      (unsigned int)CH32H417_CH585_SPI_LINK_SPI_KHZ);
+    ch585_adc_key_cal_log_line(line);
+    ch585_adc_key_cal_log_help();
+
+    while(1)
+    {
+        int spi_rc;
+        uint32_t diag;
+
+        ch585_adc_key_cal_poll_command(&state);
+        if(state.stream == 0U)
+        {
+            rt_thread_mdelay(20);
+            continue;
+        }
+
+        ch585_adc_key_cal_build_cmd(&state);
+        memset(&s_ch585_adc_key_cal_rx, 0, sizeof(s_ch585_adc_key_cal_rx));
+        spi_rc = ch32h417_ch585_spi_link_transfer(
+            (const uint8_t *)&s_ch585_adc_key_cal_tx,
+            (uint8_t *)&s_ch585_adc_key_cal_rx,
+            (uint16_t)CH585_H417_ADC_KEY_CAL_FRAME_BYTES);
+        diag = ch32h417_ch585_spi_link_last_diag();
+
+        if(spi_rc == CH32H417_CH585_SPI_LINK_OK)
+        {
+            ch585_adc_key_cal_emit_sample(&state, spi_rc, diag);
+        }
+        else
+        {
+            state.spi_errors++;
+            if((state.spi_errors & 0x3FU) == 1U)
+            {
+                (void)rt_snprintf(line,
+                                  sizeof(line),
+                                  "CAL_ERR side=%s spi=%d spi_errors=%u diag=0x%08x",
+                                  CH585_ADC_KEY_CAL_SOURCE_TEXT,
+                                  spi_rc,
+                                  (unsigned int)state.spi_errors,
+                                  (unsigned int)diag);
+                ch585_adc_key_cal_log_line(line);
+            }
+        }
+
+        ch32h417_dual_cdc_poll();
+        rt_thread_mdelay(1);
     }
 }
 #endif
@@ -1216,6 +1844,7 @@ static int V5F_MAYBE_UNUSED lcd_start_rgb565_window(void);
 #define V5F_SDRAM_ERR_VERIFY           (-203)
 #define V5F_SDRAM_ERR_LCD              (-204)
 #define V5F_SDRAM_USB_LINE_BYTES       128u
+#define V5F_SDRAM_SCOPE_CYCLES         262144u
 
 static uint8_t s_sdram_debug_phase = V5F_SDRAM_DEFAULT_PHASE_SEL;
 static uint8_t s_sdram_debug_pipe = FMC_ReadPipeDelay_none;
@@ -1833,6 +2462,67 @@ static int sdram_usb_debug_parse_u8(const char *text, uint8_t max_value, uint8_t
     return 0;
 }
 
+static int sdram_usb_debug_parse_u16(const char *text, uint16_t *value)
+{
+    uint32_t parsed = 0u;
+    uint8_t digits = 0u;
+    uint8_t base = 16u;
+
+    if((text == RT_NULL) || (value == RT_NULL))
+    {
+        return -1;
+    }
+
+    text = sdram_usb_debug_skip_arg_sep(text);
+    if((text[0] == '0') && ((text[1] == 'x') || (text[1] == 'X')))
+    {
+        text += 2;
+    }
+
+    while(*text != '\0')
+    {
+        uint8_t digit;
+
+        if((*text >= '0') && (*text <= '9'))
+        {
+            digit = (uint8_t)(*text - '0');
+        }
+        else if((base == 16u) && (*text >= 'a') && (*text <= 'f'))
+        {
+            digit = (uint8_t)(10u + (uint8_t)(*text - 'a'));
+        }
+        else if((base == 16u) && (*text >= 'A') && (*text <= 'F'))
+        {
+            digit = (uint8_t)(10u + (uint8_t)(*text - 'A'));
+        }
+        else
+        {
+            break;
+        }
+
+        if(digit >= base)
+        {
+            return -1;
+        }
+        parsed = (parsed * base) + digit;
+        digits++;
+        text++;
+    }
+
+    while((*text == ' ') || (*text == '\t'))
+    {
+        text++;
+    }
+
+    if((digits == 0u) || (*text != '\0') || (parsed > 0xFFFFu))
+    {
+        return -1;
+    }
+
+    *value = (uint16_t)parsed;
+    return 0;
+}
+
 static int sdram_usb_debug_command_is(const char *line, const char *command)
 {
     rt_size_t len = (rt_size_t)strlen(command);
@@ -1848,7 +2538,7 @@ static int sdram_usb_debug_command_is(const char *line, const char *command)
 
 static void sdram_usb_debug_help(void)
 {
-    sdram_usb_debug_write_line("SDRAM CDC commands: dump, scan, regs, rcc, pad, bias, wlow, hslv, uport, dq, addr, p <0-15>, r <0-2>");
+    sdram_usb_debug_write_line("SDRAM CDC commands: dump, scan, regs, rcc, pad, bias, wlow, hslv, uport, dq, addr, scope <hex16>, p <0-15>, r <0-2>");
 }
 
 static void sdram_usb_debug_report(volatile uint16_t *probe, const char *tag)
@@ -2308,6 +2998,52 @@ static void sdram_usb_debug_addr(void)
     }
 }
 
+static uint32_t sdram_scope_cycle_count(volatile uint16_t *probe,
+                                        uint16_t expected,
+                                        uint16_t *actual)
+{
+    uint32_t i;
+    uint16_t last = 0u;
+
+    *probe = expected;
+    ch32h417_ltdc_rgb_framebuffer_barrier();
+
+    for(i = 0u; i < V5F_SDRAM_SCOPE_CYCLES; i++)
+    {
+        last = *probe;
+        ch32h417_ltdc_rgb_framebuffer_barrier();
+    }
+
+    if(actual != RT_NULL)
+    {
+        *actual = last;
+    }
+
+    return i;
+}
+
+static void sdram_usb_debug_scope(volatile uint16_t *probe, uint16_t expected)
+{
+    char line[V5F_SDRAM_USB_LINE_BYTES];
+    uint16_t actual = 0u;
+    uint32_t cycles = sdram_scope_cycle_count(probe, expected, &actual);
+    int used;
+
+    g_v5f_hw_test_diag.sdram_expected = expected;
+    g_v5f_hw_test_diag.sdram_actual = actual;
+    used = rt_snprintf(line,
+                       sizeof(line),
+                       "SDRAM scope exp=%04x act=%04x xor=%04x cycles=%u",
+                       (unsigned int)expected,
+                       (unsigned int)actual,
+                       (unsigned int)(expected ^ actual),
+                       (unsigned int)cycles);
+    if((used > 0) && ((rt_size_t)used < sizeof(line)))
+    {
+        sdram_usb_debug_write_line(line);
+    }
+}
+
 static void sdram_usb_debug_measure_current(volatile uint16_t *probe)
 {
     s_sdram_debug_score =
@@ -2320,6 +3056,7 @@ static void sdram_usb_debug_measure_current(volatile uint16_t *probe)
 static void sdram_usb_debug_handle_command(volatile uint16_t *probe, const char *line)
 {
     uint8_t value = 0u;
+    uint16_t pattern = 0u;
 
     if((line == RT_NULL) || (line[0] == '\0'))
     {
@@ -2390,6 +3127,19 @@ static void sdram_usb_debug_handle_command(volatile uint16_t *probe, const char 
     if(sdram_usb_debug_command_is(line, "addr"))
     {
         sdram_usb_debug_addr();
+        return;
+    }
+
+    if(sdram_usb_debug_command_is(line, "scope"))
+    {
+        if(sdram_usb_debug_parse_u16(&line[5], &pattern) == 0)
+        {
+            sdram_usb_debug_scope(probe, pattern);
+        }
+        else
+        {
+            sdram_usb_debug_write_line("ERR scope pattern is 0x0000..0xffff");
+        }
         return;
     }
 
@@ -4757,6 +5507,8 @@ static void v5f_hw_thread_entry(void *parameter)
     result = CH32H417_LTDC_RGB_OK;
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_SPI_SPEED
     result = CH32H417_LTDC_RGB_OK;
+#elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_ADC_KEY_CAL
+    result = CH32H417_LTDC_RGB_OK;
 #elif (APP_V5F_HW_TEST == APP_V5F_HW_TEST_GPHA_R2M_FILL) || \
       (APP_V5F_HW_TEST == APP_V5F_HW_TEST_GPHA_PFC_L8_RGB565) || \
       (APP_V5F_HW_TEST == APP_V5F_HW_TEST_GPHA_BLEND_RGB565) || \
@@ -4801,6 +5553,8 @@ static void v5f_hw_thread_entry(void *parameter)
     run_tick_diag_test();
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_SPI_SPEED
     run_ch585_spi_speed_test();
+#elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_ADC_KEY_CAL
+    run_ch585_adc_key_cal_test();
 #else
     while(1)
     {

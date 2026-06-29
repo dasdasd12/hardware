@@ -12,6 +12,9 @@ H417_USB_CDC_SOURCE = os.path.join(
 V5F_HW_TEST_SOURCE = os.path.join(
     ROOT, "hw_tests", "h417", "passed", "v5f_rtthread", "src", "v5f_hw_test.c"
 )
+H417_V3F_WAKE_STUB_SOURCE = os.path.join(
+    ROOT, "hw_tests", "h417", "passed", "v3f_standalone", "src", "h417_v5f_wake_stub.c"
+)
 
 
 def read_check_script():
@@ -31,6 +34,11 @@ def read_h417_usb_cdc_source():
 
 def read_v5f_hw_test_source():
     with io.open(V5F_HW_TEST_SOURCE, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def read_h417_v3f_wake_stub_source():
+    with io.open(H417_V3F_WAKE_STUB_SOURCE, "r", encoding="utf-8") as handle:
         return handle.read()
 
 
@@ -58,6 +66,27 @@ def test_h417_sdram_tests_stay_in_hw_tests_until_driver_cleanup():
     assert "h417_v5f_sdram_dq_probe" in text
     assert "firmware/h417/drivers/sdram" in text
     assert "SDRAM bring-up must stay in hw_tests" in text
+
+
+def test_h417_v5f_sdram_tests_use_hw_tests_owned_v3f_wake_stub():
+    makefile = read_h417_makefile()
+    stub = read_h417_v3f_wake_stub_source()
+
+    assert "H417_V3F_WAKE_STUB_TEST := h417_v5f_wake_stub" in makefile
+    assert "H417_V3F_WAKE_BUILD_ROOT := $(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F" in makefile
+    assert "H417_LOCAL_V3F_PROJECT=h417_V3F" in makefile
+    assert "HW_TEST=$(H417_V3F_WAKE_STUB_TEST)" in makefile
+    assert '"$(H417_FIRMWARE_ROOT)" v3f' not in makefile
+
+    assert "H417_V3F_WAKE_TRACE_BASE" in stub
+    assert "H417_V3F_WAKE_TRACE_MAGIC" in stub
+    assert "V5F_START_ADDR      0x00010000u" in stub
+    assert "SystemInit()" in stub
+    assert "RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE)" in stub
+    assert "NVIC_WakeUp_V5F(V5F_START_ADDR)" in stub
+    assert "USB" not in stub
+    assert "CH585" not in stub
+    assert "HID" not in stub
 
 
 def test_h417_sdram_tests_do_not_depend_on_uart_console():
@@ -286,6 +315,7 @@ def test_h417_sdram_dq_probe_uses_usb_cdc_debug_commands():
     assert '"uport"' in text
     assert '"dq"' in text
     assert '"addr"' in text
+    assert '"scope"' in text
     assert '"dump"' in text
     assert "p <0-15>" in text
     assert "r <0-2>" in text
@@ -360,6 +390,17 @@ def test_h417_sdram_dq_probe_usb_addr_command_reports_multiple_address_windows()
     assert "addr_offsets" in text
     assert "V5F_SDRAM_BASE_ADDR + offset" in text
     assert "SDRAM addr" in text
+
+
+def test_h417_sdram_dq_probe_usb_scope_command_repeats_fixed_pattern_cycles():
+    text = read_v5f_hw_test_source()
+
+    assert "sdram_usb_debug_scope" in text
+    assert "sdram_usb_debug_parse_u16" in text
+    assert "uint8_t base = 16u" in text
+    assert "sdram_scope_cycle_count" in text
+    assert "V5F_SDRAM_SCOPE_CYCLES" in text
+    assert "SDRAM scope" in text
 
 
 def test_h417_sdram_dq_probe_usb_rcc_command_reports_clock_and_vio_state():

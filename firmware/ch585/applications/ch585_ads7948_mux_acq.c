@@ -320,6 +320,37 @@ static void ch585_ads7948_mux_store(ch585_ads7948_mux_acq_t *acq,
     }
 }
 
+static uint8_t ch585_ads7948_mux_compact_key_to_lane_mux(
+    const ch585_ads7948_mux_profile_t *profile,
+    uint8_t compact_key,
+    uint8_t *lane_out,
+    uint8_t *mux_out)
+{
+    uint8_t lane;
+    uint8_t offset = compact_key;
+
+    if((profile == 0) || (lane_out == 0) || (mux_out == 0))
+    {
+        return 0U;
+    }
+
+    for(lane = 0U; lane < CH585_ADS7948_MUX_LANE_COUNT; lane++)
+    {
+        const ch585_ads7948_mux_lane_t *lane_cfg = &profile->lanes[lane];
+
+        if(offset < lane_cfg->mux_count)
+        {
+            *lane_out = lane;
+            *mux_out = (uint8_t)(lane_cfg->mux_first + offset);
+            return 1U;
+        }
+
+        offset = (uint8_t)(offset - lane_cfg->mux_count);
+    }
+
+    return 0U;
+}
+
 static void ch585_ads7948_mux_acq_poll_channel(
     ch585_ads7948_mux_acq_t *acq,
     uint8_t adc_channel)
@@ -479,6 +510,43 @@ void ch585_ads7948_mux_acq_poll(ch585_ads7948_mux_acq_t *acq)
     ch585_ads7948_mux_acq_poll_channel(acq, 0U);
     ch585_ads7948_mux_acq_poll_channel(acq, 1U);
     acq->frames++;
+}
+
+int ch585_ads7948_mux_acq_read_compact_key(
+    ch585_ads7948_mux_acq_t *acq,
+    uint8_t compact_key,
+    uint16_t *raw_out)
+{
+    uint8_t lane_index = 0U;
+    uint8_t mux_channel = 0U;
+    const ch585_ads7948_mux_lane_t *lane;
+    uint16_t code;
+
+    if((acq == 0) || (acq->profile == 0) ||
+       (raw_out == 0))
+    {
+        return -1;
+    }
+
+    if(ch585_ads7948_mux_compact_key_to_lane_mux(acq->profile,
+                                                 compact_key,
+                                                 &lane_index,
+                                                 &mux_channel) == 0U)
+    {
+        return -2;
+    }
+
+    lane = &acq->profile->lanes[lane_index];
+    ch585_ads7948_mux_set_ch_sel(lane->adc_channel);
+    ch585_ads7948_mux_set_mux_addr(mux_channel);
+
+    (void)ch585_ads7948_mux_read_adc_code(acq, lane->adc_index);
+    code = ch585_ads7948_mux_read_adc_code(acq, lane->adc_index);
+    ch585_ads7948_mux_store(acq, lane_index, mux_channel, code);
+    acq->frames++;
+
+    *raw_out = code;
+    return 0;
 }
 
 const uint16_t *ch585_ads7948_mux_acq_raw(

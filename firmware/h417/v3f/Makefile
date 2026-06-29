@@ -31,10 +31,26 @@ OFFICIAL_USBSS_ROOT ?= C:/program1/hardware/WCH/CH32H417/CH32H417EVT/EVT/EXAM/US
 
 V3F_USBSS_OFFICIAL_OWNER ?= 0
 V3F_ENABLE_USBFS_CLOCK_INIT ?= 0
+V3F_WAKE_V5F ?= 0
+V3F_ENABLE_USBHS_8K ?= 1
+V3F_USB_REPORT_INTERVAL_US ?= 125
+V3F_ENABLE_RGB_STATUS ?= 0
+V3F_RGB_LED_COUNT ?= 1
+V3F_ENABLE_RF_BRIDGE ?= 0
+V3F_ENABLE_SPI_HOST_CMD ?= 0
+V3F_ENABLE_USBFS_CDC_DEBUG ?= 0
 
 # Defines
 DEFS := -DCore_V3F
 DEFS += -DV3F_ENABLE_USBFS_CLOCK_INIT=$(V3F_ENABLE_USBFS_CLOCK_INIT)
+DEFS += -DV3F_WAKE_V5F=$(V3F_WAKE_V5F)
+DEFS += -DV3F_ENABLE_USBHS_8K=$(V3F_ENABLE_USBHS_8K)
+DEFS += -DV3F_USB_REPORT_INTERVAL_US=$(V3F_USB_REPORT_INTERVAL_US)
+DEFS += -DV3F_ENABLE_RGB_STATUS=$(V3F_ENABLE_RGB_STATUS)
+DEFS += -DV3F_RGB_LED_COUNT=$(V3F_RGB_LED_COUNT)
+DEFS += -DV3F_ENABLE_RF_BRIDGE=$(V3F_ENABLE_RF_BRIDGE)
+DEFS += -DV3F_ENABLE_SPI_HOST_CMD=$(V3F_ENABLE_SPI_HOST_CMD)
+DEFS += -DV3F_ENABLE_USBFS_CDC_DEBUG=$(V3F_ENABLE_USBFS_CDC_DEBUG)
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 DEFS += -DV3F_USBSS_OFFICIAL_OWNER=1
 endif
@@ -42,6 +58,17 @@ endif
 # Include paths
 INC := -I"$(PROJECT_ROOT)/bsp"
 INC += -I"$(PROJECT_ROOT)/drivers"
+INC += -I"$(PROJECT_ROOT)/applications"
+INC += -I"../../common"
+INC += -I"$(PROJECT_ROOT)/drivers/ch585_spi_link/include"
+INC += -I"$(PROJECT_ROOT)/drivers/rgb1w_pioc/include"
+ifeq ($(V3F_ENABLE_USBHS_8K),1)
+INC += -I"$(PROJECT_ROOT)/drivers/usbhs_hid_nkro/include"
+INC += -I"$(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/include"
+else
+INC += -I"$(PROJECT_ROOT)/drivers/usbfs_hid_nkro/include"
+INC += -I"$(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/include"
+endif
 INC += -I"$(SRC_ROOT)/Debug" -I"$(SRC_ROOT)/Core" -I"$(SRC_ROOT)/Peripheral/inc"
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 INC += -I"$(OFFICIAL_USBSS_ROOT)"
@@ -49,12 +76,30 @@ endif
 
 # Source files
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
+APP_SRC += $(PROJECT_ROOT)/applications/board_init.c
+APP_SRC += $(PROJECT_ROOT)/applications/ch585_link.c
+APP_SRC += $(PROJECT_ROOT)/applications/half_state.c
+APP_SRC += $(PROJECT_ROOT)/applications/default_profile.c
+APP_SRC += $(PROJECT_ROOT)/applications/rf_report_bridge.c
+APP_SRC += $(PROJECT_ROOT)/applications/rgb_status.c
 APP_SRC += $(PROJECT_ROOT)/bsp/system_ch32h417.c
+APP_SRC += $(PROJECT_ROOT)/drivers/ch585_spi_link/src/ch32h417_ch585_spi_link.c
+APP_SRC += $(PROJECT_ROOT)/drivers/rgb1w_pioc/src/ch32h417_pioc_rgb1w.c
+ifeq ($(V3F_ENABLE_USBHS_8K),1)
+APP_SRC += $(PROJECT_ROOT)/drivers/usbhs_hid_nkro/src/ch32h417_usbhs_hid_nkro.c
+APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/src/ch32h417_usbhs_device.c
+APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/src/usb_desc.c
+else
+APP_SRC += $(PROJECT_ROOT)/drivers/usbfs_hid_nkro/src/ch32h417_usbfs_hid_nkro.c
+APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/src/ch32h417_usbfs_device.c
+APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/src/usb_desc.c
+endif
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_rcc.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_pwr.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_flash.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_gpio.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_dbgmcu.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_spi.c
 
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 APP_SRC += $(SRC_ROOT)/Debug/debug.c

@@ -434,6 +434,11 @@ def main():
     )
     assert_contains(
         H417_V5F_TEST_SRC,
+        r"sdram_usb_debug_scope",
+        "SDRAM DQ probe USB CDC repeated read scope diagnostic",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
         r"PWR_GetVIO18InitialStatus",
         "SDRAM DQ probe VIO18 initial-state visibility",
     )

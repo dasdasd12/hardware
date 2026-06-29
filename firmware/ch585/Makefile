@@ -1,10 +1,13 @@
 # CH585 firmware build entry.
-# Default target builds the RF basic smoke firmware.
+# Default target builds the half keyboard scan firmware.
 
 PREFIX       ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
-APP          ?= rf_basic
+APP          ?= half_scan
 PROJECT_NAME ?= ch585_$(APP)
 BUILD_ROOT   ?= build
+BUILD_VARIANT ?= $(APP)
+HALF_SCAN_CLOCK_DEFS := -DSYSCLK_FREQ=CLK_SOURCE_HSE_PLL_78MHz -DFREQ_SYS=78000000
+HALF_SCAN_DEBUG_UART_DEFS := -DCH585_HALF_SCAN_DEBUG_UART=1 -DDEBUG=Debug_UART1
 
 CC      := "$(PREFIX)gcc"
 AS      := "$(PREFIX)gcc" -x assembler-with-cpp
@@ -28,6 +31,8 @@ SDK_ROOT := basic/wch/SRC
 LIB_ROOT := basic/wch/LIB
 
 INC := -I"applications/$(APP)"
+INC += -I"applications"
+INC += -I"../common"
 INC += -I"drivers"
 INC += -I"drivers/rf/include"
 INC += -I"drivers/usb/usbhs_keyboard"
@@ -37,7 +42,13 @@ INC += -I"$(SDK_ROOT)/StdPeriphDriver/inc"
 INC += -I"$(SDK_ROOT)/RVMSIS"
 
 APP_C_SOURCES :=
-ifeq ($(APP),rf_basic)
+ifeq ($(APP),half_scan)
+APP_C_SOURCES += applications/half_scan/main.c
+APP_C_SOURCES += applications/magnetic_key_engine.c
+APP_C_SOURCES += applications/half_scan/ch585_rf_nkro_tx.c
+APP_C_SOURCES += applications/ch585_ads7948_mux_acq.c
+APP_C_SOURCES += drivers/ch585_spi0_slave_link.c
+else ifeq ($(APP),rf_basic)
 APP_C_SOURCES += applications/rf_basic/main.c
 APP_C_SOURCES += drivers/rf/RF_basic.c
 else ifeq ($(APP),rf_receiver_usbhs)
@@ -47,11 +58,8 @@ APP_C_SOURCES += drivers/usb/usbhs_keyboard/ch585_usbhs_kbd.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_desc_hid.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hid.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hs_config_stub.c
-else ifeq ($(APP),rf_keyboard_tx)
-APP_C_SOURCES += applications/rf_keyboard_tx/main.c
-APP_C_SOURCES += applications/rf_keyboard_tx/rf_keyboard_tx.c
 else
-$(error Unknown APP '$(APP)'; expected rf_basic, rf_receiver_usbhs, or rf_keyboard_tx)
+$(error Unknown APP '$(APP)'; expected half_scan, rf_basic, or rf_receiver_usbhs)
 endif
 
 C_SOURCES := $(APP_C_SOURCES)
@@ -76,7 +84,7 @@ ASM_SOURCES += $(LIB_ROOT)/ble_task_scheduler.S
 
 LDSCRIPT := $(SDK_ROOT)/Ld/Link.ld
 
-BUILD := $(BUILD_ROOT)/$(APP)
+BUILD := $(BUILD_ROOT)/$(BUILD_VARIANT)
 ELF := $(BUILD)/$(PROJECT_NAME).elf
 
 OBJS := $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SOURCES)))
@@ -85,15 +93,33 @@ OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all firmware rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
+.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_debug_uart half_scan_right_debug_uart rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
 
 all: firmware
 
 firmware: $(ELF) $(BUILD)/$(PROJECT_NAME).hex $(BUILD)/$(PROJECT_NAME).bin $(BUILD)/$(PROJECT_NAME).lst
 	@$(SIZE) "$(ELF)"
 
-rf_basic rf_receiver_usbhs rf_keyboard_tx:
+half_scan:
 	@$(MAKE) APP=$@ firmware
+
+half_scan_left:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left BUILD_VARIANT=half_scan_left DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0" firmware
+
+half_scan_right:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right BUILD_VARIANT=half_scan_right DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
+
+half_scan_left_debug_uart:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_debug_uart BUILD_VARIANT=half_scan_left_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0" firmware
+
+half_scan_right_debug_uart:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right_debug_uart BUILD_VARIANT=half_scan_right_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
+
+rf_basic rf_receiver_usbhs:
+	@$(MAKE) APP=$@ firmware
+
+rf_keyboard_tx:
+	$(error rf_keyboard_tx is disabled; RF TX is integrated into half_scan_left)
 
 $(BUILD)/%.o: %.c | $(BUILD)
 	@echo "CC  $(notdir $<)"

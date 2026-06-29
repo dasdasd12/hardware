@@ -2,7 +2,7 @@
 
 Standalone CH585 board bring-up tests.
 
-## ADS7948/MUX Probe
+## ADS7948/MUX Scan
 
 Build:
 
@@ -26,10 +26,8 @@ UART log          -> UART1 PA9 TX / PA8 RX
 Useful build overrides:
 
 ```powershell
-make -C hw_tests/ch585 TEST=ch585_ads7948_mux_probe DEFS_EXTRA="-DCH585_ADS7948_PROBE_KEY=58"
-make -C hw_tests/ch585 TEST=ch585_ads7948_mux_probe DEFS_EXTRA="-DCH585_ADS7948_PROBE_KEY=0xFF"
-make -C hw_tests/ch585 TEST=ch585_ads7948_mux_probe DEFS_EXTRA="-DCH585_ADS7948_PROBE_RIGHT_HALF=0"
+make -C hw_tests/ch585 TEST=ch585_ads7948_mux_probe DEFS_EXTRA="-DCH585_ADC_MUX_HALF_RIGHT=1"
 ```
 
-Serial output lines begin with `AP` and include sequence, key, lane, mux,
-raw ADC, filtered ADC, down state, flags, ADC error count, and scan status.
+Serial output includes the active half profile, ADS7948 lane mapping, raw ADC
+codes, travel percentage, and a compact text bar for each active MUX slot.

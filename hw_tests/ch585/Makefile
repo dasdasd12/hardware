@@ -6,8 +6,10 @@ TEST ?= ch585_left_eeprom_i2c
 PROJECT_ROOT ?= ../..
 BUILD_ROOT ?= build
 ALLOW_EEPROM_WRITE ?= 0
+CH585_HALF_ROLE := $(HALF)
 CH585_FIRMWARE_ROOT ?= $(PROJECT_ROOT)/firmware/ch585
 WCH_CH585_SRC_ROOT := $(CH585_FIRMWARE_ROOT)/basic/wch/SRC
+CH585_APPLICATION_ROOT := $(CH585_FIRMWARE_ROOT)/applications
 CH585_DRIVER_ROOT := $(CH585_FIRMWARE_ROOT)/drivers
 
 CC := "$(PREFIX)gcc"
@@ -26,10 +28,18 @@ LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs
 
 SRC_ROOT := $(WCH_CH585_SRC_ROOT)
 DRIVER_ROOT := $(SRC_ROOT)/StdPeriphDriver
-INC := -I$(SRC_ROOT)/RVMSIS -I$(DRIVER_ROOT)/inc -I$(CH585_DRIVER_ROOT) -Isrc
+INC := -I$(SRC_ROOT)/RVMSIS -I$(DRIVER_ROOT)/inc
+INC += -I$(CH585_APPLICATION_ROOT) -I$(CH585_DRIVER_ROOT)
+INC += -I$(PROJECT_ROOT)/hw_tests/common -Isrc
 DEFS := -DTEST_NAME=\"$(TEST)\" -DCH585_HALF_NAME=\"$(HALF)\"
 DEFS += -DALLOW_EEPROM_WRITE=$(ALLOW_EEPROM_WRITE)
 DEFS += $(DEFS_EXTRA)
+
+ifeq ($(HALF),right)
+DEFS += -DCH585_ADC_MUX_HALF_RIGHT=1
+else
+DEFS += -DCH585_ADC_MUX_HALF_LEFT=1
+endif
 
 COMMON_SRC := src/ch585_common.c src/ch585_test_main.c
 TEST_EXTRA_SRC :=
@@ -53,10 +63,26 @@ else ifeq ($(filter $(TEST),ch585_right_ec11_gpio ch585_u3_ec11_gpio),$(TEST))
 TEST_SRC := src/ch585_u3_ec11_gpio.c
 DEFS += -DCH585_TEST_FUNC=ch585_u3_ec11_gpio_run
 else ifeq ($(TEST),ch585_ads7948_mux_probe)
-TEST_SRC := src/ch585_ads7948_mux_probe.c
-TEST_EXTRA_SRC += $(CH585_DRIVER_ROOT)/ads7948.c
-TEST_EXTRA_SRC += $(CH585_DRIVER_ROOT)/ch585_ads7948_mux_scan.c
-DEFS += -DCH585_TEST_FUNC=ch585_ads7948_mux_probe_run
+TEST_SRC := src/ch585_adc_mux_scan.c
+TEST_EXTRA_SRC += $(CH585_APPLICATION_ROOT)/ch585_ads7948_mux_acq.c
+DEFS += -DCH585_TEST_FUNC=ch585_adc_mux_scan_run
+DEFS += -DSYSCLK_FREQ=CLK_SOURCE_HSE_PLL_78MHz
+DEFS += -DCH585_SYSCLK_SOURCE=CLK_SOURCE_HSE_PLL_78MHz
+DEFS += -DFREQ_SYS=78000000
+else ifeq ($(TEST),ch585_spi0_speed_slave)
+TEST_SRC := src/ch585_spi0_speed_slave.c
+TEST_EXTRA_SRC += $(CH585_DRIVER_ROOT)/ch585_spi0_slave_link.c
+TEST_EXTRA_SDK_SRC += $(DRIVER_ROOT)/CH58x_spi0.c
+DEFS += -DCH585_TEST_FUNC=ch585_spi0_speed_slave_run
+else ifeq ($(TEST),ch585_adc_key_cal_slave)
+TEST_SRC := src/ch585_adc_key_cal_slave.c
+TEST_EXTRA_SRC += $(CH585_APPLICATION_ROOT)/ch585_ads7948_mux_acq.c
+TEST_EXTRA_SRC += $(CH585_DRIVER_ROOT)/ch585_spi0_slave_link.c
+TEST_EXTRA_SDK_SRC += $(DRIVER_ROOT)/CH58x_spi0.c
+DEFS += -DCH585_TEST_FUNC=ch585_adc_key_cal_slave_run
+DEFS += -DSYSCLK_FREQ=CLK_SOURCE_HSE_PLL_78MHz
+DEFS += -DCH585_SYSCLK_SOURCE=CLK_SOURCE_HSE_PLL_78MHz
+DEFS += -DFREQ_SYS=78000000
 else
 $(error Unknown TEST '$(TEST)')
 endif

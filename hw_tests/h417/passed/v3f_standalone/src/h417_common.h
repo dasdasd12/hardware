@@ -47,5 +47,7 @@ void h417_lcd_backlight_run(void);
 void h417_ltdc_run(void);
 void h417_flash_image_run(void);
 void h417_flash_mosi_probe_run(void);
+void h417_usbfs_official_hid_run(void);
+void h417_usbhs_official_hid_run(void);
 
 #endif
