@@ -57,6 +57,10 @@ int ch585_ads7948_mux_acq_init(
     ch585_ads7948_mux_acq_t *acq,
     const ch585_ads7948_mux_profile_t *profile);
 void ch585_ads7948_mux_acq_poll(ch585_ads7948_mux_acq_t *acq);
+int ch585_ads7948_mux_acq_read_compact_key(
+    ch585_ads7948_mux_acq_t *acq,
+    uint8_t compact_key,
+    uint16_t *raw_out);
 const uint16_t *ch585_ads7948_mux_acq_raw(
     const ch585_ads7948_mux_acq_t *acq);
 

@@ -26,10 +26,12 @@ LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs
 # H417-local WCH EVT hardware library root
 WCH_H417_ROOT ?= ../basic/wch
 SRC_ROOT      := $(WCH_H417_ROOT)/SRC
-H417_DRIVER_ROOT ?= ../drivers
-LTDC_RGB_ROOT := $(H417_DRIVER_ROOT)/ltdc_rgb
-FLASH_NAND_ROOT := $(H417_DRIVER_ROOT)/gd5f1g_spi_nand
-GPHA_2D_ROOT := $(H417_DRIVER_ROOT)/gpha_2d
+V3F_DRIVER_ROOT ?= ../v3f/drivers
+V5F_DRIVER_ROOT ?= $(PROJECT_ROOT)/drivers
+LTDC_RGB_ROOT := $(V5F_DRIVER_ROOT)/ltdc_rgb
+FLASH_NAND_ROOT := $(V3F_DRIVER_ROOT)/gd5f1g_spi_nand
+GPHA_2D_ROOT := $(V5F_DRIVER_ROOT)/gpha_2d
+CH585_SPI_LINK_ROOT := $(V3F_DRIVER_ROOT)/ch585_spi_link
 V5F_HW_TEST_ROOT ?= ../../../hw_tests/h417/passed/v5f_rtthread
 V5F_HW_TEST_SRC_ROOT := $(V5F_HW_TEST_ROOT)/src
 V5F_HW_TEST_ASSET_ROOT := $(V5F_HW_TEST_ROOT)/assets
@@ -140,7 +142,7 @@ INC += -I"$(RTT_ROOT)/components/libc/compilers/common/include"
 INC += -I"$(RTT_ROOT)/components/libc/compilers/newlib"
 INC += -I"$(RTT_ROOT)/components/finsh"
 INC += -I"$(SRC_ROOT)/Debug" -I"$(SRC_ROOT)/Core" -I"$(SRC_ROOT)/Peripheral/inc"
-INC += -I"$(LTDC_RGB_ROOT)/include" -I"$(FLASH_NAND_ROOT)/include" -I"$(GPHA_2D_ROOT)/include"
+INC += -I"$(LTDC_RGB_ROOT)/include" -I"$(FLASH_NAND_ROOT)/include" -I"$(GPHA_2D_ROOT)/include" -I"$(CH585_SPI_LINK_ROOT)/include"
 ifneq ($(APP_V5F_HW_TEST),none)
 INC += -I"$(V5F_HW_TEST_ROOT)/include"
 INC += -I"$(HW_TEST_COMMON_ROOT)"
@@ -218,6 +220,10 @@ endif
 ifneq ($(filter $(APP_V5F_HW_TEST),flash flash_l8_assets),)
 DRV_SRC += $(FLASH_NAND_ROOT)/src/gd5f1g_spi_nand.c
 DRV_SRC += $(FLASH_NAND_ROOT)/src/ch32h417_gd5f1g_spi1.c
+endif
+
+ifeq ($(APP_V5F_HW_TEST),ch585_spi_speed)
+DRV_SRC += $(CH585_SPI_LINK_ROOT)/src/ch32h417_ch585_spi_link.c
 endif
 
 # Application

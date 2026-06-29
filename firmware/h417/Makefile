@@ -19,7 +19,7 @@ endif
 
 .PHONY: all v3f V3F v5f V5F clean flash
 
-all: v3f v5f
+all: v3f
 
 v3f V3F:
 	@$(MAKE) -C v3f PREFIX=$(PREFIX) BUILD_ROOT=../$(BUILD_ROOT)/V3F

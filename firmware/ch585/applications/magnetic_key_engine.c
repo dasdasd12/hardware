@@ -7,13 +7,13 @@
 #include <stddef.h>
 #include <string.h>
 
-#define MAG_KEY_DEFAULT_RELEASED_ADC       200U
-#define MAG_KEY_DEFAULT_PRESSED_ADC        850U
+#define MAG_KEY_DEFAULT_RELEASED_ADC       490U
+#define MAG_KEY_DEFAULT_PRESSED_ADC        330U
 #define MAG_KEY_DEFAULT_PRESS_PM           450U
 #define MAG_KEY_DEFAULT_RELEASE_PM         350U
-#define MAG_KEY_DEFAULT_RT_PRESS_DELTA_PM  60U
-#define MAG_KEY_DEFAULT_RT_RELEASE_DELTA_PM 40U
-#define MAG_KEY_DEFAULT_FILTER_SHIFT       2U
+#define MAG_KEY_DEFAULT_RT_PRESS_DELTA_PM  300U
+#define MAG_KEY_DEFAULT_RT_RELEASE_DELTA_PM 300U
+#define MAG_KEY_DEFAULT_FILTER_SHIFT       0U
 
 static uint16_t mag_key_clamp_pm(int32_t value)
 {
@@ -143,7 +143,7 @@ int mag_key_engine_init(mag_key_engine_t *engine,
         engine->state[key].position_pm = 0U;
         engine->filtered_q8[key] = (uint32_t)cfg.released_adc *
                                    MAG_KEY_FILTER_SCALE;
-        engine->valley_pm[key] = 0U;
+        engine->valley_pm[key] = MAG_KEY_POSITION_MAX_PM;
         engine->peak_pm[key] = 0U;
     }
 
@@ -260,15 +260,15 @@ static uint8_t mag_key_rt_down_next(mag_key_engine_t *engine,
 
     if (state->is_down == 0U)
     {
-        if ((position_pm <= cfg->release_pm) || (position_pm < valley))
+        if (position_pm < valley)
         {
             valley = position_pm;
             engine->valley_pm[key_id] = valley;
         }
 
-        if ((position_pm >= cfg->press_pm) &&
-            ((uint32_t)position_pm >=
-             (uint32_t)valley + (uint32_t)cfg->rt_press_delta_pm))
+        if (((uint32_t)position_pm >=
+             (uint32_t)valley + (uint32_t)cfg->rt_press_delta_pm) ||
+            ((peak == 0U) && (position_pm >= cfg->press_pm)))
         {
             engine->peak_pm[key_id] = position_pm;
             return 1U;
@@ -283,9 +283,8 @@ static uint8_t mag_key_rt_down_next(mag_key_engine_t *engine,
         engine->peak_pm[key_id] = peak;
     }
 
-    if ((position_pm <= cfg->release_pm) ||
-        ((uint32_t)position_pm + (uint32_t)cfg->rt_release_delta_pm <=
-         (uint32_t)peak))
+    if ((uint32_t)position_pm + (uint32_t)cfg->rt_release_delta_pm <=
+        (uint32_t)peak)
     {
         engine->valley_pm[key_id] = position_pm;
         return 0U;
