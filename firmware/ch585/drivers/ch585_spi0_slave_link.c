@@ -4,10 +4,31 @@
 
 #include "CH58x_common.h"
 
+#ifndef CH585_SPI0_SLAVE_LINK_TMOS_HOOK
+#define CH585_SPI0_SLAVE_LINK_TMOS_HOOK 0
+#endif
+
+#if CH585_SPI0_SLAVE_LINK_TMOS_HOOK
+#include "HAL.h"
+#endif
+
 static uint32_t s_ch585_spi0_slave_link_frames;
 static uint32_t s_ch585_spi0_slave_link_aborts;
 static uint16_t s_ch585_spi0_slave_link_last_rx_count;
 static uint8_t s_ch585_spi0_slave_link_last_rx_head[4];
+
+static void ch585_spi0_slave_link_wait_hook(void)
+{
+#if CH585_SPI0_SLAVE_LINK_TMOS_HOOK
+    static uint16_t hook_div;
+
+    hook_div++;
+    if((hook_div & 0x03FFU) == 0U)
+    {
+        TMOS_SystemProcess();
+    }
+#endif
+}
 
 static void ch585_spi0_slave_link_pins_init(void)
 {
@@ -28,6 +49,7 @@ static void ch585_spi0_slave_link_wait_cs_high(void)
 {
     while((R8_SPI0_RUN_FLAG & RB_SPI_SLV_SELECT) != 0U)
     {
+        ch585_spi0_slave_link_wait_hook();
     }
 }
 
@@ -79,6 +101,8 @@ static int ch585_spi0_slave_link_wait_tx_done(uint8_t *rx, uint16_t len)
 
     while((R8_SPI0_INT_FLAG & RB_SPI_IF_CNT_END) == 0U)
     {
+        ch585_spi0_slave_link_wait_hook();
+
         if((R8_SPI0_RUN_FLAG & RB_SPI_SLV_SELECT) != 0U)
         {
             saw_select = 1U;
@@ -113,6 +137,8 @@ static int ch585_spi0_slave_link_wait_tx_done(uint8_t *rx, uint16_t len)
 
     while((R8_SPI0_INT_FLAG & RB_SPI_IF_BYTE_END) != 0U)
     {
+        ch585_spi0_slave_link_wait_hook();
+
         uint8_t byte = R8_SPI0_BUFFER;
         if((rx != 0) && (rx_index < len))
         {
@@ -136,6 +162,8 @@ static int ch585_spi0_slave_link_wait_rx_done(uint8_t *rx, uint16_t len)
 
     while((R8_SPI0_INT_FLAG & RB_SPI_IF_CNT_END) == 0U)
     {
+        ch585_spi0_slave_link_wait_hook();
+
         if((R8_SPI0_RUN_FLAG & RB_SPI_SLV_SELECT) != 0U)
         {
             saw_select = 1U;

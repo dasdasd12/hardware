@@ -6,12 +6,12 @@ PROJECT_NAME ?= h417_V3F
 PROJECT_ROOT ?= .
 BUILD_ROOT   ?= ../build/V3F
 
-CC      := $(PREFIX)gcc
-AS      := $(PREFIX)gcc -x assembler-with-cpp
-LD      := $(PREFIX)gcc
-OBJCOPY := $(PREFIX)objcopy
-OBJDUMP := $(PREFIX)objdump
-SIZE    := $(PREFIX)size
+CC      := "$(PREFIX)gcc"
+AS      := "$(PREFIX)gcc" -x assembler-with-cpp
+LD      := "$(PREFIX)gcc"
+OBJCOPY := "$(PREFIX)objcopy"
+OBJDUMP := "$(PREFIX)objdump"
+SIZE    := "$(PREFIX)size"
 
 # V3F has no FPU: rv32imac
 ARCH_FLAGS := -march=rv32imac_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
@@ -39,6 +39,7 @@ V3F_RGB_LED_COUNT ?= 1
 V3F_ENABLE_RF_BRIDGE ?= 0
 V3F_ENABLE_SPI_HOST_CMD ?= 0
 V3F_ENABLE_USBFS_CDC_DEBUG ?= 0
+V3F_OUTPUT_MODE_DEFAULT ?= 0
 
 # Defines
 DEFS := -DCore_V3F
@@ -51,6 +52,7 @@ DEFS += -DV3F_RGB_LED_COUNT=$(V3F_RGB_LED_COUNT)
 DEFS += -DV3F_ENABLE_RF_BRIDGE=$(V3F_ENABLE_RF_BRIDGE)
 DEFS += -DV3F_ENABLE_SPI_HOST_CMD=$(V3F_ENABLE_SPI_HOST_CMD)
 DEFS += -DV3F_ENABLE_USBFS_CDC_DEBUG=$(V3F_ENABLE_USBFS_CDC_DEBUG)
+DEFS += -DV3F_OUTPUT_MODE_DEFAULT=$(V3F_OUTPUT_MODE_DEFAULT)
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 DEFS += -DV3F_USBSS_OFFICIAL_OWNER=1
 endif

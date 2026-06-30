@@ -23,12 +23,14 @@ static rfipTx_t s_tx_param;
 static uint8_t s_tx_buf[RF_FRAME_LEN] __attribute__((aligned(4)));
 static uint8_t s_nkro16[AIK_NKRO_REPORT_BYTES] __attribute__((aligned(4)));
 static volatile uint8_t s_started;
+static volatile uint8_t s_enabled;
 static volatile uint8_t s_rf_seq;
 static volatile uint32_t s_tx_ticks;
 static volatile uint32_t s_tx_done_count;
 static volatile uint32_t s_report_count;
 static volatile uint16_t s_last_host_seq;
 static volatile uint8_t s_last_flags;
+static volatile uint8_t s_last_switch_status;
 
 static uint8_t frame_xor(const uint8_t *buf, uint8_t len)
 {
@@ -113,6 +115,7 @@ void ch585_rf_nkro_tx_init(void)
 
     memset(s_tx_buf, 0, sizeof(s_tx_buf));
     memset(s_nkro16, 0, sizeof(s_nkro16));
+    s_last_switch_status = 0U;
 
     s_rf_task_id = TMOS_ProcessEventRegister(rf_process_event);
 
@@ -145,6 +148,7 @@ void ch585_rf_nkro_tx_init(void)
     PFIC_EnableIRQ(TMR0_IRQn);
 
     s_started = 1U;
+    s_enabled = 1U;
     PRINT("half_scan RF 2.4G 1K legacy NKRO TX: %u-byte frame target=%u\r\n",
           RF_FRAME_LEN,
           RF_TX_TARGET_ID);
@@ -158,6 +162,42 @@ void ch585_rf_nkro_tx_poll(void)
     }
 }
 
+void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
+{
+    if(s_started == 0U)
+    {
+        s_enabled = 0U;
+        return;
+    }
+
+    if(enabled != 0U)
+    {
+        (void)RFRole_Stop();
+        s_last_switch_status = RFRole_SwitchMode(1U);
+        (void)RFRole_SetParam(&s_rf_param);
+        s_enabled = 1U;
+        TMR0_ClearITFlag(TMR0_3_IT_CYC_END);
+        TMR0_ITCfg(ENABLE, TMR0_3_IT_CYC_END);
+        PFIC_EnableIRQ(TMR0_IRQn);
+        PRINT("half_scan rf enable switch=%u\r\n",
+              (unsigned int)s_last_switch_status);
+    }
+    else
+    {
+        s_enabled = 0U;
+        TMR0_ITCfg(DISABLE, TMR0_3_IT_CYC_END);
+        PFIC_DisableIRQ(TMR0_IRQn);
+        (void)RFRole_Stop();
+        memset(s_nkro16, 0, sizeof(s_nkro16));
+        PRINT("half_scan rf disable\r\n");
+    }
+}
+
+uint8_t ch585_rf_nkro_tx_is_enabled(void)
+{
+    return s_enabled;
+}
+
 void ch585_rf_nkro_tx_set_report(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
                                  uint16_t host_seq,
                                  uint8_t flags)
@@ -167,7 +207,7 @@ void ch585_rf_nkro_tx_set_report(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
         return;
     }
 
-    if(s_started != 0U)
+    if((s_started != 0U) && (s_enabled != 0U))
     {
         PFIC_DisableIRQ(TMR0_IRQn);
     }
@@ -177,7 +217,7 @@ void ch585_rf_nkro_tx_set_report(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
     s_last_flags = flags;
     s_report_count++;
 
-    if(s_started != 0U)
+    if((s_started != 0U) && (s_enabled != 0U))
     {
         PFIC_EnableIRQ(TMR0_IRQn);
     }
@@ -200,6 +240,10 @@ void TMR0_IRQHandler(void)
     if(TMR0_GetITFlag(TMR0_3_IT_CYC_END))
     {
         TMR0_ClearITFlag(TMR0_3_IT_CYC_END);
+        if((s_started == 0U) || (s_enabled == 0U))
+        {
+            return;
+        }
         s_tx_ticks++;
         fill_nkro_frame(RF_TX_TARGET_ID);
         rf_tx_start(s_tx_buf);

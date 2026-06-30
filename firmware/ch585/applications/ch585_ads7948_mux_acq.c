@@ -4,6 +4,13 @@
 #include "core_riscv.h"
 #include "CH58x_gpio.h"
 #include "CH58x_spi.h"
+#if CH585_ADS7948_MUX_TMOS_HOOK
+#include "HAL.h"
+#endif
+
+#ifndef CH585_ADS7948_MUX_TMOS_HOOK
+#define CH585_ADS7948_MUX_TMOS_HOOK 0
+#endif
 
 #define CH585_ADS7948_MUX_TARGET_SPS 2000000U
 #define CH585_ADS7948_MUX_SYSCLK_HZ 78000000U
@@ -41,6 +48,19 @@
 
 #define CH585_ADS7948_MUX_LANE(adc, channel, cs, cs_text, first, count) \
     {adc, channel, cs, cs_text, first, count}
+
+static void ch585_ads7948_mux_wait_hook(void)
+{
+#if CH585_ADS7948_MUX_TMOS_HOOK
+    static uint8_t hook_div;
+
+    hook_div++;
+    if((hook_div & 0x1FU) == 0U)
+    {
+        TMOS_SystemProcess();
+    }
+#endif
+}
 
 static const ch585_ads7948_mux_profile_t g_ch585_ads7948_mux_profiles[2] = {
     {
@@ -264,6 +284,7 @@ static uint8_t ch585_ads7948_mux_spi1_recv_byte(void)
     R8_SPI1_BUFFER = 0xFFU;
     while((R8_SPI1_INT_FLAG & RB_SPI_FREE) == 0U)
     {
+        ch585_ads7948_mux_wait_hook();
     }
     return R8_SPI1_BUFFER;
 }
@@ -407,6 +428,7 @@ static void ch585_ads7948_mux_acq_poll_channel(
 
     for(mux_channel = min_mux; mux_channel < max_mux_end; mux_channel++)
     {
+        ch585_ads7948_mux_wait_hook();
         ch585_ads7948_mux_set_mux_addr(mux_channel);
 
         for(adc_index = 0U;
@@ -454,6 +476,7 @@ static void ch585_ads7948_mux_acq_poll_channel(
         adc_index < CH585_ADS7948_MUX_ADC_COUNT;
         adc_index++)
     {
+        ch585_ads7948_mux_wait_hook();
         if(prev_valid[adc_index] != 0U)
         {
             uint16_t code =

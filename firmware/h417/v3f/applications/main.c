@@ -60,9 +60,18 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_ENABLE_USBFS_CDC_DEBUG 0
 #endif
 
+#ifndef V3F_OUTPUT_MODE_DEFAULT
+#define V3F_OUTPUT_MODE_DEFAULT AIK_OUTPUT_MODE_USBHS
+#endif
+
 #ifndef V3F_CDC_DEBUG_PERIOD_TICKS
 #define V3F_CDC_DEBUG_PERIOD_TICKS 25U
 #endif
+
+#define V3F_SWITCH_KEY_ESC 46U
+#define V3F_SWITCH_KEY_F1  45U
+#define V3F_SWITCH_KEY_F2  44U
+#define V3F_SWITCH_KEY_F3  43U
 
 enum
 {
@@ -104,6 +113,7 @@ enum
     V3F_TRACE_KEYS_DOWN01 = 39,
     V3F_TRACE_NKRO_0205 = 40,
     V3F_TRACE_NKRO_0609 = 41,
+    V3F_TRACE_OUTPUT_MODE = 42,
 };
 
 typedef struct
@@ -178,6 +188,68 @@ static uint32_t pack4(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3)
            ((uint32_t)b3 << 24);
 }
 
+static uint8_t v3f_output_mode_sanitize(uint8_t mode)
+{
+    if((mode == AIK_OUTPUT_MODE_RF24) || (mode == AIK_OUTPUT_MODE_BLE))
+    {
+        return mode;
+    }
+    return AIK_OUTPUT_MODE_USBHS;
+}
+
+static uint8_t v3f_output_mode_is_wireless(uint8_t mode)
+{
+    return (uint8_t)((mode == AIK_OUTPUT_MODE_RF24) ||
+                     (mode == AIK_OUTPUT_MODE_BLE));
+}
+
+static void v3f_global_key_clear_local(v3f_global_key_state_t *keys,
+                                       uint8_t key_id)
+{
+    if((keys != 0) && (key_id < AIK_KEY_COUNT_TOTAL))
+    {
+        keys->down[key_id >> 3] &=
+            (uint8_t)~(uint8_t)(1U << (key_id & 7U));
+    }
+}
+
+static uint8_t v3f_output_mode_update_from_keys(v3f_global_key_state_t *keys,
+                                                uint8_t current_mode)
+{
+    uint8_t next_mode = current_mode;
+    uint8_t combo_active = 0U;
+
+    if((keys != 0) &&
+       (v3f_global_key_is_down(keys, V3F_SWITCH_KEY_ESC) != 0U))
+    {
+        if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F1) != 0U)
+        {
+            next_mode = AIK_OUTPUT_MODE_USBHS;
+            combo_active = 1U;
+        }
+        else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F2) != 0U)
+        {
+            next_mode = AIK_OUTPUT_MODE_RF24;
+            combo_active = 1U;
+        }
+        else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F3) != 0U)
+        {
+            next_mode = AIK_OUTPUT_MODE_BLE;
+            combo_active = 1U;
+        }
+    }
+
+    if(combo_active != 0U)
+    {
+        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_ESC);
+        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F1);
+        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F2);
+        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F3);
+    }
+
+    return v3f_output_mode_sanitize(next_mode);
+}
+
 static void v3f_link_diag_trace(const v3f_half_cache_t *left,
                                 const v3f_half_cache_t *right)
 {
@@ -245,7 +317,7 @@ static void v3f_report_diag_trace(const v3f_global_key_state_t *keys,
 static void v3f_prepare_spi_poll_tx(aik_spi_host_cmd_v1_t *cmd,
                                     uint16_t host_seq,
                                     const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
-                                    uint8_t enable_rf)
+                                    uint8_t output_mode)
 {
     if(cmd == 0)
     {
@@ -253,34 +325,41 @@ static void v3f_prepare_spi_poll_tx(aik_spi_host_cmd_v1_t *cmd,
     }
 
 #if V3F_ENABLE_SPI_HOST_CMD
-    v3f_rf_report_bridge_prepare_cmd(cmd, host_seq, nkro16, enable_rf);
+    v3f_rf_report_bridge_prepare_cmd(cmd, host_seq, nkro16, output_mode);
 #else
     (void)host_seq;
     (void)nkro16;
-    (void)enable_rf;
+    (void)output_mode;
     memset(cmd, 0, sizeof(*cmd));
 #endif
 }
 
 static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
                                          uint16_t host_seq,
-                                         const aik_spi_half_state_v1_t *right)
+                                         const aik_spi_half_state_v1_t *right,
+                                         uint8_t output_mode)
 {
 #if V3F_ENABLE_SPI_HOST_CMD && V3F_ENABLE_RF_BRIDGE
     aik_spi_half_state_v1_t empty_right;
 
     if(right != 0)
     {
-        v3f_rf_report_bridge_prepare_right_state_cmd(cmd, host_seq, right);
+        v3f_rf_report_bridge_prepare_right_state_cmd(cmd,
+                                                     host_seq,
+                                                     right,
+                                                     output_mode);
         return;
     }
 
     memset(&empty_right, 0, sizeof(empty_right));
     empty_right.half_seq = host_seq;
     aik_spi_half_state_finish(&empty_right, AIK_KEY_COUNT_RIGHT);
-    v3f_rf_report_bridge_prepare_right_state_cmd(cmd, host_seq, &empty_right);
+    v3f_rf_report_bridge_prepare_right_state_cmd(cmd,
+                                                 host_seq,
+                                                 &empty_right,
+                                                 output_mode);
 #else
-    v3f_prepare_spi_poll_tx(cmd, host_seq, 0, 0U);
+    v3f_prepare_spi_poll_tx(cmd, host_seq, 0, output_mode);
     (void)right;
 #endif
 }
@@ -428,11 +507,14 @@ int main(void)
     aik_spi_host_cmd_v1_t right_cmd;
     v3f_global_key_state_t keys;
     uint8_t nkro16[AIK_NKRO_REPORT_BYTES];
+    uint8_t zero_nkro16[AIK_NKRO_REPORT_BYTES];
+    uint8_t output_mode = v3f_output_mode_sanitize(V3F_OUTPUT_MODE_DEFAULT);
     uint16_t host_seq = 0U;
 
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
     memset(nkro16, 0, sizeof(nkro16));
+    memset(zero_nkro16, 0, sizeof(zero_nkro16));
 
     v3f_board_init();
     v3f_usb_hid_nkro_init();
@@ -444,6 +526,7 @@ int main(void)
     {
         uint8_t got_left;
         uint8_t got_right;
+        uint8_t previous_output_mode = output_mode;
 
 #if !V3F_ENABLE_RF_BRIDGE
         if(v3f_usb_hid_nkro_pending_empty() == 0U)
@@ -456,14 +539,25 @@ int main(void)
         v3f_prepare_spi_poll_tx(&right_cmd,
                                 host_seq,
                                 0,
-                                0U);
+                                output_mode);
         got_right = v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx);
         update_half_cache(&right, got_right, &rx);
         age_half_cache_on_usb_report(&right, got_right);
 
-        v3f_prepare_right_state_push(&left_cmd,
-                                     host_seq,
-                                     right.valid ? &right.frame : 0);
+        if(v3f_output_mode_is_wireless(output_mode) != 0U)
+        {
+            v3f_prepare_right_state_push(&left_cmd,
+                                         host_seq,
+                                         right.valid ? &right.frame : 0,
+                                         output_mode);
+        }
+        else
+        {
+            v3f_prepare_spi_poll_tx(&left_cmd,
+                                    host_seq,
+                                    0,
+                                    output_mode);
+        }
         got_left = v3f_ch585_link_poll(AIK_HALF_ID_LEFT, &left_cmd, &rx);
         update_half_cache(&left, got_left, &rx);
         age_half_cache_on_usb_report(&left, got_left);
@@ -471,11 +565,11 @@ int main(void)
         v3f_prepare_spi_poll_tx(&left_cmd,
                                 host_seq,
                                 nkro16,
-                                (uint8_t)V3F_ENABLE_RF_BRIDGE);
+                                output_mode);
         v3f_prepare_spi_poll_tx(&right_cmd,
                                 host_seq,
                                 nkro16,
-                                0U);
+                                output_mode);
 
         got_left = v3f_ch585_link_poll(AIK_HALF_ID_LEFT, &left_cmd, &rx);
         update_half_cache(&left, got_left, &rx);
@@ -490,8 +584,16 @@ int main(void)
         v3f_half_state_merge(left.valid ? &left.frame : 0,
                              right.valid ? &right.frame : 0,
                              &keys);
+        output_mode = v3f_output_mode_update_from_keys(&keys, output_mode);
         v3f_default_profile_build_nkro16(&keys, nkro16);
-        if(v3f_usb_hid_nkro_pending_empty() != 0U)
+        if((previous_output_mode == AIK_OUTPUT_MODE_USBHS) &&
+           (output_mode != AIK_OUTPUT_MODE_USBHS) &&
+           (v3f_usb_hid_nkro_pending_empty() != 0U))
+        {
+            (void)v3f_usb_hid_nkro_submit(zero_nkro16);
+        }
+        else if((output_mode == AIK_OUTPUT_MODE_USBHS) &&
+                (v3f_usb_hid_nkro_pending_empty() != 0U))
         {
             (void)v3f_usb_hid_nkro_submit(nkro16);
         }
@@ -501,6 +603,7 @@ int main(void)
         v3f_trace_set(V3F_TRACE_RIGHT_OK, right.valid);
         v3f_trace_set(V3F_TRACE_LEFT_STALE, left.stale_ticks);
         v3f_trace_set(V3F_TRACE_RIGHT_STALE, right.stale_ticks);
+        v3f_trace_set(V3F_TRACE_OUTPUT_MODE, output_mode);
         v3f_link_diag_trace(&left, &right);
         v3f_report_diag_trace(&keys, nkro16);
         v3f_usb_diag_trace();

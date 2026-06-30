@@ -10,6 +10,7 @@
 #include "battservice.h"
 #include "hidkbdservice.h"
 #include "hiddev.h"
+#include "wchrf.h"
 
 #define BLE_HID_LOG(...)            \
     do                              \
@@ -22,17 +23,23 @@
 #define BLE_HID_KEY_TAP_DOWN_EVT      0x0004
 #define BLE_HID_KEY_TAP_UP_EVT        0x0008
 #define BLE_HID_ADV_INTERVAL          160
-#define BLE_HID_MIN_CONN_INTERVAL     8
-#define BLE_HID_MAX_CONN_INTERVAL     8
+#define BLE_HID_MIN_CONN_INTERVAL     16
+#define BLE_HID_MAX_CONN_INTERVAL     24
 #define BLE_HID_SLAVE_LATENCY         0
 #define BLE_HID_CONN_TIMEOUT          500
-#define BLE_HID_DEVICE_NAME           "CH585_LX_TEST"
+#define BLE_HID_MIN_CE_LEN            6
+#define BLE_HID_MAX_CE_LEN            12
+#define BLE_HID_PARAM_UPDATE_DELAY_MS 100
+#define BLE_HID_PHY_UPDATE_DELAY_MS   150
+#define BLE_HID_ENABLE_PARAM_UPDATE   0
+#define BLE_HID_ENABLE_PHY_UPDATE     0
+#define BLE_HID_DEVICE_NAME           "CH585M_HIDBLE"
 #define BLE_HID_IDLE_TIMEOUT_MS       60000
 #define BLE_HID_KEY_TAP_HOLD_MS       120
 #define BLE_HID_KEY_TAP_RETRY_MS      800
 #define BLE_HID_KEY_TAP_MAX_RETRY     20
 #define BLE_HID_KEY_TAP_QUEUE_SIZE    16
-#define BLE_HID_CLEAR_BONDS_ON_BOOT   TRUE
+#define BLE_HID_CLEAR_BONDS_ON_BOOT   FALSE
 
 typedef struct
 {
@@ -54,7 +61,7 @@ static uint8_t g_key_tap_queue_count = 0;
 static uint8_t scanRspData[] = {
     0x0E,
     GAP_ADTYPE_LOCAL_NAME_COMPLETE,
-    'C', 'H', '5', '8', '5', '_', 'L', 'X', '_', 'T', 'E', 'S', 'T',
+    'C', 'H', '5', '8', '5', 'M', '_', 'H', 'I', 'D', 'B', 'L', 'E',
 
     0x05,
     GAP_ADTYPE_SLAVE_CONN_INTERVAL_RANGE,
@@ -82,7 +89,7 @@ static uint8_t advertData[] = {
 
     0x0E,
     GAP_ADTYPE_LOCAL_NAME_COMPLETE,
-    'C', 'H', '5', '8', '5', '_', 'L', 'X', '_', 'T', 'E', 'S', 'T',
+    'C', 'H', '5', '8', '5', 'M', '_', 'H', 'I', 'D', 'B', 'L', 'E',
 
     0x03,
     GAP_ADTYPE_APPEARANCE,
@@ -120,6 +127,8 @@ static hidDevCB_t hidCBs = {
 void BLE_HID_Init(void)
 {
     g_ble_task_id = TMOS_ProcessEventRegister(BLE_HID_ProcessEvent);
+    GAPRole_PeripheralInit();
+    HidDev_Init();
 
     {
         uint8_t adv_enable = TRUE;
@@ -158,11 +167,37 @@ void BLE_HID_Init(void)
     }
 
     {
+        uint16_t min_interval = BLE_HID_MIN_CONN_INTERVAL;
+        uint16_t max_interval = BLE_HID_MAX_CONN_INTERVAL;
+
+        GAPRole_SetParameter(GAPROLE_MIN_CONN_INTERVAL,
+                             sizeof(uint16_t),
+                             &min_interval);
+        GAPRole_SetParameter(GAPROLE_MAX_CONN_INTERVAL,
+                             sizeof(uint16_t),
+                             &max_interval);
+
+        GAP_SetParamValue(TGAP_CONN_EST_INT_MIN, BLE_HID_MIN_CONN_INTERVAL);
+        GAP_SetParamValue(TGAP_CONN_EST_INT_MAX, BLE_HID_MAX_CONN_INTERVAL);
+        GAP_SetParamValue(TGAP_CONN_EST_LATENCY, BLE_HID_SLAVE_LATENCY);
+        GAP_SetParamValue(TGAP_CONN_EST_SUPERV_TIMEOUT, BLE_HID_CONN_TIMEOUT);
+        GAP_SetParamValue(TGAP_CONN_EST_MIN_CE_LEN, BLE_HID_MIN_CE_LEN);
+        GAP_SetParamValue(TGAP_CONN_EST_MAX_CE_LEN, BLE_HID_MAX_CE_LEN);
+        GAP_SetParamValue(TGAP_CONN_EST_2M_INT_MIN, BLE_HID_MIN_CONN_INTERVAL);
+        GAP_SetParamValue(TGAP_CONN_EST_2M_INT_MAX, BLE_HID_MAX_CONN_INTERVAL);
+        GAP_SetParamValue(TGAP_CONN_EST_2M_LATENCY, BLE_HID_SLAVE_LATENCY);
+        GAP_SetParamValue(TGAP_CONN_EST_2M_SUPERV_TIMEOUT, BLE_HID_CONN_TIMEOUT);
+        GAP_SetParamValue(TGAP_CONN_EST_2M_MIN_CE_LEN, BLE_HID_MIN_CE_LEN);
+        GAP_SetParamValue(TGAP_CONN_EST_2M_MAX_CE_LEN, BLE_HID_MAX_CE_LEN);
+    }
+
+    {
         bStatus_t hid_status = Hid_AddService();
         BLE_HID_LOG("%s: Hid_AddService=%x\n", BLE_HID_DEVICE_NAME, hid_status);
     }
 
     HidDev_Register(&hidCfg, &hidCBs);
+    BLE_HID_LOG("%s: HidDev init done\n", BLE_HID_DEVICE_NAME);
 
     if(BLE_HID_CLEAR_BONDS_ON_BOOT)
     {
@@ -313,6 +348,34 @@ void BLE_HID_StopAdvert(void)
 {
     uint8_t en = FALSE;
     GAPRole_SetParameter(GAPROLE_ADVERT_ENABLED, sizeof(uint8_t), &en);
+}
+
+void BLE_HID_SetEnabled(uint8_t enabled)
+{
+    if(enabled != 0U)
+    {
+        bStatus_t switch_status;
+
+        (void)RFRole_Stop();
+        switch_status = RFRole_SwitchMode(0U);
+        BLE_HID_LOG("%s: ble enable switch=%x\n",
+                    BLE_HID_DEVICE_NAME, switch_status);
+        if(!BLE_HID_IsConnected())
+        {
+            BLE_HID_StartAdvert();
+        }
+        return;
+    }
+
+    BLE_HID_StopAdvert();
+    if(BLE_HID_IsConnected())
+    {
+        uint8_t release_report[BLE_HID_KBD_REPORT_LEN] = {0};
+        (void)BLE_HID_SendKeyboard(release_report);
+        (void)GAPRole_TerminateLink(g_conn_handle);
+    }
+    bleHidResetKeyTapState();
+    bleHidClearKeyTapQueue();
 }
 
 uint8_t BLE_HID_SendKeyboard(const uint8_t *report8)
@@ -504,9 +567,22 @@ static void hidStateCB(gapRole_States_t newState, gapRoleEvent_t *pEvent)
             {
                 g_conn_handle = ((gapEstLinkReqEvent_t *)pEvent)->connectionHandle;
                 bleHidResetKeyTapState();
-                BLE_HID_LOG("%s: connected\n", BLE_HID_DEVICE_NAME);
-                tmos_start_task(g_ble_task_id, BLE_HID_PARAM_UPDATE_EVT, 1600);
-                tmos_start_task(g_ble_task_id, BLE_HID_PHY_UPDATE_EVT, 2400);
+                BLE_HID_LOG("%s: connected status=%02x handle=%04x\n",
+                            BLE_HID_DEVICE_NAME,
+                            (unsigned int)pEvent->gap.hdr.status,
+                            (unsigned int)g_conn_handle);
+                if(BLE_HID_ENABLE_PARAM_UPDATE)
+                {
+                    tmos_start_task(g_ble_task_id,
+                                    BLE_HID_PARAM_UPDATE_EVT,
+                                    BLE_HID_PARAM_UPDATE_DELAY_MS);
+                }
+                if(BLE_HID_ENABLE_PHY_UPDATE)
+                {
+                    tmos_start_task(g_ble_task_id,
+                                    BLE_HID_PHY_UPDATE_EVT,
+                                    BLE_HID_PHY_UPDATE_DELAY_MS);
+                }
             }
             break;
 
@@ -522,7 +598,11 @@ static void hidStateCB(gapRole_States_t newState, gapRoleEvent_t *pEvent)
             {
                 g_conn_handle = GAP_CONNHANDLE_INIT;
                 bleHidResetKeyTapState();
-                BLE_HID_LOG("%s: disconnected\n", BLE_HID_DEVICE_NAME);
+                BLE_HID_LOG("%s: disconnected status=%02x reason=%02x handle=%04x\n",
+                            BLE_HID_DEVICE_NAME,
+                            (unsigned int)pEvent->gap.hdr.status,
+                            (unsigned int)pEvent->linkTerminate.reason,
+                            (unsigned int)pEvent->linkTerminate.connectionHandle);
                 BLE_HID_StartAdvert();
             }
             else if(pEvent->gap.opcode == GAP_END_DISCOVERABLE_DONE_EVENT)
