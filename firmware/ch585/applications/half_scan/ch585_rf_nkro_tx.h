@@ -7,6 +7,8 @@
 
 void ch585_rf_nkro_tx_init(void);
 void ch585_rf_nkro_tx_poll(void);
+void ch585_rf_nkro_tx_set_enabled(uint8_t enabled);
+uint8_t ch585_rf_nkro_tx_is_enabled(void);
 void ch585_rf_nkro_tx_set_report(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
                                  uint16_t host_seq,
                                  uint8_t flags);

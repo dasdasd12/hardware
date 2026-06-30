@@ -34,6 +34,7 @@ INC := -I"applications/$(APP)"
 INC += -I"applications"
 INC += -I"../common"
 INC += -I"drivers"
+INC += -I"drivers/ble"
 INC += -I"drivers/rf/include"
 INC += -I"drivers/usb/usbhs_keyboard"
 INC += -I"bsp/hal/include"
@@ -49,6 +50,14 @@ APP_C_SOURCES += applications/magnetic_key_engine.c
 APP_C_SOURCES += applications/half_scan/ch585_rf_nkro_tx.c
 APP_C_SOURCES += applications/ch585_ads7948_mux_acq.c
 APP_C_SOURCES += drivers/ch585_spi0_slave_link.c
+ifneq (,$(findstring -DCH585_BLE_HID_ENABLE=1,$(DEFS_EXTRA)))
+APP_C_SOURCES += drivers/ble/ble_hid.c
+APP_C_SOURCES += drivers/ble/battservice.c
+APP_C_SOURCES += drivers/ble/devinfoservice.c
+APP_C_SOURCES += drivers/ble/hiddev.c
+APP_C_SOURCES += drivers/ble/hidkbdservice.c
+APP_C_SOURCES += drivers/ble/scanparamservice.c
+endif
 else ifeq ($(APP),rf_basic)
 APP_C_SOURCES += applications/rf_basic/main.c
 APP_C_SOURCES += drivers/rf/RF_basic.c
@@ -94,7 +103,7 @@ OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_rf half_scan_left_rf_debug_uart half_scan_left_debug_uart half_scan_right_debug_uart rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
+.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_rf half_scan_left_rf_debug_uart half_scan_left_ble_debug_uart half_scan_left_output_switch_debug_uart half_scan_left_debug_uart half_scan_right_debug_uart rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
 
 all: firmware
 
@@ -115,6 +124,12 @@ half_scan_left_rf:
 
 half_scan_left_rf_debug_uart:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_rf_debug_uart BUILD_VARIANT=half_scan_left_rf_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1" firmware
+
+half_scan_left_ble_debug_uart:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_ble_debug_uart BUILD_VARIANT=half_scan_left_ble_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0 -DCH585_BLE_HID_ENABLE=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
+
+half_scan_left_output_switch_debug_uart:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_output_switch_debug_uart BUILD_VARIANT=half_scan_left_output_switch_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1 -DCH585_BLE_HID_ENABLE=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
 
 half_scan_left_debug_uart:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_debug_uart BUILD_VARIANT=half_scan_left_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0" firmware
