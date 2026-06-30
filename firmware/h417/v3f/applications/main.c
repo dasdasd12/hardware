@@ -72,6 +72,8 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_SWITCH_KEY_F1  45U
 #define V3F_SWITCH_KEY_F2  44U
 #define V3F_SWITCH_KEY_F3  43U
+#define V3F_SWITCH_KEY_F5  41U
+#define V3F_SWITCH_KEY_F6  6U
 
 enum
 {
@@ -248,6 +250,44 @@ static uint8_t v3f_output_mode_update_from_keys(v3f_global_key_state_t *keys,
     }
 
     return v3f_output_mode_sanitize(next_mode);
+}
+
+static void v3f_lighting_update_from_keys(v3f_global_key_state_t *keys)
+{
+    static uint8_t combo_latched;
+    uint8_t combo_down = 0U;
+    uint8_t handled = 0U;
+
+    if((keys != 0) &&
+       (v3f_global_key_is_down(keys, V3F_SWITCH_KEY_ESC) != 0U))
+    {
+        if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F5) != 0U)
+        {
+            combo_down = 1U;
+            if(combo_latched == 0U)
+            {
+                v3f_rgb_status_toggle_enabled();
+            }
+            handled = 1U;
+        }
+        else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F6) != 0U)
+        {
+            combo_down = 1U;
+            if(combo_latched == 0U)
+            {
+                v3f_rgb_status_next_effect();
+            }
+            handled = 1U;
+        }
+    }
+
+    combo_latched = combo_down;
+    if(handled != 0U)
+    {
+        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_ESC);
+        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F5);
+        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F6);
+    }
 }
 
 static void v3f_link_diag_trace(const v3f_half_cache_t *left,
@@ -520,7 +560,7 @@ int main(void)
     v3f_usb_hid_nkro_init();
     v3f_ch585_link_init();
     v3f_rgb_status_init();
-    v3f_rgb_status_red_once();
+    v3f_rgb_status_set_enabled(1U);
 
     while(1)
     {
@@ -585,6 +625,7 @@ int main(void)
                              right.valid ? &right.frame : 0,
                              &keys);
         output_mode = v3f_output_mode_update_from_keys(&keys, output_mode);
+        v3f_lighting_update_from_keys(&keys);
         v3f_default_profile_build_nkro16(&keys, nkro16);
         if((previous_output_mode == AIK_OUTPUT_MODE_USBHS) &&
            (output_mode != AIK_OUTPUT_MODE_USBHS) &&
@@ -608,6 +649,7 @@ int main(void)
         v3f_report_diag_trace(&keys, nkro16);
         v3f_usb_diag_trace();
         v3f_cdc_debug_poll(host_seq, &left, &right, &keys, nkro16);
+        v3f_rgb_status_task(host_seq);
 
         host_seq++;
 #if V3F_ENABLE_RF_BRIDGE
