@@ -58,17 +58,8 @@ APP_C_SOURCES += drivers/usb/usbhs_keyboard/ch585_usbhs_kbd.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_desc_hid.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hid.c
 APP_C_SOURCES += drivers/usb/usbhs_keyboard/usb_hs_config_stub.c
-else ifeq ($(APP),local_periph_test)
-APP_C_SOURCES += applications/local_periph_test/main.c
-APP_C_SOURCES += applications/local_periph_test/ch585_local_periph_test.c
-APP_C_SOURCES += applications/local_periph_test/ch585_soft_i2c.c
-APP_C_SOURCES += drivers/ch585_i2c_bus.c
-APP_C_SOURCES += drivers/ch585_local_inputs.c
-APP_C_SOURCES += drivers/ch585_power_status.c
-APP_C_SOURCES += drivers/hx24lc16.c
-APP_C_SOURCES += drivers/max17048.c
 else
-$(error Unknown APP '$(APP)'; expected half_scan, rf_basic, rf_receiver_usbhs, or local_periph_test)
+$(error Unknown APP '$(APP)'; expected half_scan, rf_basic, or rf_receiver_usbhs)
 endif
 
 C_SOURCES := $(APP_C_SOURCES)
@@ -102,7 +93,7 @@ OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_debug_uart half_scan_right_debug_uart local_periph_test local_periph_u2 local_periph_u3 rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
+.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_debug_uart half_scan_right_debug_uart rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
 
 all: firmware
 
@@ -126,15 +117,6 @@ half_scan_right_debug_uart:
 
 rf_basic rf_receiver_usbhs:
 	@$(MAKE) APP=$@ firmware
-
-local_periph_test:
-	@$(MAKE) APP=local_periph_test firmware
-
-local_periph_u2:
-	@$(MAKE) APP=local_periph_test PROJECT_NAME=ch585_local_periph_u2 BUILD_VARIANT=local_periph_u2 DEFS_EXTRA="$(DEFS_EXTRA) -DCH585_LOCAL_PERIPH_TEST_RIGHT=0" firmware
-
-local_periph_u3:
-	@$(MAKE) APP=local_periph_test PROJECT_NAME=ch585_local_periph_u3 BUILD_VARIANT=local_periph_u3 DEFS_EXTRA="$(DEFS_EXTRA) -DCH585_LOCAL_PERIPH_TEST_RIGHT=1" firmware
 
 rf_keyboard_tx:
 	$(error rf_keyboard_tx is disabled; RF TX is integrated into half_scan_left)
