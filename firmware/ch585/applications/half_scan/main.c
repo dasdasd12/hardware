@@ -5,6 +5,7 @@
 
 #include "aik_spi_protocol.h"
 #include "ch585_ads7948_mux_acq.h"
+#include "ch585_half_report.h"
 #include "ch585_rf_nkro_tx.h"
 #include "ch585_spi0_slave_link.h"
 #include "magnetic_key_engine.h"
@@ -43,9 +44,11 @@ static ch585_ads7948_mux_acq_t s_acq;
 static mag_key_engine_t s_engine;
 static aik_spi_half_state_v1_t s_tx_frame __attribute__((aligned(4)));
 static aik_spi_host_cmd_v1_t s_rx_cmd __attribute__((aligned(4)));
+static aik_spi_half_state_v1_t s_right_frame __attribute__((aligned(4)));
 static uint8_t s_rf_nkro16[AIK_NKRO_REPORT_BYTES];
 static uint16_t s_compact_raw[AIK_KEY_COUNT_RIGHT];
 static int s_last_spi_result;
+static uint8_t s_right_frame_valid;
 
 static ch585_ads7948_mux_side_t half_scan_side(void)
 {
@@ -132,6 +135,25 @@ static void half_scan_apply_host_cmd(void)
     if(s_rx_cmd.cmd == AIK_SPI_CMD_POLL_WITH_RF)
     {
         memcpy(s_rf_nkro16, s_rx_cmd.nkro16, sizeof(s_rf_nkro16));
+        ch585_rf_nkro_tx_set_report(s_rf_nkro16,
+                                    s_rx_cmd.host_seq,
+                                    s_rx_cmd.flags);
+    }
+    else if(s_rx_cmd.cmd == AIK_SPI_CMD_PUSH_RIGHT_STATE)
+    {
+        aik_spi_half_state_v1_t next_right;
+
+        memcpy(&next_right, s_rx_cmd.nkro16, sizeof(next_right));
+        if(aik_spi_half_state_valid(&next_right) == 0U)
+        {
+            return;
+        }
+
+        s_right_frame = next_right;
+        s_right_frame_valid = 1U;
+        ch585_half_report_build_nkro16(&s_tx_frame,
+                                       s_right_frame_valid ? &s_right_frame : 0,
+                                       s_rf_nkro16);
         ch585_rf_nkro_tx_set_report(s_rf_nkro16,
                                     s_rx_cmd.host_seq,
                                     s_rx_cmd.flags);
@@ -275,9 +297,11 @@ static void half_scan_init(void)
     memset(&s_engine, 0, sizeof(s_engine));
     memset(&s_tx_frame, 0, sizeof(s_tx_frame));
     memset(&s_rx_cmd, 0, sizeof(s_rx_cmd));
+    memset(&s_right_frame, 0, sizeof(s_right_frame));
     memset(s_rf_nkro16, 0, sizeof(s_rf_nkro16));
     memset(s_compact_raw, 0, sizeof(s_compact_raw));
     s_last_spi_result = 0;
+    s_right_frame_valid = 0U;
 
     ch585_ads7948_mux_gpio_init();
     (void)ch585_ads7948_mux_acq_init(&s_acq, profile);
@@ -292,6 +316,13 @@ static void half_scan_init(void)
 #if CH585_RF_TX_ENABLE
     ch585_rf_nkro_tx_init();
 #endif
+
+    ch585_ads7948_mux_acq_poll(&s_acq);
+    half_scan_compact_raw(&s_acq,
+                          s_compact_raw,
+                          aik_spi_half_key_count((uint8_t)CH585_HALF_ID));
+    (void)mag_key_engine_update(&s_engine, s_compact_raw);
+    half_scan_build_frame();
 }
 
 int main(void)
@@ -302,18 +333,20 @@ int main(void)
     {
         uint8_t key_count = aik_spi_half_key_count((uint8_t)CH585_HALF_ID);
 
-        ch585_ads7948_mux_acq_poll(&s_acq);
-        half_scan_compact_raw(&s_acq, s_compact_raw, key_count);
-        (void)mag_key_engine_update(&s_engine, s_compact_raw);
-        half_scan_build_frame();
         s_last_spi_result =
-            ch585_spi0_slave_link_serve_frame((const uint8_t *)&s_tx_frame,
-                                              (uint8_t *)&s_rx_cmd,
-                                              AIK_SPI_HALF_STATE_SIZE);
+            ch585_spi0_slave_link_receive_frame((uint8_t *)&s_rx_cmd,
+                                                AIK_SPI_HOST_CMD_SIZE);
         if(s_last_spi_result == CH585_SPI0_SLAVE_LINK_OK)
         {
             half_scan_apply_host_cmd();
         }
+        s_last_spi_result =
+            ch585_spi0_slave_link_serve_tx_frame((const uint8_t *)&s_tx_frame,
+                                                 AIK_SPI_HALF_STATE_SIZE);
+        ch585_ads7948_mux_acq_poll(&s_acq);
+        half_scan_compact_raw(&s_acq, s_compact_raw, key_count);
+        (void)mag_key_engine_update(&s_engine, s_compact_raw);
+        half_scan_build_frame();
         half_scan_debug_poll(key_count);
 #if CH585_RF_TX_ENABLE
         ch585_rf_nkro_tx_poll();

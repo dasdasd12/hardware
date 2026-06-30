@@ -18,6 +18,7 @@ extern "C" {
 
 #define AIK_SPI_CMD_POLL 0U
 #define AIK_SPI_CMD_POLL_WITH_RF 1U
+#define AIK_SPI_CMD_PUSH_RIGHT_STATE 2U
 
 #define AIK_HALF_ID_LEFT 0U
 #define AIK_HALF_ID_RIGHT 1U

@@ -46,7 +46,23 @@ static void ch585_spi0_slave_link_arm_tx_dma(const uint8_t *tx, uint16_t len)
     R8_SPI0_CTRL_CFG |= RB_SPI_DMA_ENABLE;
 }
 
-static void ch585_spi0_slave_link_abort_tx(void)
+static void ch585_spi0_slave_link_arm_rx_dma(uint8_t *rx, uint16_t len)
+{
+    R8_SPI0_CTRL_CFG &= (uint8_t)(~RB_SPI_DMA_ENABLE);
+    R8_SPI0_CTRL_MOD &= (uint8_t)(~RB_SPI_MISO_OE);
+    R8_SPI0_CTRL_MOD |= RB_SPI_FIFO_DIR;
+    R32_SPI0_DMA_BEG = (uint32_t)rx;
+    R32_SPI0_DMA_END = (uint32_t)(rx + len);
+    R16_SPI0_TOTAL_CNT = len;
+    R8_SPI0_INT_FLAG = RB_SPI_IF_CNT_END |
+                       RB_SPI_IF_DMA_END |
+                       RB_SPI_IF_BYTE_END |
+                       RB_SPI_IF_FIFO_OV |
+                       RB_SPI_IF_FST_BYTE;
+    R8_SPI0_CTRL_CFG |= RB_SPI_DMA_ENABLE;
+}
+
+static void ch585_spi0_slave_link_abort_dma(void)
 {
     R8_SPI0_CTRL_CFG &= (uint8_t)(~RB_SPI_DMA_ENABLE);
     R8_SPI0_INT_FLAG = RB_SPI_IF_CNT_END |
@@ -69,7 +85,7 @@ static int ch585_spi0_slave_link_wait_tx_done(uint8_t *rx, uint16_t len)
         }
         else if(saw_select != 0U)
         {
-            ch585_spi0_slave_link_abort_tx();
+            ch585_spi0_slave_link_abort_dma();
             return CH585_SPI0_SLAVE_LINK_ERR_ABORT;
         }
 
@@ -114,6 +130,40 @@ static int ch585_spi0_slave_link_wait_tx_done(uint8_t *rx, uint16_t len)
     return CH585_SPI0_SLAVE_LINK_OK;
 }
 
+static int ch585_spi0_slave_link_wait_rx_done(uint8_t *rx, uint16_t len)
+{
+    uint8_t saw_select = 0U;
+
+    while((R8_SPI0_INT_FLAG & RB_SPI_IF_CNT_END) == 0U)
+    {
+        if((R8_SPI0_RUN_FLAG & RB_SPI_SLV_SELECT) != 0U)
+        {
+            saw_select = 1U;
+        }
+        else if(saw_select != 0U)
+        {
+            ch585_spi0_slave_link_abort_dma();
+            return CH585_SPI0_SLAVE_LINK_ERR_ABORT;
+        }
+
+        if((R8_SPI0_INT_FLAG & RB_SPI_IF_FIFO_OV) != 0U)
+        {
+            (void)R8_SPI0_BUFFER;
+            ch585_spi0_slave_link_abort_dma();
+            return CH585_SPI0_SLAVE_LINK_ERR_ABORT;
+        }
+    }
+
+    ch585_spi0_slave_link_abort_dma();
+    s_ch585_spi0_slave_link_last_rx_count = len;
+    memcpy(s_ch585_spi0_slave_link_last_rx_head,
+           rx,
+           (len < sizeof(s_ch585_spi0_slave_link_last_rx_head)) ?
+               len :
+               sizeof(s_ch585_spi0_slave_link_last_rx_head));
+    return CH585_SPI0_SLAVE_LINK_OK;
+}
+
 void ch585_spi0_slave_link_init(void)
 {
     s_ch585_spi0_slave_link_frames = 0U;
@@ -141,6 +191,36 @@ int ch585_spi0_slave_link_serve_frame(const uint8_t *tx, uint8_t *rx, uint16_t l
     SetFirstData(tx[0]);
     ch585_spi0_slave_link_arm_tx_dma(tx, len);
     result = ch585_spi0_slave_link_wait_tx_done(rx, len);
+    ch585_spi0_slave_link_wait_cs_high();
+
+    if(result == CH585_SPI0_SLAVE_LINK_OK)
+    {
+        s_ch585_spi0_slave_link_frames++;
+    }
+    else if(result == CH585_SPI0_SLAVE_LINK_ERR_ABORT)
+    {
+        s_ch585_spi0_slave_link_aborts++;
+    }
+
+    return result;
+}
+
+int ch585_spi0_slave_link_receive_frame(uint8_t *rx, uint16_t len)
+{
+    int result;
+
+    if((rx == 0) || (len == 0U))
+    {
+        return CH585_SPI0_SLAVE_LINK_ERR_PARAM;
+    }
+
+    ch585_spi0_slave_link_wait_cs_high();
+    ch585_spi0_slave_link_stream_reset();
+    s_ch585_spi0_slave_link_last_rx_count = 0U;
+    memset(s_ch585_spi0_slave_link_last_rx_head, 0, sizeof(s_ch585_spi0_slave_link_last_rx_head));
+    memset(rx, 0, len);
+    ch585_spi0_slave_link_arm_rx_dma(rx, len);
+    result = ch585_spi0_slave_link_wait_rx_done(rx, len);
     ch585_spi0_slave_link_wait_cs_high();
 
     if(result == CH585_SPI0_SLAVE_LINK_OK)

@@ -262,6 +262,29 @@ static void v3f_prepare_spi_poll_tx(aik_spi_host_cmd_v1_t *cmd,
 #endif
 }
 
+static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
+                                         uint16_t host_seq,
+                                         const aik_spi_half_state_v1_t *right)
+{
+#if V3F_ENABLE_SPI_HOST_CMD && V3F_ENABLE_RF_BRIDGE
+    aik_spi_half_state_v1_t empty_right;
+
+    if(right != 0)
+    {
+        v3f_rf_report_bridge_prepare_right_state_cmd(cmd, host_seq, right);
+        return;
+    }
+
+    memset(&empty_right, 0, sizeof(empty_right));
+    empty_right.half_seq = host_seq;
+    aik_spi_half_state_finish(&empty_right, AIK_KEY_COUNT_RIGHT);
+    v3f_rf_report_bridge_prepare_right_state_cmd(cmd, host_seq, &empty_right);
+#else
+    v3f_prepare_spi_poll_tx(cmd, host_seq, 0, 0U);
+    (void)right;
+#endif
+}
+
 static void v3f_cdc_debug_poll(uint16_t tick,
                                const v3f_half_cache_t *left,
                                const v3f_half_cache_t *right,
@@ -422,11 +445,29 @@ int main(void)
         uint8_t got_left;
         uint8_t got_right;
 
+#if !V3F_ENABLE_RF_BRIDGE
         if(v3f_usb_hid_nkro_pending_empty() == 0U)
         {
             continue;
         }
+#endif
 
+#if V3F_ENABLE_RF_BRIDGE
+        v3f_prepare_spi_poll_tx(&right_cmd,
+                                host_seq,
+                                0,
+                                0U);
+        got_right = v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx);
+        update_half_cache(&right, got_right, &rx);
+        age_half_cache_on_usb_report(&right, got_right);
+
+        v3f_prepare_right_state_push(&left_cmd,
+                                     host_seq,
+                                     right.valid ? &right.frame : 0);
+        got_left = v3f_ch585_link_poll(AIK_HALF_ID_LEFT, &left_cmd, &rx);
+        update_half_cache(&left, got_left, &rx);
+        age_half_cache_on_usb_report(&left, got_left);
+#else
         v3f_prepare_spi_poll_tx(&left_cmd,
                                 host_seq,
                                 nkro16,
@@ -444,12 +485,16 @@ int main(void)
 
         age_half_cache_on_usb_report(&left, got_left);
         age_half_cache_on_usb_report(&right, got_right);
+#endif
 
         v3f_half_state_merge(left.valid ? &left.frame : 0,
                              right.valid ? &right.frame : 0,
                              &keys);
         v3f_default_profile_build_nkro16(&keys, nkro16);
-        (void)v3f_usb_hid_nkro_submit(nkro16);
+        if(v3f_usb_hid_nkro_pending_empty() != 0U)
+        {
+            (void)v3f_usb_hid_nkro_submit(nkro16);
+        }
 
         v3f_trace_inc(V3F_TRACE_TICK);
         v3f_trace_set(V3F_TRACE_LEFT_OK, left.valid);
@@ -462,5 +507,8 @@ int main(void)
         v3f_cdc_debug_poll(host_seq, &left, &right, &keys, nkro16);
 
         host_seq++;
+#if V3F_ENABLE_RF_BRIDGE
+        v3f_board_delay_us(V3F_USB_REPORT_INTERVAL_US);
+#endif
     }
 }
