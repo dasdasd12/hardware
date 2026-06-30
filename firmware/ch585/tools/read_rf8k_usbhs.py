@@ -82,6 +82,8 @@ def parse_report(buf: bytes) -> dict[str, int]:
         "rssi": struct.unpack_from("<b", buf, 44)[0],
         "key_ok": u32(buf, 45),
         "key_seq": struct.unpack_from("<H", buf, 49)[0],
+        "kbd_nonzero": u32(buf, 51),
+        "kbd": buf[55:63].hex(),
     }
 
 
@@ -148,7 +150,9 @@ def main() -> int:
                     f"timeout={last['timeout']} "
                     f"usb_sent={last['usb_sent']} "
                     f"usb_drop={last['usb_drop']} "
-                    f"rssi={last['rssi']}",
+                    f"rssi={last['rssi']} "
+                    f"kbd_nonzero={last['kbd_nonzero']} "
+                    f"kbd={last['kbd']}",
                     flush=True,
                 )
             last_t = now

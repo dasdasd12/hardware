@@ -20,6 +20,7 @@ uint8_t BLE_HID_IsKeyTapBusy(void);
 uint8_t BLE_HID_GetQueuedTapCount(void);
 void BLE_HID_StartAdvert(void);
 void BLE_HID_StopAdvert(void);
+void BLE_HID_SetEnabled(uint8_t enabled);
 uint8_t BLE_HID_SendKeyboard(const uint8_t *report8);
 uint8_t BLE_HID_TriggerKeyTap(uint8_t keycode);
 uint8_t BLE_HID_TriggerModifiedKeyTap(uint8_t modifier, uint8_t keycode);

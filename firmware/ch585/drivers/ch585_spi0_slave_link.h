@@ -18,6 +18,7 @@ typedef struct
 } ch585_spi0_slave_link_stats_t;
 
 void ch585_spi0_slave_link_init(void);
+int ch585_spi0_slave_link_receive_frame(uint8_t *rx, uint16_t len);
 int ch585_spi0_slave_link_serve_tx_frame(const uint8_t *tx, uint16_t len);
 int ch585_spi0_slave_link_serve_frame(const uint8_t *tx, uint8_t *rx, uint16_t len);
 void ch585_spi0_slave_link_get_stats(ch585_spi0_slave_link_stats_t *stats);

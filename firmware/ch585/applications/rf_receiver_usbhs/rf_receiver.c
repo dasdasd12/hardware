@@ -112,6 +112,7 @@ static volatile int8_t   g_last_rssi;
 static volatile uint32_t g_usb_hs_sent_count;
 static volatile uint32_t g_usb_hs_drop_count;
 static volatile uint8_t  g_usb_hs_report_pending;
+static volatile uint32_t g_kbd_nonzero_count;
 static uint8_t g_usb_hs_report[64];
 
 /*******************************************************************************
@@ -136,6 +137,18 @@ static void put_u32_le(uint8_t *buf, uint8_t off, uint32_t val)
     buf[off + 1] = (uint8_t)(val >> 8);
     buf[off + 2] = (uint8_t)(val >> 16);
     buf[off + 3] = (uint8_t)(val >> 24);
+}
+
+static uint8_t report_or16(const uint8_t *report)
+{
+    uint8_t value = 0U;
+    uint8_t i;
+
+    for(i = 0U; i < 16U; i++)
+    {
+        value |= report[i];
+    }
+    return value;
 }
 
 static void nkro_set_usage(uint8_t *report, uint8_t usage)
@@ -200,6 +213,11 @@ static void build_usb_hs_report(uint16_t seq)
     g_usb_hs_report[44] = (uint8_t)g_last_rssi;
     put_u32_le(g_usb_hs_report, 45, g_key_state_ok_count);
     put_u16_le(g_usb_hs_report, 49, g_last_key_state_seq);
+    put_u32_le(g_usb_hs_report, 51, g_kbd_nonzero_count);
+    for(uint8_t i = 0; i < 8; i++)
+    {
+        g_usb_hs_report[55 + i] = g_kbd_report[i];
+    }
 
     for(uint8_t i = 0; i < 63; i++) {
         xorv ^= g_usb_hs_report[i];
@@ -298,6 +316,10 @@ void RF_RX_ProcessCallBack(rfRole_States_t sta, uint8_t id)
                 /* 复制键盘报告（16B: modifier + reserved + bitmap14B）*/
                 for (uint8_t i = 0; i < 16; i++)
                     g_kbd_report[i] = p[RF_KBD_OFFSET + i];
+                if(report_or16(g_kbd_report) != 0U)
+                {
+                    g_kbd_nonzero_count++;
+                }
                 /* Consumer */
                 g_consumer_usage = (uint16_t)p[RF_CONSUMER_OFFSET] | ((uint16_t)p[RF_CONSUMER_OFFSET + 1] << 8);
                 g_report_ready = 1;
