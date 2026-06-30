@@ -33,6 +33,7 @@ typedef struct
 
 void ch32h417_gd5f1g_spi1_init(ch32h417_gd5f1g_spi1_context_t *context,
                                gd5f1g_spi_bus_t *bus);
+void ch32h417_gd5f1g_spi1_release(ch32h417_gd5f1g_spi1_context_t *context);
 void ch32h417_gd5f1g_spi1_set_mode(ch32h417_gd5f1g_spi1_context_t *context,
                                    uint8_t mode);
 void ch32h417_gd5f1g_gpio_init(ch32h417_gd5f1g_spi1_context_t *context,

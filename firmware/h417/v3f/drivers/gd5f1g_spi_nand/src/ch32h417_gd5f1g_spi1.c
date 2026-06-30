@@ -321,6 +321,31 @@ void ch32h417_gd5f1g_spi1_init(ch32h417_gd5f1g_spi1_context_t *context,
     bus->delay_us = spi1_delay_us;
 }
 
+void ch32h417_gd5f1g_spi1_release(ch32h417_gd5f1g_spi1_context_t *context)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    SPI_Cmd(SPI1, DISABLE);
+    spi1_flush_rx();
+    SPI_I2S_DeInit(SPI1);
+
+    flash_gpio_idle();
+    gpio.GPIO_Pin = FLASH_SCK_PIN | FLASH_MOSI_PIN | FLASH_MISO_PIN;
+    gpio.GPIO_Speed = GPIO_Speed_Very_High;
+    gpio.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    GPIO_Init(FLASH_CS_PORT, &gpio);
+
+    gpio.GPIO_Pin = FLASH_CS_PIN;
+    gpio.GPIO_Mode = GPIO_Mode_Out_PP;
+    GPIO_Init(FLASH_CS_PORT, &gpio);
+    GPIO_SetBits(FLASH_CS_PORT, FLASH_CS_PIN);
+
+    if(context != 0)
+    {
+        context->active_mode = 0U;
+    }
+}
+
 static void gpio_bus_init_with_miso(ch32h417_gd5f1g_spi1_context_t *context,
                                     gd5f1g_spi_bus_t *bus,
                                     GPIOMode_TypeDef miso_mode)

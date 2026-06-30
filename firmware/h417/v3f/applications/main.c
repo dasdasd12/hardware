@@ -4,8 +4,9 @@
 #include "aik_spi_protocol.h"
 #include "board_init.h"
 #include "ch585_link.h"
-#include "default_profile.h"
 #include "half_state.h"
+#include "profile_runtime.h"
+#include "profile_store_gd5f1g.h"
 #include "rf_report_bridge.h"
 #include "rgb_status.h"
 
@@ -104,6 +105,9 @@ enum
     V3F_TRACE_KEYS_DOWN01 = 39,
     V3F_TRACE_NKRO_0205 = 40,
     V3F_TRACE_NKRO_0609 = 41,
+    V3F_TRACE_PROFILE_STATUS = 42,
+    V3F_TRACE_PROFILE_GENERATION = 43,
+    V3F_TRACE_PROFILE_CRC = 44,
 };
 
 typedef struct
@@ -240,6 +244,30 @@ static void v3f_report_diag_trace(const v3f_global_key_state_t *keys,
                   pack4(nkro16[2], nkro16[3], nkro16[4], nkro16[5]));
     v3f_trace_set(V3F_TRACE_NKRO_0609,
                   pack4(nkro16[6], nkro16[7], nkro16[8], nkro16[9]));
+}
+
+static void v3f_profile_init_from_flash(void)
+{
+    aik_profile_runtime_v1_t runtime;
+    v3f_profile_store_diag_t diag;
+    int rc;
+
+    v3f_profile_runtime_clear();
+    memset(&runtime, 0, sizeof(runtime));
+    memset(&diag, 0, sizeof(diag));
+
+    rc = v3f_profile_store_load_fixed(&runtime, &diag);
+    if(rc == V3F_PROFILE_STORE_OK)
+    {
+        rc = v3f_profile_runtime_apply(&runtime);
+    }
+
+    v3f_trace_set(V3F_TRACE_PROFILE_STATUS, (uint32_t)(int32_t)rc);
+    v3f_trace_set(V3F_TRACE_PROFILE_GENERATION,
+                  v3f_profile_runtime_generation());
+    v3f_trace_set(V3F_TRACE_PROFILE_CRC,
+                  ((uint32_t)diag.crc16) |
+                  ((uint32_t)diag.calculated_crc16 << 16));
 }
 
 static void v3f_prepare_spi_poll_tx(aik_spi_host_cmd_v1_t *cmd,
@@ -412,6 +440,7 @@ int main(void)
     memset(nkro16, 0, sizeof(nkro16));
 
     v3f_board_init();
+    v3f_profile_init_from_flash();
     v3f_usb_hid_nkro_init();
     v3f_ch585_link_init();
     v3f_rgb_status_init();
@@ -448,7 +477,7 @@ int main(void)
         v3f_half_state_merge(left.valid ? &left.frame : 0,
                              right.valid ? &right.frame : 0,
                              &keys);
-        v3f_default_profile_build_nkro16(&keys, nkro16);
+        v3f_profile_runtime_build_nkro16(&keys, nkro16);
         (void)v3f_usb_hid_nkro_submit(nkro16);
 
         v3f_trace_inc(V3F_TRACE_TICK);

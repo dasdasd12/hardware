@@ -61,6 +61,7 @@ INC += -I"$(PROJECT_ROOT)/drivers"
 INC += -I"$(PROJECT_ROOT)/applications"
 INC += -I"../../common"
 INC += -I"$(PROJECT_ROOT)/drivers/ch585_spi_link/include"
+INC += -I"$(PROJECT_ROOT)/drivers/gd5f1g_spi_nand/include"
 INC += -I"$(PROJECT_ROOT)/drivers/rgb1w_pioc/include"
 ifeq ($(V3F_ENABLE_USBHS_8K),1)
 INC += -I"$(PROJECT_ROOT)/drivers/usbhs_hid_nkro/include"
@@ -79,11 +80,14 @@ APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_SRC += $(PROJECT_ROOT)/applications/board_init.c
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_link.c
 APP_SRC += $(PROJECT_ROOT)/applications/half_state.c
-APP_SRC += $(PROJECT_ROOT)/applications/default_profile.c
+APP_SRC += $(PROJECT_ROOT)/applications/profile_runtime.c
+APP_SRC += $(PROJECT_ROOT)/applications/profile_store_gd5f1g.c
 APP_SRC += $(PROJECT_ROOT)/applications/rf_report_bridge.c
 APP_SRC += $(PROJECT_ROOT)/applications/rgb_status.c
 APP_SRC += $(PROJECT_ROOT)/bsp/system_ch32h417.c
 APP_SRC += $(PROJECT_ROOT)/drivers/ch585_spi_link/src/ch32h417_ch585_spi_link.c
+APP_SRC += $(PROJECT_ROOT)/drivers/gd5f1g_spi_nand/src/gd5f1g_spi_nand.c
+APP_SRC += $(PROJECT_ROOT)/drivers/gd5f1g_spi_nand/src/ch32h417_gd5f1g_spi1.c
 APP_SRC += $(PROJECT_ROOT)/drivers/rgb1w_pioc/src/ch32h417_pioc_rgb1w.c
 ifeq ($(V3F_ENABLE_USBHS_8K),1)
 APP_SRC += $(PROJECT_ROOT)/drivers/usbhs_hid_nkro/src/ch32h417_usbhs_hid_nkro.c
