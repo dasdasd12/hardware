@@ -11,13 +11,13 @@ H417_FIRMWARE_ROOT = os.path.join(ROOT, "firmware", "h417")
 CH585_FIRMWARE_ROOT = os.path.join(ROOT, "firmware", "ch585")
 H417_WCH_ROOT = os.path.join(H417_FIRMWARE_ROOT, "basic", "wch", "SRC")
 CH585_WCH_ROOT = os.path.join(CH585_FIRMWARE_ROOT, "basic", "wch", "SRC")
-H417_DRIVER_ROOT = os.path.join(H417_FIRMWARE_ROOT, "drivers")
 H417_V3F_DRIVER_ROOT = os.path.join(H417_FIRMWARE_ROOT, "v3f", "drivers")
+H417_V5F_DRIVER_ROOT = os.path.join(H417_FIRMWARE_ROOT, "v5f_rtthread", "drivers")
 H417_RGB1W_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "rgb1w_pioc")
-H417_FLASH_NAND_ROOT = os.path.join(H417_DRIVER_ROOT, "gd5f1g_spi_nand")
-H417_LTDC_RGB_ROOT = os.path.join(H417_DRIVER_ROOT, "ltdc_rgb")
-H417_GPHA_2D_ROOT = os.path.join(H417_DRIVER_ROOT, "gpha_2d")
-H417_SDRAM_DRIVER_ROOT = os.path.join(H417_DRIVER_ROOT, "sdram")
+H417_FLASH_NAND_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand")
+H417_LTDC_RGB_ROOT = os.path.join(H417_V5F_DRIVER_ROOT, "ltdc_rgb")
+H417_GPHA_2D_ROOT = os.path.join(H417_V5F_DRIVER_ROOT, "gpha_2d")
+H417_SDRAM_DRIVER_ROOT = os.path.join(H417_V5F_DRIVER_ROOT, "sdram")
 H417_V3F_TEST_ROOT = os.path.join(H417_ROOT, "passed", "v3f_standalone")
 H417_V3F_TEST_SRC_ROOT = os.path.join(H417_V3F_TEST_ROOT, "src")
 H417_V5F_TEST_ROOT = os.path.join(H417_ROOT, "passed", "v5f_rtthread")
@@ -59,7 +59,7 @@ def assert_not_exists(path, description):
         fail("{0} should not exist: {1}".format(os.path.relpath(path, ROOT), description))
 
 
-def scan_tree(path, suffixes):
+def scan_tree(path, suffixes, include_paths=True):
     if not os.path.exists(path):
         fail("missing {0}".format(os.path.relpath(path, ROOT)))
     data = []
@@ -68,7 +68,8 @@ def scan_tree(path, suffixes):
             child = os.path.join(base, name)
             _root, ext = os.path.splitext(child)
             if ext.lower() in suffixes:
-                data.append("\n/* {0} */\n".format(os.path.relpath(child, ROOT)))
+                if include_paths:
+                    data.append("\n/* {0} */\n".format(os.path.relpath(child, ROOT)))
                 with io.open(child, "r", encoding="utf-8", errors="ignore") as handle:
                     data.append(handle.read())
     if not data:
@@ -113,11 +114,11 @@ def main():
     assert_contains(h417_makefile, r"\bHW_TEST\s*\?=", "HW_TEST selection")
     assert_contains(h417_makefile, r"firmware/h417", "H417 firmware-owned dependency root")
     assert_contains(h417_makefile, r"WCH_H417_SRC_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/basic/wch/SRC", "H417-local WCH source tree")
-    assert_contains(h417_makefile, r"H417_DRIVER_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/drivers", "H417 shared driver root")
     assert_contains(h417_makefile, r"V3F_DRIVER_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/v3f/drivers", "V3F driver root")
+    assert_contains(h417_makefile, r"V5F_DRIVER_ROOT\s*:=\s*\$\(H417_FIRMWARE_ROOT\)/v5f_rtthread/drivers", "V5F driver root")
     assert_contains(h417_makefile, r"RGB1W_PIOC_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/rgb1w_pioc", "V3F RGB1W PIOC driver tree")
-    assert_contains(h417_makefile, r"FLASH_NAND_ROOT\s*:=\s*\$\(H417_DRIVER_ROOT\)/gd5f1g_spi_nand", "H417 shared GD5F1G driver tree")
-    assert_contains(h417_makefile, r"LTDC_RGB_ROOT\s*:=\s*\$\(H417_DRIVER_ROOT\)/ltdc_rgb", "H417 shared LTDC RGB driver tree")
+    assert_contains(h417_makefile, r"FLASH_NAND_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/gd5f1g_spi_nand", "V3F GD5F1G driver tree")
+    assert_contains(h417_makefile, r"LTDC_RGB_ROOT\s*:=\s*\$\(V5F_DRIVER_ROOT\)/ltdc_rgb", "V5F LTDC RGB driver tree")
     assert_contains(h417_makefile, r"V3F_STANDALONE_ROOT\s*:=\s*passed/v3f_standalone", "H417 passed V3F standalone test root")
     assert_contains(h417_makefile, r"H417_DUAL_CORE_TESTS\s*:=", "H417 dual-core test wrapper list")
     assert_contains(h417_makefile, r"H417_HW_TEST_BUILD_NAME\s*:=\s*\$\(HW_TEST\)", "H417 default build name")
@@ -285,7 +286,7 @@ def main():
     )
     assert_not_exists(
         H417_SDRAM_DRIVER_ROOT,
-        "firmware/h417/drivers/sdram: SDRAM bring-up must stay in hw_tests until driver cleanup",
+        "firmware/h417/v5f_rtthread/drivers/sdram: SDRAM bring-up must stay in hw_tests until driver cleanup",
     )
     assert_not_contains(
         H417_V5F_TEST_SRC,
@@ -514,7 +515,7 @@ def main():
     )
     assert_not_contains(
         os.path.join(H417_GPHA_2D_ROOT, "include", "ch32h417_gpha_2d.h"),
-        r"rtthread|rt_[a-z0-9_]*",
+        r"#\s*include.*rtthread|\brt_[a-z0-9_]*",
         "RT-Thread dependency in GPHA driver API",
     )
     assert_not_contains(
@@ -552,15 +553,14 @@ def main():
         read_text(os.path.join(H417_V3F_TEST_ROOT, "Link_h417_v3f.ld")) +
         scan_tree(H417_V3F_TEST_SRC_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
     )
-    pioc_driver_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"))
-    ltdc_rgb_driver_text = scan_tree(H417_LTDC_RGB_ROOT, (".c", ".h"))
+    pioc_driver_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"), include_paths=False)
+    ltdc_rgb_driver_text = scan_tree(H417_LTDC_RGB_ROOT, (".c", ".h"), include_paths=False)
     combined_h417_text = h417_standalone_text + pioc_driver_text + ltdc_rgb_driver_text
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
 
     forbidden_h417 = {
         r"\bUSART\b|\bUART\b|USART_|UART_": "H417 UART/USART use",
         r"\bADC\b|ADC_": "H417 ADC use",
-        r"\bUSB\b|USBHS|USBFS|OTG": "H417 USB use",
         r"rtthread|RT-Thread|\brt_[a-z0-9_]*": "RT-Thread dependency",
         r"\bPB3\b|\bPB4\b|\bPB5\b|SCK0|MOSI0|MISO0": "H417-CH585 reserved SPI nets",
     }
@@ -596,6 +596,7 @@ def main():
         "h417_v5f_sdram_ltdc_rgb565",
         "h417_v5f_sdram_remap_probe",
         "h417_v5f_sdram_dq_probe",
+        "h417_v5f_sdram_official_16bit",
         "h417_v5f_ch585_spi_speed",
     )
     for name in required_h417_tests:

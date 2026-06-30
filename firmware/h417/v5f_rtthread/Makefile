@@ -54,6 +54,7 @@ RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
 #   tick_diag - V5F RT tick versus mcycle visual timing comparison
 #   ch585_spi_speed - CH585 SPI1 link SCK sweep with CDC debug output
 #   ch585_adc_key_cal - H417 USB CDC to CH585 single-key ADC calibration bridge
+#   sdram_official_16bit - WCH official FMC/SDRAM_16bit example init in hw_tests
 APP_V5F_HW_TEST ?= none
 APP_V5F_HW_TEST_ID := 0
 
@@ -95,6 +96,9 @@ APP_V5F_HW_TEST_ID := 15
 else ifeq ($(APP_V5F_HW_TEST),ch585_adc_key_cal)
 APP_ENABLE_V5F_HW_TEST := 1
 APP_V5F_HW_TEST_ID := 16
+else ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
+APP_ENABLE_V5F_HW_TEST := 1
+APP_V5F_HW_TEST_ID := 17
 else
 $(error Unknown APP_V5F_HW_TEST '$(APP_V5F_HW_TEST)')
 endif
@@ -151,6 +155,9 @@ ifneq ($(APP_V5F_HW_TEST),none)
 INC += -I"$(V5F_HW_TEST_ROOT)/include"
 INC += -I"$(HW_TEST_COMMON_ROOT)"
 INC += -I"$(V5F_HW_TEST_ASSET_ROOT)/ltdc" -I"$(V5F_HW_TEST_ASSET_ROOT)/flash"
+endif
+ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
+INC += -I"$(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit"
 endif
 
 # CherryUSB include paths
@@ -249,6 +256,10 @@ endif
 
 ifneq ($(APP_V5F_HW_TEST),none)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/v5f_hw_test.c
+endif
+ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/hardware.c
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/h417_v5f_sdram_official_16bit_board.c
 endif
 ifeq ($(APP_V5F_HW_TEST),flash_l8_assets)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/gd5f1g_l8_asset_store.c

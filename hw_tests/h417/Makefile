@@ -25,7 +25,7 @@ H417_USBHS_DISABLE_SWD ?= 1
 V3F_STANDALONE_ROOT := passed/v3f_standalone
 V3F_STANDALONE_SRC_ROOT := $(V3F_STANDALONE_ROOT)/src
 H417_V3F_WAKE_STUB_TEST := h417_v5f_wake_stub
-H417_DUAL_CORE_TESTS := h417_v5f_ltdc h417_v5f_ltdc_l8_palette_image h417_v5f_ltdc_rgb565_diag h417_v5f_gpha_r2m_fill h417_v5f_gpha_pfc_l8_rgb565 h417_v5f_gpha_blend_rgb565 h417_v5f_gpha_l8_ltdc_fullscreen h417_v5f_flash h417_v5f_flash_l8_assets h417_v5f_tick_diag h417_v5f_sdram_memtest h417_v5f_sdram_ltdc_rgb565 h417_v5f_sdram_remap_probe h417_v5f_sdram_dq_probe h417_v5f_ch585_spi_speed h417_v5f_ch585_adc_key_cal
+H417_DUAL_CORE_TESTS := h417_v5f_ltdc h417_v5f_ltdc_l8_palette_image h417_v5f_ltdc_rgb565_diag h417_v5f_gpha_r2m_fill h417_v5f_gpha_pfc_l8_rgb565 h417_v5f_gpha_blend_rgb565 h417_v5f_gpha_l8_ltdc_fullscreen h417_v5f_flash h417_v5f_flash_l8_assets h417_v5f_tick_diag h417_v5f_sdram_memtest h417_v5f_sdram_ltdc_rgb565 h417_v5f_sdram_remap_probe h417_v5f_sdram_dq_probe h417_v5f_sdram_official_16bit h417_v5f_ch585_spi_speed h417_v5f_ch585_adc_key_cal
 IS_DUAL_CORE_TEST := $(filter $(HW_TEST),$(H417_DUAL_CORE_TESTS))
 APP_V5F_HW_TEST_ID_OVERRIDE :=
 APP_V5F_HW_TEST_USB_CDC :=
@@ -64,6 +64,10 @@ APP_V5F_HW_TEST_ID_OVERRIDE := 13
 else ifeq ($(HW_TEST),h417_v5f_sdram_dq_probe)
 APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
 APP_V5F_HW_TEST_ID_OVERRIDE := 14
+APP_V5F_HW_TEST_USB_CDC := 1
+else ifeq ($(HW_TEST),h417_v5f_sdram_official_16bit)
+APP_V5F_HW_TEST_MODE := sdram_official_16bit
+APP_V5F_HW_TEST_ID_OVERRIDE := 17
 APP_V5F_HW_TEST_USB_CDC := 1
 else ifeq ($(HW_TEST),h417_v5f_ch585_spi_speed)
 APP_V5F_HW_TEST_MODE := ch585_spi_speed

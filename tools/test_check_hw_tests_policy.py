@@ -12,6 +12,34 @@ H417_USB_CDC_SOURCE = os.path.join(
 V5F_HW_TEST_SOURCE = os.path.join(
     ROOT, "hw_tests", "h417", "passed", "v5f_rtthread", "src", "v5f_hw_test.c"
 )
+V5F_HW_TEST_HEADER = os.path.join(
+    ROOT, "hw_tests", "h417", "passed", "v5f_rtthread", "include", "v5f_hw_test.h"
+)
+V5F_RTTHREAD_MAKEFILE = os.path.join(
+    ROOT, "firmware", "h417", "v5f_rtthread", "Makefile"
+)
+H417_OFFICIAL_SDRAM16_SOURCE = os.path.join(
+    ROOT,
+    "hw_tests",
+    "h417",
+    "passed",
+    "v5f_rtthread",
+    "src",
+    "official",
+    "wch_sdram_16bit",
+    "hardware.c",
+)
+H417_OFFICIAL_SDRAM16_BOARD_DRIVER = os.path.join(
+    ROOT,
+    "hw_tests",
+    "h417",
+    "passed",
+    "v5f_rtthread",
+    "src",
+    "official",
+    "wch_sdram_16bit",
+    "h417_v5f_sdram_official_16bit_board.c",
+)
 H417_V3F_WAKE_STUB_SOURCE = os.path.join(
     ROOT, "hw_tests", "h417", "passed", "v3f_standalone", "src", "h417_v5f_wake_stub.c"
 )
@@ -34,6 +62,26 @@ def read_h417_usb_cdc_source():
 
 def read_v5f_hw_test_source():
     with io.open(V5F_HW_TEST_SOURCE, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def read_v5f_hw_test_header():
+    with io.open(V5F_HW_TEST_HEADER, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def read_v5f_rtthread_makefile():
+    with io.open(V5F_RTTHREAD_MAKEFILE, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def read_h417_official_sdram16_source():
+    with io.open(H417_OFFICIAL_SDRAM16_SOURCE, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def read_h417_official_sdram16_board_driver():
+    with io.open(H417_OFFICIAL_SDRAM16_BOARD_DRIVER, "r", encoding="utf-8") as handle:
         return handle.read()
 
 
@@ -64,8 +112,67 @@ def test_h417_sdram_tests_stay_in_hw_tests_until_driver_cleanup():
     assert "h417_v5f_sdram_ltdc_rgb565" in text
     assert "h417_v5f_sdram_remap_probe" in text
     assert "h417_v5f_sdram_dq_probe" in text
-    assert "firmware/h417/drivers/sdram" in text
+    assert "h417_v5f_sdram_official_16bit" in text
+    assert "firmware/h417/v5f_rtthread/drivers/sdram" in text
     assert "SDRAM bring-up must stay in hw_tests" in text
+
+
+def test_h417_sdram_official_16bit_example_is_imported_under_hw_tests():
+    makefile = read_h417_makefile()
+    v5f_makefile = read_v5f_rtthread_makefile()
+    header = read_v5f_hw_test_header()
+    source = read_v5f_hw_test_source()
+    official = read_h417_official_sdram16_source()
+    board_driver = read_h417_official_sdram16_board_driver()
+
+    assert "h417_v5f_sdram_official_16bit" in makefile
+    assert "APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT 17" in header
+    assert "sdram_official_16bit" in v5f_makefile
+    assert "wch_sdram_16bit" in v5f_makefile
+    assert "run_sdram_official_16bit_test" in source
+    assert "extern void h417_v5f_sdram_official_16bit_init(void)" in source
+    assert "h417_v5f_sdram_official_16bit_board.c" in v5f_makefile
+    assert "SDRAM_Initialization_Sequence" in official
+    assert "FMC_Bank1->BTCR[0] |= (1 << 24)" in official
+    assert "Bank5_SDRAM_ADDR                         ((u32)(0X60000000))" in official
+    assert "SDRAM_Initialization_Sequence()" in board_driver
+    assert "FMC_Bank1->BTCR[0] |= (1 << 24)" in board_driver
+    assert "h417_v5f_sdram_official_16bit_gpio_config" in board_driver
+    assert "h417_v5f_sdram_official_16bit_gpio_af(GPIOD, GPIO_Pin_0, GPIO_PinSource0, GPIO_AF1)" in board_driver
+    assert "h417_v5f_sdram_official_16bit_gpio_af(GPIOD, GPIO_Pin_1, GPIO_PinSource1, GPIO_AF1)" in board_driver
+    assert "void Hardware(void)" not in board_driver
+
+
+def test_h417_sdram_official_16bit_enables_usb_fs_cdc_debug():
+    makefile = read_h417_makefile()
+    match = re.search(
+        r"else ifeq \(\$\(HW_TEST\),h417_v5f_sdram_official_16bit\)\n"
+        r"(?P<body>.*?)(?=\nelse ifeq|\nendif)",
+        makefile,
+        re.S,
+    )
+
+    assert match is not None
+    assert "APP_V5F_HW_TEST_USB_CDC := 1" in match.group("body")
+    assert (
+        "APP_ENABLE_USB_TEST=1 APP_ENABLE_USB2_FS_CDC=1 "
+        "APP_ENABLE_USB2_HS_CDC=0 APP_ENABLE_USBSS_CDC=0"
+    ) in makefile
+
+
+def test_h417_sdram_official_16bit_uses_cdc_status_loop():
+    source = read_v5f_hw_test_source()
+    start = source.index("static void V5F_MAYBE_UNUSED run_sdram_official_16bit_test")
+    end = source.index("static void V5F_MAYBE_UNUSED run_sdram_dq_probe_test")
+    official_test = source[start:end]
+
+    assert "V5F_SDRAM_USB_DEBUG_ENABLED" in source
+    assert "APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT" in source
+    assert "g_v5f_hw_test_diag.sdram_sdclk_hz = HCLKClock;" in official_test
+    assert "g_v5f_hw_test_diag.sdram_sdclk_hz = HCLKClock / 2u;" not in official_test
+    assert "sdram_usb_debug_init(probe)" in official_test
+    assert "sdram_usb_debug_poll(probe)" in official_test
+    assert 'sdram_usb_debug_report(probe, "tick")' in official_test
 
 
 def test_h417_v5f_sdram_tests_use_hw_tests_owned_v3f_wake_stub():
@@ -229,7 +336,7 @@ def test_h417_sdram_dq_probe_includes_byte_lane_dqm_readback():
 def test_h417_sdram_dq_probe_places_dqm_rows_before_matrix_with_revision_marker():
     text = read_v5f_hw_test_source()
     full_start = text.index("static void sdram_dq_probe_full_show")
-    full_end = text.index("#if APP_ENABLE_USB_TEST", full_start)
+    full_end = text.index("#if V5F_SDRAM_USB_DEBUG_ENABLED", full_start)
     full_function = text[full_start:full_end]
     lower_start = text.index("static void sdram_dq_probe_lower_show")
     lower_end = text.index("static void sdram_dq_probe_full_show", lower_start)
@@ -248,7 +355,7 @@ def test_h417_sdram_dq_probe_places_dqm_rows_before_matrix_with_revision_marker(
 def test_h417_sdram_dq_probe_scans_fmc_read_phase_before_byte_lane_probe():
     text = read_v5f_hw_test_source()
     start = text.index("static void sdram_dq_probe_full_show")
-    end = text.index("#if APP_ENABLE_USB_TEST", start)
+    end = text.index("#if V5F_SDRAM_USB_DEBUG_ENABLED", start)
     dq_probe_function = text[start:end]
 
     assert "sdram_phase_probe_show(probe, 22u)" in dq_probe_function

@@ -54,12 +54,21 @@
 #define APP_ENABLE_USB_TEST 0
 #endif
 
+#if APP_ENABLE_USB_TEST && \
+    ((APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE) || \
+     (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT))
+#define V5F_SDRAM_USB_DEBUG_ENABLED 1
+#else
+#define V5F_SDRAM_USB_DEBUG_ENABLED 0
+#endif
+
 #define V5F_MAYBE_UNUSED       __attribute__((unused))
 
 #if (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_MEMTEST) && \
     (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_LTDC_RGB565) && \
     (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_REMAP_PROBE) && \
-    (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_DQ_PROBE)
+    (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_DQ_PROBE) && \
+    (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT)
 static const char *v5f_hw_test_runtime_name(void)
 {
     switch(APP_V5F_HW_TEST)
@@ -72,6 +81,8 @@ static const char *v5f_hw_test_runtime_name(void)
             return "sdram_remap_probe";
         case APP_V5F_HW_TEST_SDRAM_DQ_PROBE:
             return "sdram_dq_probe";
+        case APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT:
+            return "sdram_official_16bit";
         default:
             return APP_V5F_HW_TEST_NAME;
     }
@@ -1820,7 +1831,8 @@ static int V5F_MAYBE_UNUSED lcd_start_rgb565_window(void);
 #if (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_MEMTEST) || \
     (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_LTDC_RGB565) || \
     (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_REMAP_PROBE) || \
-    (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE)
+    (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE) || \
+    (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT)
 #define V5F_SDRAM_BASE_ADDR            0xC0000000u
 #define V5F_SDRAM_REMAP_ADDR           0x60000000u
 #define V5F_SDRAM_BYTES                (32u * 1024u * 1024u)
@@ -1850,6 +1862,10 @@ static uint8_t s_sdram_debug_phase = V5F_SDRAM_DEFAULT_PHASE_SEL;
 static uint8_t s_sdram_debug_pipe = FMC_ReadPipeDelay_none;
 static uint8_t s_sdram_debug_score;
 static uint8_t s_sdram_debug_bit_score;
+
+#if APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT
+extern void h417_v5f_sdram_official_16bit_init(void);
+#endif
 
 typedef enum
 {
@@ -2345,7 +2361,7 @@ static void sdram_gpio_af(GPIO_TypeDef *port,
                           uint8_t pin_source,
                           uint8_t alternate_function);
 
-#if APP_ENABLE_USB_TEST && (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE)
+#if V5F_SDRAM_USB_DEBUG_ENABLED
 static int sdram_usb_debug_write_full(const char *data, rt_size_t len)
 {
     rt_size_t offset = 0u;
@@ -3922,7 +3938,8 @@ static int V5F_MAYBE_UNUSED lcd_start_rgb565_window(void)
 #if (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_MEMTEST) || \
     (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_LTDC_RGB565) || \
     (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_REMAP_PROBE) || \
-    (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE)
+    (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE) || \
+    (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT)
 static int sdram_run_memtest_bytes(uint32_t bytes)
 {
     v5f_sdram_memtest_result_t result = {0};
@@ -4178,6 +4195,71 @@ static void V5F_MAYBE_UNUSED run_sdram_remap_probe_test(void)
     }
 }
 
+#if APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT
+static void V5F_MAYBE_UNUSED run_sdram_official_16bit_test(void)
+{
+    v5f_sdram_memtest_result_t fail = {0};
+    volatile uint16_t *probe = (volatile uint16_t *)V5F_SDRAM_REMAP_ADDR;
+    uint16_t green = ch32h417_ltdc_rgb_pack_rgb565(0u, 210u, 80u);
+    uint8_t pass;
+    int result;
+
+    g_v5f_hw_test_diag.phase = V5F_HW_PHASE_RUNNING;
+
+    result = sdram_status_lcd_start();
+    if(result != CH32H417_LTDC_RGB_OK)
+    {
+        fail_forever(result);
+    }
+
+    sdram_diag_clear();
+    g_v5f_hw_test_diag.sdram_stage = V5F_SDRAM_STAGE_INIT;
+    g_v5f_hw_test_diag.sdram_hclk_hz = HCLKClock;
+    g_v5f_hw_test_diag.sdram_sdclk_hz = HCLKClock;
+    g_v5f_hw_test_diag.sdram_refresh_count = 677u;
+    sdram_status_show(V5F_SDRAM_STATUS_INIT,
+                      ch32h417_ltdc_rgb_pack_rgb565(0u, 170u, 220u));
+
+    h417_v5f_sdram_official_16bit_init();
+
+    g_v5f_hw_test_diag.sdram_stage = V5F_SDRAM_STAGE_DATA_BUS;
+    pass = sdram_probe_window_show(V5F_SDRAM_REMAP_ADDR, 36u);
+    if(pass == 0u)
+    {
+        fail.stage = V5F_SDRAM_STAGE_DATA_BUS;
+        fail.expected = g_v5f_hw_test_diag.sdram_expected;
+        fail.actual = g_v5f_hw_test_diag.sdram_actual;
+        sdram_diag_fail(V5F_SDRAM_ERR_VERIFY, &fail);
+        sdram_status_fail_show();
+        fail_forever(V5F_SDRAM_ERR_VERIFY);
+    }
+
+    g_v5f_hw_test_diag.sdram_stage = V5F_SDRAM_STAGE_LTDC_RUNNING;
+    g_v5f_hw_test_diag.sdram_ok_count++;
+    sdram_status_show(V5F_SDRAM_STATUS_PASS, green);
+    fb_fill_user_rect_rgb565(4u, 36u, 148u, 18u, green);
+    fb_fill_user_rect_rgb565(168u, 36u, 148u, 18u, green);
+    memory_barrier();
+
+#if V5F_SDRAM_USB_DEBUG_ENABLED
+    sdram_usb_debug_init(probe);
+#endif
+
+    while(1)
+    {
+#if V5F_SDRAM_USB_DEBUG_ENABLED
+        sdram_usb_debug_poll(probe);
+        if((g_v5f_hw_test_diag.frame_count % 8u) == 0u)
+        {
+            sdram_usb_debug_report(probe, "tick");
+        }
+#endif
+        g_v5f_hw_test_diag.frame_count++;
+        rt_thread_mdelay(250);
+    }
+}
+#endif
+
 static void V5F_MAYBE_UNUSED run_sdram_dq_probe_test(void)
 {
     v5f_sdram_memtest_result_t fail = {0};
@@ -4201,13 +4283,13 @@ static void V5F_MAYBE_UNUSED run_sdram_dq_probe_test(void)
     }
 
     sdram_dq_probe_full_show(probe);
-#if APP_ENABLE_USB_TEST && (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE)
+#if V5F_SDRAM_USB_DEBUG_ENABLED
     sdram_usb_debug_init(probe);
 #endif
 
     while(1)
     {
-#if APP_ENABLE_USB_TEST && (APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE)
+#if V5F_SDRAM_USB_DEBUG_ENABLED
         sdram_usb_debug_poll(probe);
         if((g_v5f_hw_test_diag.frame_count % 8u) == 0u)
         {
@@ -5470,7 +5552,8 @@ static void v5f_hw_thread_entry(void *parameter)
 #if (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_MEMTEST) && \
     (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_LTDC_RGB565) && \
     (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_REMAP_PROBE) && \
-    (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_DQ_PROBE)
+    (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_DQ_PROBE) && \
+    (APP_V5F_HW_TEST != APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT)
     rt_kprintf("V5F hardware test: %s\n", v5f_hw_test_runtime_name());
 #endif
 
@@ -5505,6 +5588,8 @@ static void v5f_hw_thread_entry(void *parameter)
     result = CH32H417_LTDC_RGB_OK;
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE
     result = CH32H417_LTDC_RGB_OK;
+#elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT
+    result = CH32H417_LTDC_RGB_OK;
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_SPI_SPEED
     result = CH32H417_LTDC_RGB_OK;
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_ADC_KEY_CAL
@@ -5537,6 +5622,8 @@ static void v5f_hw_thread_entry(void *parameter)
     run_sdram_remap_probe_test();
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_DQ_PROBE
     run_sdram_dq_probe_test();
+#elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT
+    run_sdram_official_16bit_test();
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_GPHA_R2M_FILL
     run_gpha_r2m_fill_test();
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_GPHA_PFC_L8_RGB565
