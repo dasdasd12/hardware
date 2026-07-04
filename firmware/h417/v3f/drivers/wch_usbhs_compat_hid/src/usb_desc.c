@@ -70,7 +70,7 @@ const uint8_t  MyCfgDescr_HS[ ] =
     0x05,                           // bDescriptorType
     0x82,                           // bEndpointAddress: HID IN EP2
     0x03,                           // bmAttributes
-    0x10, 0x00,                     // wMaxPacketSize
+    0x20, 0x00,                     // wMaxPacketSize
     0x01,                           // bInterval: 125us at high speed
 };
 
@@ -112,7 +112,7 @@ const uint8_t  MyCfgDescr_FS[ ] =
     0x05,                           // bDescriptorType
     0x82,                           // bEndpointAddress: HID IN EP2
     0x03,                           // bmAttributes
-    0x10, 0x00,                     // wMaxPacketSize
+    0x20, 0x00,                     // wMaxPacketSize
     0x01,                           // bInterval: 1mS at full speed
 };
 
@@ -122,6 +122,7 @@ const uint8_t  MyHIDReportDesc_HS[ ] =
     0x05, 0x01,                     // Usage Page (Generic Desktop)
     0x09, 0x06,                     // Usage (Keyboard)
     0xA1, 0x01,                     // Collection (Application)
+    0x85, 0x01,                     //   Report ID (1)
     0x05, 0x07,                     //   Usage Page (Keyboard)
     0x19, 0xE0,                     //   Usage Minimum (Left Control)
     0x29, 0xE7,                     //   Usage Maximum (Right GUI)
@@ -142,6 +143,19 @@ const uint8_t  MyHIDReportDesc_HS[ ] =
     0x95, 0x70,                     //   Report Count (112)
     0x81, 0x02,                     //   Input (Data,Var,Abs)
     0xC0,                           // End Collection
+
+    0x05, 0x0C,                     // Usage Page (Consumer)
+    0x09, 0x01,                     // Usage (Consumer Control)
+    0xA1, 0x01,                     // Collection (Application)
+    0x85, 0x02,                     //   Report ID (2)
+    0x15, 0x00,                     //   Logical Minimum (0)
+    0x26, 0xFF, 0x03,               //   Logical Maximum (0x03FF)
+    0x19, 0x00,                     //   Usage Minimum (0)
+    0x2A, 0xFF, 0x03,               //   Usage Maximum (0x03FF)
+    0x75, 0x10,                     //   Report Size (16)
+    0x95, 0x01,                     //   Report Count (1)
+    0x81, 0x00,                     //   Input (Data,Array,Abs)
+    0xC0,                           // End Collection
 };
 
 /* HID Report Descriptor(FS) */
@@ -150,6 +164,7 @@ const uint8_t  MyHIDReportDesc_FS[ ] =
     0x05, 0x01,                     // Usage Page (Generic Desktop)
     0x09, 0x06,                     // Usage (Keyboard)
     0xA1, 0x01,                     // Collection (Application)
+    0x85, 0x01,                     //   Report ID (1)
     0x05, 0x07,                     //   Usage Page (Keyboard)
     0x19, 0xE0,                     //   Usage Minimum (Left Control)
     0x29, 0xE7,                     //   Usage Maximum (Right GUI)
@@ -169,6 +184,19 @@ const uint8_t  MyHIDReportDesc_FS[ ] =
     0x75, 0x01,                     //   Report Size (1)
     0x95, 0x70,                     //   Report Count (112)
     0x81, 0x02,                     //   Input (Data,Var,Abs)
+    0xC0,                           // End Collection
+
+    0x05, 0x0C,                     // Usage Page (Consumer)
+    0x09, 0x01,                     // Usage (Consumer Control)
+    0xA1, 0x01,                     // Collection (Application)
+    0x85, 0x02,                     //   Report ID (2)
+    0x15, 0x00,                     //   Logical Minimum (0)
+    0x26, 0xFF, 0x03,               //   Logical Maximum (0x03FF)
+    0x19, 0x00,                     //   Usage Minimum (0)
+    0x2A, 0xFF, 0x03,               //   Usage Maximum (0x03FF)
+    0x75, 0x10,                     //   Report Size (16)
+    0x95, 0x01,                     //   Report Count (1)
+    0x81, 0x00,                     //   Input (Data,Array,Abs)
     0xC0,                           // End Collection
 };
 

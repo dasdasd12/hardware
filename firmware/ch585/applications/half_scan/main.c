@@ -43,9 +43,53 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_HALF_SCAN_DEBUG_PERIOD_FRAMES 100U
 #endif
 
+#ifndef CH585_LOCAL_ROTARY_PULSE_FRAMES
+#define CH585_LOCAL_ROTARY_PULSE_FRAMES 6U
+#endif
+
+#ifndef CH585_LOCAL_ROTARY_QUAD_STEPS_PER_EVENT
+#define CH585_LOCAL_ROTARY_QUAD_STEPS_PER_EVENT 2
+#endif
+
+#ifndef CH585_LOCAL_SWITCH_DEBOUNCE_FRAMES
+#define CH585_LOCAL_SWITCH_DEBOUNCE_FRAMES 3U
+#endif
+
+#ifndef CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES
+#define CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES 6U
+#endif
+
+#ifndef CH585_LOCAL_SWITCH_ENTER_PULSE_FRAMES
+#define CH585_LOCAL_SWITCH_ENTER_PULSE_FRAMES 6U
+#endif
+
+#ifndef CH585_LOCAL_BUTTON_DEBOUNCE_FRAMES
+#define CH585_LOCAL_BUTTON_DEBOUNCE_FRAMES 3U
+#endif
+
+#ifndef CH585_LOCAL_BUTTON_PULSE_FRAMES
+#define CH585_LOCAL_BUTTON_PULSE_FRAMES 6U
+#endif
+
 #ifndef BLE_HID_KBD_REPORT_LEN
 #define BLE_HID_KBD_REPORT_LEN 8U
 #endif
+
+#define CH585_HID_KEYBOARD_MUTE        0x7FU
+#define CH585_HID_KEYBOARD_VOLUME_UP   0x80U
+#define CH585_HID_KEYBOARD_VOLUME_DOWN 0x81U
+
+#define CH585_LOCAL_SWITCH_CENTER_MASK 0x01U
+#define CH585_LOCAL_SWITCH_UP_MASK     0x02U
+#define CH585_LOCAL_SWITCH_DOWN_MASK   0x04U
+#define CH585_LOCAL_SWITCH_RIGHT_MASK  0x08U
+#define CH585_LOCAL_SWITCH_LEFT_MASK   0x10U
+#define CH585_LOCAL_SWITCH_DIR_MASK    0x1EU
+
+#define CH585_LOCAL_SWITCH_GESTURE_NONE    0U
+#define CH585_LOCAL_SWITCH_GESTURE_PENDING 1U
+#define CH585_LOCAL_SWITCH_GESTURE_ENTER   2U
+#define CH585_LOCAL_SWITCH_GESTURE_DIR     3U
 
 #if CH585_HALF_SCAN_DEBUG_UART && !defined(DEBUG)
 #error CH585_HALF_SCAN_DEBUG_UART requires DEBUG=Debug_UART1 or another WCH DEBUG UART.
@@ -55,6 +99,7 @@ static ch585_ads7948_mux_acq_t s_acq;
 static mag_key_engine_t s_engine;
 static aik_spi_half_state_v1_t s_tx_frame __attribute__((aligned(4)));
 static aik_spi_host_cmd_v1_t s_rx_cmd __attribute__((aligned(4)));
+static aik_spi_profile_status_v1_t s_profile_status __attribute__((aligned(4)));
 static aik_spi_half_state_v1_t s_right_frame __attribute__((aligned(4)));
 static uint8_t s_rf_nkro16[AIK_NKRO_REPORT_BYTES];
 #if CH585_BLE_HID_ENABLE
@@ -62,7 +107,23 @@ static uint8_t s_ble_boot8[BLE_HID_KBD_REPORT_LEN];
 #endif
 static uint16_t s_compact_raw[AIK_KEY_COUNT_RIGHT];
 static int s_last_spi_result;
+static uint8_t s_profile_status_pending;
 static uint8_t s_right_frame_valid;
+static uint8_t s_local_rotary_last_ab;
+static int8_t s_local_rotary_accum;
+static uint8_t s_local_rotary_cw_frames;
+static uint8_t s_local_rotary_ccw_frames;
+static uint8_t s_local_button_last_raw;
+static uint8_t s_local_button_stable;
+static uint8_t s_local_button_last_stable;
+static uint8_t s_local_button_raw_count;
+static uint8_t s_local_button_mute_frames;
+static uint8_t s_local_switch_last_raw;
+static uint8_t s_local_switch_stable;
+static uint8_t s_local_switch_raw_count;
+static uint8_t s_local_switch_gesture;
+static uint8_t s_local_switch_guard_frames;
+static uint8_t s_local_switch_enter_frames;
 #if CH585_BLE_HID_ENABLE
 static uint32_t s_ble_sent_count;
 static uint32_t s_ble_drop_count;
@@ -91,6 +152,262 @@ static void half_scan_build_down_bits(void)
         if((state != 0) && (state->is_down != 0U))
         {
             s_tx_frame.down_bits[key >> 3] |= (uint8_t)(1U << (key & 7U));
+        }
+    }
+}
+
+static uint8_t half_scan_gpioa_pressed(uint32_t pin)
+{
+    return (GPIOA_ReadPortPin(pin) == 0U) ? 1U : 0U;
+}
+
+static uint8_t half_scan_gpiob_pressed(uint32_t pin)
+{
+    return (GPIOB_ReadPortPin(pin) == 0U) ? 1U : 0U;
+}
+
+static uint8_t half_scan_read_rotary_ab(void)
+{
+    uint8_t a = half_scan_gpioa_pressed(GPIO_Pin_10);
+    uint8_t b = half_scan_gpioa_pressed(GPIO_Pin_11);
+
+    return (uint8_t)(a | (uint8_t)(b << 1));
+}
+
+static void half_scan_local_gpio_init(void)
+{
+    GPIOA_ModeCfg(GPIO_Pin_10 | GPIO_Pin_11, GPIO_ModeIN_PU);
+    if(CH585_HALF_ID == AIK_HALF_ID_LEFT)
+    {
+        GPIOA_ModeCfg(GPIO_Pin_7, GPIO_ModeIN_PU);
+        GPIOB_ModeCfg(GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7,
+                      GPIO_ModeIN_PU);
+    }
+    else
+    {
+        GPIOA_ModeCfg(GPIO_Pin_7, GPIO_ModeIN_PU);
+    }
+
+    s_local_rotary_last_ab = half_scan_read_rotary_ab();
+    s_local_rotary_accum = 0;
+    s_local_rotary_cw_frames = 0U;
+    s_local_rotary_ccw_frames = 0U;
+    s_local_button_last_raw = 0U;
+    s_local_button_stable = 0U;
+    s_local_button_last_stable = 0U;
+    s_local_button_raw_count = 0U;
+    s_local_button_mute_frames = 0U;
+    s_local_switch_last_raw = 0U;
+    s_local_switch_stable = 0U;
+    s_local_switch_raw_count = 0U;
+    s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_NONE;
+    s_local_switch_guard_frames = 0U;
+    s_local_switch_enter_frames = 0U;
+}
+
+static uint8_t half_scan_debounce_u8(uint8_t raw,
+                                     uint8_t mask,
+                                     uint8_t threshold,
+                                     uint8_t *last_raw,
+                                     uint8_t *raw_count,
+                                     uint8_t *stable)
+{
+    raw &= mask;
+    if(raw == *last_raw)
+    {
+        if(*raw_count < threshold)
+        {
+            (*raw_count)++;
+        }
+    }
+    else
+    {
+        *last_raw = raw;
+        *raw_count = 1U;
+    }
+
+    if(*raw_count >= threshold)
+    {
+        *stable = raw;
+    }
+    return *stable;
+}
+
+static void half_scan_local_rotary_poll(void)
+{
+    static const int8_t s_quad_delta[16] =
+    {
+         0, -1,  1,  0,
+         1,  0,  0, -1,
+        -1,  0,  0,  1,
+         0,  1, -1,  0
+    };
+    uint8_t next_ab = half_scan_read_rotary_ab();
+    uint8_t index = (uint8_t)((s_local_rotary_last_ab << 2) | next_ab);
+
+    s_local_rotary_last_ab = next_ab;
+    s_local_rotary_accum =
+        (int8_t)(s_local_rotary_accum + s_quad_delta[index & 0x0FU]);
+
+    if(s_local_rotary_accum >= CH585_LOCAL_ROTARY_QUAD_STEPS_PER_EVENT)
+    {
+        s_local_rotary_accum = 0;
+        s_local_rotary_cw_frames = CH585_LOCAL_ROTARY_PULSE_FRAMES;
+        s_local_rotary_ccw_frames = 0U;
+    }
+    else if(s_local_rotary_accum <= -CH585_LOCAL_ROTARY_QUAD_STEPS_PER_EVENT)
+    {
+        s_local_rotary_accum = 0;
+        s_local_rotary_ccw_frames = CH585_LOCAL_ROTARY_PULSE_FRAMES;
+        s_local_rotary_cw_frames = 0U;
+    }
+}
+
+static uint8_t half_scan_local_switch_stable_mask(void)
+{
+    uint8_t raw = 0U;
+
+    if(half_scan_gpioa_pressed(GPIO_Pin_7) != 0U)
+    {
+        raw |= CH585_LOCAL_SWITCH_CENTER_MASK;
+    }
+    if(half_scan_gpiob_pressed(GPIO_Pin_7) != 0U)
+    {
+        raw |= CH585_LOCAL_SWITCH_UP_MASK;
+    }
+    if(half_scan_gpiob_pressed(GPIO_Pin_6) != 0U)
+    {
+        raw |= CH585_LOCAL_SWITCH_DOWN_MASK;
+    }
+    if(half_scan_gpiob_pressed(GPIO_Pin_5) != 0U)
+    {
+        raw |= CH585_LOCAL_SWITCH_RIGHT_MASK;
+    }
+    if(half_scan_gpiob_pressed(GPIO_Pin_4) != 0U)
+    {
+        raw |= CH585_LOCAL_SWITCH_LEFT_MASK;
+    }
+
+    return half_scan_debounce_u8(raw,
+                                 CH585_LOCAL_SWITCH_CENTER_MASK |
+                                     CH585_LOCAL_SWITCH_DIR_MASK,
+                                 CH585_LOCAL_SWITCH_DEBOUNCE_FRAMES,
+                                 &s_local_switch_last_raw,
+                                 &s_local_switch_raw_count,
+                                 &s_local_switch_stable);
+}
+
+static void half_scan_apply_left_five_way(void)
+{
+    uint8_t stable = half_scan_local_switch_stable_mask();
+    uint8_t center = (uint8_t)(stable & CH585_LOCAL_SWITCH_CENTER_MASK);
+    uint8_t dirs = (uint8_t)(stable & CH585_LOCAL_SWITCH_DIR_MASK);
+
+    if(center == 0U)
+    {
+        s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_NONE;
+        s_local_switch_guard_frames = 0U;
+        s_local_switch_enter_frames = 0U;
+        return;
+    }
+
+    if(s_local_switch_gesture == CH585_LOCAL_SWITCH_GESTURE_NONE)
+    {
+        s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_PENDING;
+        s_local_switch_guard_frames = CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES;
+    }
+
+    if(s_local_switch_gesture == CH585_LOCAL_SWITCH_GESTURE_PENDING)
+    {
+        if(dirs != 0U)
+        {
+            s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_DIR;
+        }
+        else if(s_local_switch_guard_frames != 0U)
+        {
+            s_local_switch_guard_frames--;
+            return;
+        }
+        else
+        {
+            s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_ENTER;
+            s_local_switch_enter_frames = CH585_LOCAL_SWITCH_ENTER_PULSE_FRAMES;
+        }
+    }
+
+    if(s_local_switch_gesture == CH585_LOCAL_SWITCH_GESTURE_ENTER)
+    {
+        if(s_local_switch_enter_frames != 0U)
+        {
+            aik_spi_half_set_bit(&s_tx_frame, AIK_LEFT_LOCAL_BIT_SCR_CENTER);
+            s_local_switch_enter_frames--;
+        }
+        return;
+    }
+
+    if(s_local_switch_gesture != CH585_LOCAL_SWITCH_GESTURE_DIR)
+    {
+        return;
+    }
+
+    if((dirs & CH585_LOCAL_SWITCH_UP_MASK) != 0U)
+    {
+        aik_spi_half_set_bit(&s_tx_frame, AIK_LEFT_LOCAL_BIT_SCR_UP);
+    }
+    if((dirs & CH585_LOCAL_SWITCH_DOWN_MASK) != 0U)
+    {
+        aik_spi_half_set_bit(&s_tx_frame, AIK_LEFT_LOCAL_BIT_SCR_DOWN);
+    }
+    if((dirs & CH585_LOCAL_SWITCH_RIGHT_MASK) != 0U)
+    {
+        aik_spi_half_set_bit(&s_tx_frame, AIK_LEFT_LOCAL_BIT_SCR_RIGHT);
+    }
+    if((dirs & CH585_LOCAL_SWITCH_LEFT_MASK) != 0U)
+    {
+        aik_spi_half_set_bit(&s_tx_frame, AIK_LEFT_LOCAL_BIT_SCR_LEFT);
+    }
+}
+
+static void half_scan_local_button_poll(void)
+{
+    uint8_t stable = half_scan_debounce_u8(half_scan_gpioa_pressed(GPIO_Pin_7),
+                                          1U,
+                                          CH585_LOCAL_BUTTON_DEBOUNCE_FRAMES,
+                                          &s_local_button_last_raw,
+                                          &s_local_button_raw_count,
+                                          &s_local_button_stable);
+
+    if((stable != 0U) && (s_local_button_last_stable == 0U))
+    {
+        s_local_button_mute_frames = CH585_LOCAL_BUTTON_PULSE_FRAMES;
+    }
+    s_local_button_last_stable = stable;
+}
+
+static void half_scan_apply_local_inputs(void)
+{
+    if(CH585_HALF_ID == AIK_HALF_ID_LEFT)
+    {
+        half_scan_apply_left_five_way();
+    }
+    else
+    {
+        half_scan_local_rotary_poll();
+        half_scan_local_button_poll();
+        if(s_local_rotary_cw_frames != 0U)
+        {
+            aik_spi_half_set_bit(&s_tx_frame, AIK_RIGHT_LOCAL_BIT_EC11_CW);
+            s_local_rotary_cw_frames--;
+        }
+        if(s_local_rotary_ccw_frames != 0U)
+        {
+            aik_spi_half_set_bit(&s_tx_frame, AIK_RIGHT_LOCAL_BIT_EC11_CCW);
+            s_local_rotary_ccw_frames--;
+        }
+        if(s_local_button_mute_frames != 0U)
+        {
+            aik_spi_half_set_bit(&s_tx_frame, AIK_RIGHT_LOCAL_BIT_EC11_MUTE);
+            s_local_button_mute_frames--;
         }
     }
 }
@@ -137,11 +454,24 @@ static void half_scan_compact_raw(const ch585_ads7948_mux_acq_t *acq,
 
 static void half_scan_build_frame(void)
 {
-    uint8_t key_count = aik_spi_half_key_count((uint8_t)CH585_HALF_ID);
-
     s_tx_frame.half_seq++;
     half_scan_build_down_bits();
-    aik_spi_half_state_finish(&s_tx_frame, key_count);
+    half_scan_apply_local_inputs();
+    aik_spi_half_state_finish(&s_tx_frame,
+                              aik_spi_half_frame_bits((uint8_t)CH585_HALF_ID));
+}
+
+static void half_scan_prepare_profile_status(uint16_t ack_seq)
+{
+    memset(&s_profile_status, 0, sizeof(s_profile_status));
+    s_profile_status.ack_seq = ack_seq;
+    s_profile_status.half_id = (uint8_t)CH585_HALF_ID;
+    s_profile_status.flags = AIK_PROFILE_STATUS_FLAG_VALID |
+                             AIK_PROFILE_STATUS_FLAG_DEFAULT;
+    s_profile_status.profile_id16 = AIK_PROFILE_DEBUG_ID16;
+    s_profile_status.generation16 = AIK_PROFILE_DEBUG_GENERATION16;
+    aik_spi_profile_status_finish(&s_profile_status);
+    s_profile_status_pending = 1U;
 }
 
 #if CH585_BLE_HID_ENABLE
@@ -168,6 +498,30 @@ static void half_scan_nkro16_to_boot8(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES
                 boot8[out_index++] =
                     (uint8_t)(0x04U + ((byte_index - 2U) * 8U) + bit);
             }
+        }
+    }
+}
+
+static void half_scan_boot8_add_usage(uint8_t boot8[BLE_HID_KBD_REPORT_LEN],
+                                      uint8_t usage)
+{
+    uint8_t i;
+
+    if((boot8 == 0) || (usage == 0U))
+    {
+        return;
+    }
+
+    for(i = 2U; i < BLE_HID_KBD_REPORT_LEN; i++)
+    {
+        if(boot8[i] == usage)
+        {
+            return;
+        }
+        if(boot8[i] == 0U)
+        {
+            boot8[i] = usage;
+            return;
         }
     }
 }
@@ -247,6 +601,7 @@ static void half_scan_set_output_mode(uint8_t mode)
 }
 
 static void half_scan_output_nkro16(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
+                                    uint16_t consumer_usage,
                                     uint16_t host_seq,
                                     uint8_t output_mode)
 {
@@ -255,10 +610,14 @@ static void half_scan_output_nkro16(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
 #if CH585_RF_TX_ENABLE
     if(s_output_mode == AIK_OUTPUT_MODE_RF24)
     {
-        ch585_rf_nkro_tx_set_report(nkro16, host_seq, s_output_mode);
+        ch585_rf_nkro_tx_set_report(nkro16,
+                                    consumer_usage,
+                                    host_seq,
+                                    s_output_mode);
     }
 #else
     (void)host_seq;
+    (void)consumer_usage;
 #endif
 
 #if CH585_BLE_HID_ENABLE
@@ -267,6 +626,19 @@ static void half_scan_output_nkro16(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
         uint8_t next_boot8[BLE_HID_KBD_REPORT_LEN];
 
         half_scan_nkro16_to_boot8(nkro16, next_boot8);
+        if(consumer_usage == AIK_CONSUMER_USAGE_MUTE)
+        {
+            half_scan_boot8_add_usage(next_boot8, CH585_HID_KEYBOARD_MUTE);
+        }
+        else if(consumer_usage == AIK_CONSUMER_USAGE_VOLUME_UP)
+        {
+            half_scan_boot8_add_usage(next_boot8, CH585_HID_KEYBOARD_VOLUME_UP);
+        }
+        else if(consumer_usage == AIK_CONSUMER_USAGE_VOLUME_DOWN)
+        {
+            half_scan_boot8_add_usage(next_boot8, CH585_HID_KEYBOARD_VOLUME_DOWN);
+        }
+
         if(memcmp(s_ble_boot8, next_boot8, sizeof(s_ble_boot8)) != 0)
         {
             uint8_t status = BLE_HID_SendKeyboard(next_boot8);
@@ -290,12 +662,18 @@ static void half_scan_output_nkro16(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
 
 static void half_scan_apply_host_cmd(void)
 {
-#if CH585_SPI_ACCEPT_HOST_CMD
     if(aik_spi_host_cmd_valid(&s_rx_cmd) == 0U)
     {
         return;
     }
 
+    if(s_rx_cmd.cmd == AIK_SPI_CMD_GET_PROFILE_STATUS)
+    {
+        half_scan_prepare_profile_status(s_rx_cmd.host_seq);
+        return;
+    }
+
+#if CH585_SPI_ACCEPT_HOST_CMD
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
     if(s_rx_cmd.cmd == AIK_SPI_CMD_POLL)
     {
@@ -309,6 +687,7 @@ static void half_scan_apply_host_cmd(void)
                                                          s_rx_cmd.flags);
         memcpy(s_rf_nkro16, s_rx_cmd.nkro16, sizeof(s_rf_nkro16));
         half_scan_output_nkro16(s_rf_nkro16,
+                                aik_spi_host_cmd_consumer_usage(&s_rx_cmd),
                                 s_rx_cmd.host_seq,
                                 output_mode);
     }
@@ -330,6 +709,9 @@ static void half_scan_apply_host_cmd(void)
                                        s_right_frame_valid ? &s_right_frame : 0,
                                        s_rf_nkro16);
         half_scan_output_nkro16(s_rf_nkro16,
+                                ch585_half_report_consumer_usage(
+                                    &s_tx_frame,
+                                    s_right_frame_valid ? &s_right_frame : 0),
                                 s_rx_cmd.host_seq,
                                 output_mode);
     }
@@ -492,10 +874,12 @@ static void half_scan_init(void)
     memset(&s_engine, 0, sizeof(s_engine));
     memset(&s_tx_frame, 0, sizeof(s_tx_frame));
     memset(&s_rx_cmd, 0, sizeof(s_rx_cmd));
+    memset(&s_profile_status, 0, sizeof(s_profile_status));
     memset(&s_right_frame, 0, sizeof(s_right_frame));
     memset(s_rf_nkro16, 0, sizeof(s_rf_nkro16));
     memset(s_compact_raw, 0, sizeof(s_compact_raw));
     s_last_spi_result = 0;
+    s_profile_status_pending = 0U;
     s_right_frame_valid = 0U;
 #if CH585_BLE_HID_ENABLE
     memset(s_ble_boot8, 0, sizeof(s_ble_boot8));
@@ -507,6 +891,7 @@ static void half_scan_init(void)
 #endif
 
     ch585_ads7948_mux_gpio_init();
+    half_scan_local_gpio_init();
     (void)ch585_ads7948_mux_acq_init(&s_acq, profile);
 
     mag_key_default_config(&cfg);
@@ -553,9 +938,21 @@ int main(void)
         {
             half_scan_apply_host_cmd();
         }
-        s_last_spi_result =
-            ch585_spi0_slave_link_serve_tx_frame((const uint8_t *)&s_tx_frame,
-                                                 AIK_SPI_HALF_STATE_SIZE);
+        if(s_profile_status_pending != 0U)
+        {
+            s_last_spi_result =
+                ch585_spi0_slave_link_serve_tx_frame(
+                    (const uint8_t *)&s_profile_status,
+                    AIK_SPI_HALF_STATE_SIZE);
+            s_profile_status_pending = 0U;
+        }
+        else
+        {
+            s_last_spi_result =
+                ch585_spi0_slave_link_serve_tx_frame(
+                    (const uint8_t *)&s_tx_frame,
+                    AIK_SPI_HALF_STATE_SIZE);
+        }
         ch585_ads7948_mux_acq_poll(&s_acq);
         half_scan_compact_raw(&s_acq, s_compact_raw, key_count);
         (void)mag_key_engine_update(&s_engine, s_compact_raw);

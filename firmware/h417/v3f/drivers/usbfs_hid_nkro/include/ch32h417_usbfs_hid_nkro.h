@@ -37,6 +37,7 @@ void ch32h417_usbfs_hid_nkro_init(void);
 void ch32h417_usbfs_hid_nkro_send(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES]);
 uint8_t ch32h417_usbfs_hid_nkro_pending_empty(void);
 uint8_t ch32h417_usbfs_hid_nkro_submit(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES]);
+uint8_t ch32h417_usbfs_hid_nkro_submit_consumer(uint16_t usage);
 uint32_t ch32h417_usbfs_hid_nkro_reports(void);
 uint8_t ch32h417_usbfs_hid_nkro_debug_write(const char *line);
 void ch32h417_usbfs_hid_nkro_diag_snapshot(ch32h417_usbfs_hid_nkro_diag_t *diag);

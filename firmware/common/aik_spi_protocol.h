@@ -14,11 +14,13 @@ extern "C" {
 #define AIK_SPI_HOST_MAGIC 0xA6U
 #define AIK_SPI_HALF_MAGIC 0x5AU
 #define AIK_SPI_HALF_TYPE_STATE 0x11U
+#define AIK_SPI_HALF_TYPE_PROFILE_STATUS 0x21U
 #define AIK_SPI_VERSION 1U
 
 #define AIK_SPI_CMD_POLL 0U
 #define AIK_SPI_CMD_POLL_WITH_RF 1U
 #define AIK_SPI_CMD_PUSH_RIGHT_STATE 2U
+#define AIK_SPI_CMD_GET_PROFILE_STATUS 0x40U
 
 #define AIK_OUTPUT_MODE_USBHS 0U
 #define AIK_OUTPUT_MODE_RF24  1U
@@ -35,6 +37,29 @@ extern "C" {
 #define AIK_HALF_DOWN_BITS_BYTES 6U
 #define AIK_LOCAL_STATE_BYTES 8U
 #define AIK_NKRO_REPORT_BYTES 16U
+
+#define AIK_LEFT_LOCAL_BIT_SCR_UP     36U
+#define AIK_LEFT_LOCAL_BIT_SCR_DOWN   37U
+#define AIK_LEFT_LOCAL_BIT_SCR_RIGHT  38U
+#define AIK_LEFT_LOCAL_BIT_SCR_LEFT   39U
+#define AIK_LEFT_LOCAL_BIT_SCR_CENTER 40U
+#define AIK_HALF_FRAME_BITS_LEFT      41U
+
+#define AIK_RIGHT_LOCAL_BIT_EC11_CW   41U
+#define AIK_RIGHT_LOCAL_BIT_EC11_CCW  42U
+#define AIK_RIGHT_LOCAL_BIT_EC11_MUTE 43U
+#define AIK_HALF_FRAME_BITS_RIGHT     44U
+
+#define AIK_CONSUMER_USAGE_NONE        0x0000U
+#define AIK_CONSUMER_USAGE_MUTE        0x00E2U
+#define AIK_CONSUMER_USAGE_VOLUME_UP   0x00E9U
+#define AIK_CONSUMER_USAGE_VOLUME_DOWN 0x00EAU
+
+#define AIK_PROFILE_DEBUG_ID16 0xA117U
+#define AIK_PROFILE_DEBUG_GENERATION16 1U
+
+#define AIK_PROFILE_STATUS_FLAG_VALID   0x01U
+#define AIK_PROFILE_STATUS_FLAG_DEFAULT 0x02U
 
 #if defined(__GNUC__)
 #define AIK_SPI_PACKED __attribute__((packed))
@@ -63,10 +88,24 @@ typedef struct AIK_SPI_PACKED
     uint16_t crc16;
 } aik_spi_half_state_v1_t;
 
+typedef struct AIK_SPI_PACKED
+{
+    uint8_t magic;
+    uint8_t type;
+    uint16_t ack_seq;
+    uint8_t half_id;
+    uint8_t flags;
+    uint16_t profile_id16;
+    uint16_t generation16;
+    uint16_t crc16;
+} aik_spi_profile_status_v1_t;
+
 typedef char aik_spi_host_cmd_v1_size_check[
     (sizeof(aik_spi_host_cmd_v1_t) == AIK_SPI_HOST_CMD_SIZE) ? 1 : -1];
 typedef char aik_spi_half_state_v1_size_check[
     (sizeof(aik_spi_half_state_v1_t) == AIK_SPI_HALF_STATE_SIZE) ? 1 : -1];
+typedef char aik_spi_profile_status_v1_size_check[
+    (sizeof(aik_spi_profile_status_v1_t) == AIK_SPI_HALF_STATE_SIZE) ? 1 : -1];
 
 static inline uint16_t aik_spi_crc16_ccitt(const uint8_t *data, uint16_t len)
 {
@@ -106,9 +145,64 @@ static inline uint16_t aik_spi_half_state_crc(const aik_spi_half_state_v1_t *sta
                                (uint16_t)offsetof(aik_spi_half_state_v1_t, crc16));
 }
 
+static inline uint16_t aik_spi_profile_status_crc(
+    const aik_spi_profile_status_v1_t *status)
+{
+    return aik_spi_crc16_ccitt((const uint8_t *)status,
+                               (uint16_t)offsetof(aik_spi_profile_status_v1_t, crc16));
+}
+
 static inline uint8_t aik_spi_half_key_count(uint8_t half_id)
 {
     return (half_id == AIK_HALF_ID_RIGHT) ? AIK_KEY_COUNT_RIGHT : AIK_KEY_COUNT_LEFT;
+}
+
+static inline uint8_t aik_spi_half_frame_bits(uint8_t half_id)
+{
+    return (half_id == AIK_HALF_ID_RIGHT) ?
+        AIK_HALF_FRAME_BITS_RIGHT :
+        AIK_HALF_FRAME_BITS_LEFT;
+}
+
+static inline uint8_t aik_spi_half_bit_down(const aik_spi_half_state_v1_t *state,
+                                            uint8_t bit_id)
+{
+    if((state == 0) || (bit_id >= (AIK_HALF_DOWN_BITS_BYTES * 8U)))
+    {
+        return 0U;
+    }
+    return (uint8_t)((state->down_bits[bit_id >> 3] >> (bit_id & 7U)) & 1U);
+}
+
+static inline void aik_spi_half_set_bit(aik_spi_half_state_v1_t *state,
+                                        uint8_t bit_id)
+{
+    if((state != 0) && (bit_id < (AIK_HALF_DOWN_BITS_BYTES * 8U)))
+    {
+        state->down_bits[bit_id >> 3] |= (uint8_t)(1U << (bit_id & 7U));
+    }
+}
+
+static inline uint16_t aik_spi_host_cmd_consumer_usage(
+    const aik_spi_host_cmd_v1_t *cmd)
+{
+    if(cmd == 0)
+    {
+        return AIK_CONSUMER_USAGE_NONE;
+    }
+    return (uint16_t)cmd->reserved[0] |
+           (uint16_t)((uint16_t)cmd->reserved[1] << 8);
+}
+
+static inline void aik_spi_host_cmd_set_consumer_usage(
+    aik_spi_host_cmd_v1_t *cmd,
+    uint16_t usage)
+{
+    if(cmd != 0)
+    {
+        cmd->reserved[0] = (uint8_t)(usage & 0xFFU);
+        cmd->reserved[1] = (uint8_t)(usage >> 8);
+    }
 }
 
 static inline uint8_t aik_spi_half_down_last_mask(uint8_t key_count)
@@ -166,6 +260,33 @@ static inline uint8_t aik_spi_half_state_valid(const aik_spi_half_state_v1_t *st
     return (state->magic == AIK_SPI_HALF_MAGIC) &&
            (state->type == AIK_SPI_HALF_TYPE_STATE) &&
            (state->crc16 == aik_spi_half_state_crc(state));
+}
+
+static inline void aik_spi_profile_status_finish(
+    aik_spi_profile_status_v1_t *status)
+{
+    status->magic = AIK_SPI_HALF_MAGIC;
+    status->type = AIK_SPI_HALF_TYPE_PROFILE_STATUS;
+    status->crc16 = aik_spi_profile_status_crc(status);
+}
+
+static inline uint8_t aik_spi_profile_status_valid(
+    const aik_spi_profile_status_v1_t *status)
+{
+    return (status->magic == AIK_SPI_HALF_MAGIC) &&
+           (status->type == AIK_SPI_HALF_TYPE_PROFILE_STATUS) &&
+           (status->crc16 == aik_spi_profile_status_crc(status));
+}
+
+static inline uint8_t aik_spi_profile_status_matches_debug_profile(
+    const aik_spi_profile_status_v1_t *status,
+    uint8_t half_id)
+{
+    return (aik_spi_profile_status_valid(status) != 0U) &&
+           (status->half_id == half_id) &&
+           ((status->flags & AIK_PROFILE_STATUS_FLAG_VALID) != 0U) &&
+           (status->profile_id16 == AIK_PROFILE_DEBUG_ID16) &&
+           (status->generation16 == AIK_PROFILE_DEBUG_GENERATION16);
 }
 
 #ifdef __cplusplus
