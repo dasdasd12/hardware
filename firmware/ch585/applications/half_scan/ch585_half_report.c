@@ -67,6 +67,10 @@
 #define HID_USAGE_F10           0x43U
 #define HID_USAGE_F11           0x44U
 #define HID_USAGE_F12           0x45U
+#define HID_USAGE_RIGHT_ARROW   0x4FU
+#define HID_USAGE_LEFT_ARROW    0x50U
+#define HID_USAGE_DOWN_ARROW    0x51U
+#define HID_USAGE_UP_ARROW      0x52U
 
 #define HID_MOD_LEFT_CTRL   0x01U
 #define HID_MOD_LEFT_SHIFT  0x02U
@@ -174,6 +178,22 @@ static uint8_t half_key_down(const aik_spi_half_state_v1_t *half,
     return (uint8_t)((half->down_bits[key_id >> 3] >> (key_id & 7U)) & 1U);
 }
 
+static void nkro16_set_usage(uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
+                             uint8_t usage)
+{
+    if((nkro16 != 0) && (usage >= HID_USAGE_A))
+    {
+        uint8_t bit_index = (uint8_t)(usage - HID_USAGE_A);
+        uint8_t byte_index = (uint8_t)(2U + (bit_index >> 3));
+        uint8_t bit_mask = (uint8_t)(1U << (bit_index & 7U));
+
+        if(byte_index < AIK_NKRO_REPORT_BYTES)
+        {
+            nkro16[byte_index] |= bit_mask;
+        }
+    }
+}
+
 static uint8_t global_key_down(const aik_spi_half_state_v1_t *left,
                                const aik_spi_half_state_v1_t *right,
                                uint8_t key_id)
@@ -184,6 +204,36 @@ static uint8_t global_key_down(const aik_spi_half_state_v1_t *left,
     }
 
     return half_key_down(left, (uint8_t)(key_id - AIK_KEY_COUNT_RIGHT));
+}
+
+static void apply_local_keyboard_controls(const aik_spi_half_state_v1_t *left,
+                                          uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
+{
+    if(left == 0)
+    {
+        return;
+    }
+
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_UP) != 0U)
+    {
+        nkro16_set_usage(nkro16, HID_USAGE_UP_ARROW);
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_DOWN) != 0U)
+    {
+        nkro16_set_usage(nkro16, HID_USAGE_DOWN_ARROW);
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_RIGHT) != 0U)
+    {
+        nkro16_set_usage(nkro16, HID_USAGE_RIGHT_ARROW);
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_LEFT) != 0U)
+    {
+        nkro16_set_usage(nkro16, HID_USAGE_LEFT_ARROW);
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_CENTER) != 0U)
+    {
+        nkro16_set_usage(nkro16, HID_USAGE_ENTER);
+    }
 }
 
 void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
@@ -212,17 +262,32 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
             nkro16[0] |= output->modifier_mask;
         }
 
-        if(output->usage >= HID_USAGE_A)
-        {
-            uint8_t usage = output->usage;
-            uint8_t bit_index = (uint8_t)(usage - HID_USAGE_A);
-            uint8_t byte_index = (uint8_t)(2U + (bit_index >> 3));
-            uint8_t bit_mask = (uint8_t)(1U << (bit_index & 7U));
-
-            if(byte_index < AIK_NKRO_REPORT_BYTES)
-            {
-                nkro16[byte_index] |= bit_mask;
-            }
-        }
+        nkro16_set_usage(nkro16, output->usage);
     }
+
+    apply_local_keyboard_controls(left, nkro16);
+}
+
+uint16_t ch585_half_report_consumer_usage(const aik_spi_half_state_v1_t *left,
+                                          const aik_spi_half_state_v1_t *right)
+{
+    (void)left;
+
+    if(right == 0)
+    {
+        return AIK_CONSUMER_USAGE_NONE;
+    }
+    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_MUTE) != 0U)
+    {
+        return AIK_CONSUMER_USAGE_MUTE;
+    }
+    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_CW) != 0U)
+    {
+        return AIK_CONSUMER_USAGE_VOLUME_UP;
+    }
+    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_CCW) != 0U)
+    {
+        return AIK_CONSUMER_USAGE_VOLUME_DOWN;
+    }
+    return AIK_CONSUMER_USAGE_NONE;
 }
