@@ -4,6 +4,7 @@
 .wch-skill-logs/
 # Generated documentation caches
 .tmp_pdf_text/
+/docs/
 
 # MounRiver / local IDE metadata
 **/.mrs/
