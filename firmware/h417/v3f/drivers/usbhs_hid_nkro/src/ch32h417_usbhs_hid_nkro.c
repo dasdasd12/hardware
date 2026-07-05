@@ -13,10 +13,16 @@ volatile uint16_t Head_Pack_Len;
 volatile uint8_t HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 
 static uint32_t s_report_count;
-static uint8_t s_pending_report[AIK_NKRO_REPORT_BYTES];
+static uint8_t s_pending_report[AIK_NKRO_REPORT_BYTES + 1U];
+static uint8_t s_pending_len;
 static volatile uint8_t s_pending_full;
 static volatile uint8_t s_in_flight;
 static ch32h417_usbhs_hid_nkro_diag_t s_diag;
+
+#define H417_HID_REPORT_ID_NKRO      1U
+#define H417_HID_REPORT_ID_CONSUMER  2U
+#define H417_HID_NKRO_PACKET_BYTES   (AIK_NKRO_REPORT_BYTES + 1U)
+#define H417_HID_CONSUMER_PACKET_BYTES 3U
 
 static void refresh_diag(void)
 {
@@ -59,10 +65,10 @@ static void arm_pending_if_ready_locked(void)
     }
 
     memset((void *)HID_Report_Buffer, 0, sizeof(HID_Report_Buffer));
-    memcpy((void *)HID_Report_Buffer, s_pending_report, AIK_NKRO_REPORT_BYTES);
-    memcpy((void *)USBHS_EP2_Tx_Buf, s_pending_report, AIK_NKRO_REPORT_BYTES);
+    memcpy((void *)HID_Report_Buffer, s_pending_report, s_pending_len);
+    memcpy((void *)USBHS_EP2_Tx_Buf, s_pending_report, s_pending_len);
     USBHSD->UEP2_TX_DMA = (uint32_t)USBHS_EP2_Tx_Buf;
-    USBHSD->UEP2_TX_LEN = AIK_NKRO_REPORT_BYTES;
+    USBHSD->UEP2_TX_LEN = s_pending_len;
     USBHSD->UEP2_TX_CTRL =
         (USBHSD->UEP2_TX_CTRL & (uint8_t)(~USBHS_UEP_T_RES_MASK)) |
         USBHS_UEP_T_RES_ACK;
@@ -78,6 +84,7 @@ void ch32h417_usbhs_hid_nkro_init(void)
     memset((void *)Data_Buffer, 0, DEF_RING_BUFFER_SIZE);
     memset(&s_diag, 0, sizeof(s_diag));
     s_report_count = 0U;
+    s_pending_len = 0U;
     s_pending_full = 0U;
     s_in_flight = 0U;
     Data_Pack_Max_Len = 0U;
@@ -118,7 +125,9 @@ uint8_t ch32h417_usbhs_hid_nkro_submit(const uint8_t nkro16[AIK_NKRO_REPORT_BYTE
     NVIC_DisableIRQ(USBHS_IRQn);
     if((USBHS_DevEnumStatus != 0U) && (s_pending_full == 0U) && (s_in_flight == 0U))
     {
-        memcpy((void *)s_pending_report, nkro16, AIK_NKRO_REPORT_BYTES);
+        s_pending_report[0] = H417_HID_REPORT_ID_NKRO;
+        memcpy((void *)&s_pending_report[1], nkro16, AIK_NKRO_REPORT_BYTES);
+        s_pending_len = H417_HID_NKRO_PACKET_BYTES;
         s_pending_full = 1U;
         arm_pending_if_ready_locked();
         accepted = 1U;
@@ -131,6 +140,27 @@ uint8_t ch32h417_usbhs_hid_nkro_submit(const uint8_t nkro16[AIK_NKRO_REPORT_BYTE
 void ch32h417_usbhs_hid_nkro_send(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
     (void)ch32h417_usbhs_hid_nkro_submit(nkro16);
+}
+
+uint8_t ch32h417_usbhs_hid_nkro_submit_consumer(uint16_t usage)
+{
+    uint8_t accepted = 0U;
+
+    NVIC_DisableIRQ(USBHS_IRQn);
+    if((USBHS_DevEnumStatus != 0U) && (s_pending_full == 0U) &&
+       (s_in_flight == 0U))
+    {
+        s_pending_report[0] = H417_HID_REPORT_ID_CONSUMER;
+        s_pending_report[1] = (uint8_t)(usage & 0xFFU);
+        s_pending_report[2] = (uint8_t)(usage >> 8);
+        s_pending_len = H417_HID_CONSUMER_PACKET_BYTES;
+        s_pending_full = 1U;
+        arm_pending_if_ready_locked();
+        accepted = 1U;
+    }
+    refresh_diag();
+    NVIC_EnableIRQ(USBHS_IRQn);
+    return accepted;
 }
 
 uint32_t ch32h417_usbhs_hid_nkro_reports(void)

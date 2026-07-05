@@ -29,6 +29,7 @@ static volatile uint32_t s_tx_ticks;
 static volatile uint32_t s_tx_done_count;
 static volatile uint32_t s_report_count;
 static volatile uint16_t s_last_host_seq;
+static volatile uint16_t s_consumer_usage;
 static volatile uint8_t s_last_flags;
 static volatile uint8_t s_last_switch_status;
 
@@ -55,8 +56,8 @@ static void fill_nkro_frame(uint8_t target_id)
     s_tx_buf[1] = RF_FRAME_LEN - 2U;
     memcpy(&s_tx_buf[RF_KBD_OFFSET], nkro16, sizeof(nkro16));
 
-    s_tx_buf[RF_CONSUMER_OFFSET] = 0U;
-    s_tx_buf[RF_CONSUMER_OFFSET + 1U] = 0U;
+    s_tx_buf[RF_CONSUMER_OFFSET] = (uint8_t)(s_consumer_usage & 0xFFU);
+    s_tx_buf[RF_CONSUMER_OFFSET + 1U] = (uint8_t)(s_consumer_usage >> 8);
     s_tx_buf[RF_TARGET_OFFSET] = target_id;
     s_tx_buf[RF_SEQ_OFFSET] = s_rf_seq++;
     s_tx_buf[RF_FRAME_LEN - 1U] = frame_xor(s_tx_buf, RF_FRAME_LEN - 1U);
@@ -115,6 +116,7 @@ void ch585_rf_nkro_tx_init(void)
 
     memset(s_tx_buf, 0, sizeof(s_tx_buf));
     memset(s_nkro16, 0, sizeof(s_nkro16));
+    s_consumer_usage = AIK_CONSUMER_USAGE_NONE;
     s_last_switch_status = 0U;
 
     s_rf_task_id = TMOS_ProcessEventRegister(rf_process_event);
@@ -189,6 +191,7 @@ void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
         PFIC_DisableIRQ(TMR0_IRQn);
         (void)RFRole_Stop();
         memset(s_nkro16, 0, sizeof(s_nkro16));
+        s_consumer_usage = AIK_CONSUMER_USAGE_NONE;
         PRINT("half_scan rf disable\r\n");
     }
 }
@@ -199,6 +202,7 @@ uint8_t ch585_rf_nkro_tx_is_enabled(void)
 }
 
 void ch585_rf_nkro_tx_set_report(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
+                                 uint16_t consumer_usage,
                                  uint16_t host_seq,
                                  uint8_t flags)
 {
@@ -213,6 +217,7 @@ void ch585_rf_nkro_tx_set_report(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
     }
 
     memcpy(s_nkro16, nkro16, sizeof(s_nkro16));
+    s_consumer_usage = consumer_usage;
     s_last_host_seq = host_seq;
     s_last_flags = flags;
     s_report_count++;

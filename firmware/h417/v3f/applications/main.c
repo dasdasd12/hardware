@@ -20,6 +20,7 @@ typedef ch32h417_usbhs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define v3f_usb_hid_nkro_send ch32h417_usbhs_hid_nkro_send
 #define v3f_usb_hid_nkro_pending_empty ch32h417_usbhs_hid_nkro_pending_empty
 #define v3f_usb_hid_nkro_submit ch32h417_usbhs_hid_nkro_submit
+#define v3f_usb_hid_nkro_submit_consumer ch32h417_usbhs_hid_nkro_submit_consumer
 #define v3f_usb_hid_nkro_reports ch32h417_usbhs_hid_nkro_reports
 #define v3f_usb_hid_nkro_debug_write ch32h417_usbhs_hid_nkro_debug_write
 #define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbhs_hid_nkro_diag_snapshot
@@ -30,6 +31,7 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define v3f_usb_hid_nkro_send ch32h417_usbfs_hid_nkro_send
 #define v3f_usb_hid_nkro_pending_empty ch32h417_usbfs_hid_nkro_pending_empty
 #define v3f_usb_hid_nkro_submit ch32h417_usbfs_hid_nkro_submit
+#define v3f_usb_hid_nkro_submit_consumer ch32h417_usbfs_hid_nkro_submit_consumer
 #define v3f_usb_hid_nkro_reports ch32h417_usbfs_hid_nkro_reports
 #define v3f_usb_hid_nkro_debug_write ch32h417_usbfs_hid_nkro_debug_write
 #define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbfs_hid_nkro_diag_snapshot
@@ -68,12 +70,27 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_CDC_DEBUG_PERIOD_TICKS 25U
 #endif
 
-#define V3F_SWITCH_KEY_ESC 46U
+#ifndef V3F_ENABLE_PROFILE_STATUS_SYNC
+#define V3F_ENABLE_PROFILE_STATUS_SYNC 1
+#endif
+
+#ifndef V3F_PROFILE_STATUS_PERIOD_TICKS
+#define V3F_PROFILE_STATUS_PERIOD_TICKS 512U
+#endif
+
+#define V3F_FN_LAYER_KEY   38U
 #define V3F_SWITCH_KEY_F1  45U
 #define V3F_SWITCH_KEY_F2  44U
 #define V3F_SWITCH_KEY_F3  43U
 #define V3F_SWITCH_KEY_F5  41U
 #define V3F_SWITCH_KEY_F6  6U
+
+#define V3F_HID_USAGE_A           0x04U
+#define V3F_HID_USAGE_RIGHT_ARROW 0x4FU
+#define V3F_HID_USAGE_LEFT_ARROW  0x50U
+#define V3F_HID_USAGE_DOWN_ARROW  0x51U
+#define V3F_HID_USAGE_UP_ARROW    0x52U
+#define V3F_HID_USAGE_ENTER       0x28U
 
 enum
 {
@@ -205,48 +222,95 @@ static uint8_t v3f_output_mode_is_wireless(uint8_t mode)
                      (mode == AIK_OUTPUT_MODE_BLE));
 }
 
-static void v3f_global_key_clear_local(v3f_global_key_state_t *keys,
-                                       uint8_t key_id)
+static void v3f_nkro_set_usage(uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
+                               uint8_t usage)
 {
-    if((keys != 0) && (key_id < AIK_KEY_COUNT_TOTAL))
+    if((nkro16 != 0) && (usage >= V3F_HID_USAGE_A))
     {
-        keys->down[key_id >> 3] &=
-            (uint8_t)~(uint8_t)(1U << (key_id & 7U));
+        uint8_t bit_index = (uint8_t)(usage - V3F_HID_USAGE_A);
+        uint8_t byte_index = (uint8_t)(2U + (bit_index >> 3));
+        uint8_t bit_mask = (uint8_t)(1U << (bit_index & 7U));
+
+        if(byte_index < AIK_NKRO_REPORT_BYTES)
+        {
+            nkro16[byte_index] |= bit_mask;
+        }
     }
+}
+
+static void v3f_apply_local_keyboard_controls(
+    const aik_spi_half_state_v1_t *left,
+    uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
+{
+    if(left == 0)
+    {
+        return;
+    }
+
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_UP) != 0U)
+    {
+        v3f_nkro_set_usage(nkro16, V3F_HID_USAGE_UP_ARROW);
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_DOWN) != 0U)
+    {
+        v3f_nkro_set_usage(nkro16, V3F_HID_USAGE_DOWN_ARROW);
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_RIGHT) != 0U)
+    {
+        v3f_nkro_set_usage(nkro16, V3F_HID_USAGE_RIGHT_ARROW);
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_LEFT) != 0U)
+    {
+        v3f_nkro_set_usage(nkro16, V3F_HID_USAGE_LEFT_ARROW);
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_CENTER) != 0U)
+    {
+        v3f_nkro_set_usage(nkro16, V3F_HID_USAGE_ENTER);
+    }
+}
+
+static uint16_t v3f_consumer_usage_from_local_controls(
+    const aik_spi_half_state_v1_t *right)
+{
+    if(right == 0)
+    {
+        return AIK_CONSUMER_USAGE_NONE;
+    }
+    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_MUTE) != 0U)
+    {
+        return AIK_CONSUMER_USAGE_MUTE;
+    }
+    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_CW) != 0U)
+    {
+        return AIK_CONSUMER_USAGE_VOLUME_UP;
+    }
+    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_CCW) != 0U)
+    {
+        return AIK_CONSUMER_USAGE_VOLUME_DOWN;
+    }
+    return AIK_CONSUMER_USAGE_NONE;
 }
 
 static uint8_t v3f_output_mode_update_from_keys(v3f_global_key_state_t *keys,
                                                 uint8_t current_mode)
 {
     uint8_t next_mode = current_mode;
-    uint8_t combo_active = 0U;
 
     if((keys != 0) &&
-       (v3f_global_key_is_down(keys, V3F_SWITCH_KEY_ESC) != 0U))
+       (v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) != 0U))
     {
         if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F1) != 0U)
         {
             next_mode = AIK_OUTPUT_MODE_USBHS;
-            combo_active = 1U;
         }
         else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F2) != 0U)
         {
             next_mode = AIK_OUTPUT_MODE_RF24;
-            combo_active = 1U;
         }
         else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F3) != 0U)
         {
             next_mode = AIK_OUTPUT_MODE_BLE;
-            combo_active = 1U;
         }
-    }
-
-    if(combo_active != 0U)
-    {
-        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_ESC);
-        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F1);
-        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F2);
-        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F3);
     }
 
     return v3f_output_mode_sanitize(next_mode);
@@ -256,10 +320,9 @@ static void v3f_lighting_update_from_keys(v3f_global_key_state_t *keys)
 {
     static uint8_t combo_latched;
     uint8_t combo_down = 0U;
-    uint8_t handled = 0U;
 
     if((keys != 0) &&
-       (v3f_global_key_is_down(keys, V3F_SWITCH_KEY_ESC) != 0U))
+       (v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) != 0U))
     {
         if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F5) != 0U)
         {
@@ -268,7 +331,6 @@ static void v3f_lighting_update_from_keys(v3f_global_key_state_t *keys)
             {
                 v3f_rgb_status_toggle_enabled();
             }
-            handled = 1U;
         }
         else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F6) != 0U)
         {
@@ -277,16 +339,18 @@ static void v3f_lighting_update_from_keys(v3f_global_key_state_t *keys)
             {
                 v3f_rgb_status_next_effect();
             }
-            handled = 1U;
         }
     }
 
     combo_latched = combo_down;
-    if(handled != 0U)
+}
+
+static void v3f_fn_layer_consume_keys(v3f_global_key_state_t *keys)
+{
+    if((keys != 0) &&
+       (v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) != 0U))
     {
-        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_ESC);
-        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F5);
-        v3f_global_key_clear_local(keys, V3F_SWITCH_KEY_F6);
+        v3f_half_state_clear(keys);
     }
 }
 
@@ -354,6 +418,33 @@ static void v3f_report_diag_trace(const v3f_global_key_state_t *keys,
                   pack4(nkro16[6], nkro16[7], nkro16[8], nkro16[9]));
 }
 
+static void v3f_profile_status_poll(uint16_t host_seq)
+{
+#if V3F_ENABLE_PROFILE_STATUS_SYNC
+    aik_spi_profile_status_v1_t status;
+
+#if V3F_PROFILE_STATUS_PERIOD_TICKS == 0
+    return;
+#else
+    if((host_seq % V3F_PROFILE_STATUS_PERIOD_TICKS) != 31U)
+    {
+        return;
+    }
+#endif
+
+    memset(&status, 0, sizeof(status));
+    (void)v3f_ch585_link_query_profile_status(AIK_HALF_ID_LEFT,
+                                              host_seq,
+                                              &status);
+    memset(&status, 0, sizeof(status));
+    (void)v3f_ch585_link_query_profile_status(AIK_HALF_ID_RIGHT,
+                                              host_seq,
+                                              &status);
+#else
+    (void)host_seq;
+#endif
+}
+
 static void v3f_prepare_spi_poll_tx(aik_spi_host_cmd_v1_t *cmd,
                                     uint16_t host_seq,
                                     const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
@@ -393,7 +484,8 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
 
     memset(&empty_right, 0, sizeof(empty_right));
     empty_right.half_seq = host_seq;
-    aik_spi_half_state_finish(&empty_right, AIK_KEY_COUNT_RIGHT);
+    aik_spi_half_state_finish(&empty_right,
+                              aik_spi_half_frame_bits(AIK_HALF_ID_RIGHT));
     v3f_rf_report_bridge_prepare_right_state_cmd(cmd,
                                                  host_seq,
                                                  &empty_right,
@@ -415,7 +507,7 @@ static void v3f_cdc_debug_poll(uint16_t tick,
     static uint8_t phase;
     v3f_ch585_link_stats_t left_stats;
     v3f_ch585_link_stats_t right_stats;
-    char line[96];
+    char line[160];
     int len;
 
     if((uint16_t)(tick - last_tick) < V3F_CDC_DEBUG_PERIOD_TICKS)
@@ -509,7 +601,7 @@ static void v3f_cdc_debug_poll(uint16_t tick,
                            (unsigned int)((right != 0 && right->valid) ? right->frame.down_bits[3] : 0U));
             break;
 
-        default:
+        case 6:
             len = snprintf(line, sizeof(line),
                            "K d=%02x%02x%02x%02x n=%02x%02x%02x%02x rpt=%lu\r\n",
                            (unsigned int)((keys != 0) ? keys->down[0] : 0U),
@@ -522,9 +614,32 @@ static void v3f_cdc_debug_poll(uint16_t tick,
                            (unsigned int)((nkro16 != 0) ? nkro16[5] : 0U),
                            (unsigned long)v3f_usb_hid_nkro_reports());
             break;
+
+        default:
+            len = snprintf(line, sizeof(line),
+                           "P H=%04x/%u L ok=%lu bad=%lu m=%u id=%04x g=%u f=%02x R ok=%lu bad=%lu m=%u id=%04x g=%u f=%02x\r\n",
+                           (unsigned int)AIK_PROFILE_DEBUG_ID16,
+                           (unsigned int)AIK_PROFILE_DEBUG_GENERATION16,
+                           (unsigned long)left_stats.profile_status_ok,
+                           (unsigned long)left_stats.profile_status_invalid,
+                           (unsigned int)aik_spi_profile_status_matches_debug_profile(
+                               &left_stats.last_profile_status,
+                               AIK_HALF_ID_LEFT),
+                           (unsigned int)left_stats.last_profile_status.profile_id16,
+                           (unsigned int)left_stats.last_profile_status.generation16,
+                           (unsigned int)left_stats.last_profile_status.flags,
+                           (unsigned long)right_stats.profile_status_ok,
+                           (unsigned long)right_stats.profile_status_invalid,
+                           (unsigned int)aik_spi_profile_status_matches_debug_profile(
+                               &right_stats.last_profile_status,
+                               AIK_HALF_ID_RIGHT),
+                           (unsigned int)right_stats.last_profile_status.profile_id16,
+                           (unsigned int)right_stats.last_profile_status.generation16,
+                           (unsigned int)right_stats.last_profile_status.flags);
+            break;
     }
 
-    phase = (uint8_t)((phase + 1U) % 7U);
+    phase = (uint8_t)((phase + 1U) % 8U);
     if(len > 0)
     {
         (void)v3f_usb_hid_nkro_debug_write(line);
@@ -550,6 +665,8 @@ int main(void)
     uint8_t zero_nkro16[AIK_NKRO_REPORT_BYTES];
     uint8_t output_mode = v3f_output_mode_sanitize(V3F_OUTPUT_MODE_DEFAULT);
     uint16_t host_seq = 0U;
+    uint16_t last_usb_consumer_usage = AIK_CONSUMER_USAGE_NONE;
+    uint8_t usb_consumer_release_pending = 0U;
 
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
@@ -567,6 +684,7 @@ int main(void)
         uint8_t got_left;
         uint8_t got_right;
         uint8_t previous_output_mode = output_mode;
+        uint16_t consumer_usage;
 
 #if !V3F_ENABLE_RF_BRIDGE
         if(v3f_usb_hid_nkro_pending_empty() == 0U)
@@ -626,18 +744,45 @@ int main(void)
                              &keys);
         output_mode = v3f_output_mode_update_from_keys(&keys, output_mode);
         v3f_lighting_update_from_keys(&keys);
+        v3f_fn_layer_consume_keys(&keys);
         v3f_default_profile_build_nkro16(&keys, nkro16);
+        v3f_apply_local_keyboard_controls(left.valid ? &left.frame : 0,
+                                          nkro16);
+        consumer_usage = v3f_consumer_usage_from_local_controls(
+            right.valid ? &right.frame : 0);
         if((previous_output_mode == AIK_OUTPUT_MODE_USBHS) &&
            (output_mode != AIK_OUTPUT_MODE_USBHS) &&
            (v3f_usb_hid_nkro_pending_empty() != 0U))
         {
             (void)v3f_usb_hid_nkro_submit(zero_nkro16);
+            (void)v3f_usb_hid_nkro_submit_consumer(AIK_CONSUMER_USAGE_NONE);
+            usb_consumer_release_pending = 0U;
         }
         else if((output_mode == AIK_OUTPUT_MODE_USBHS) &&
                 (v3f_usb_hid_nkro_pending_empty() != 0U))
         {
-            (void)v3f_usb_hid_nkro_submit(nkro16);
+            if(usb_consumer_release_pending != 0U)
+            {
+                if(v3f_usb_hid_nkro_submit_consumer(
+                       AIK_CONSUMER_USAGE_NONE) != 0U)
+                {
+                    usb_consumer_release_pending = 0U;
+                }
+            }
+            else if((consumer_usage != AIK_CONSUMER_USAGE_NONE) &&
+                    (last_usb_consumer_usage == AIK_CONSUMER_USAGE_NONE))
+            {
+                if(v3f_usb_hid_nkro_submit_consumer(consumer_usage) != 0U)
+                {
+                    usb_consumer_release_pending = 1U;
+                }
+            }
+            else
+            {
+                (void)v3f_usb_hid_nkro_submit(nkro16);
+            }
         }
+        last_usb_consumer_usage = consumer_usage;
 
         v3f_trace_inc(V3F_TRACE_TICK);
         v3f_trace_set(V3F_TRACE_LEFT_OK, left.valid);
@@ -648,6 +793,7 @@ int main(void)
         v3f_link_diag_trace(&left, &right);
         v3f_report_diag_trace(&keys, nkro16);
         v3f_usb_diag_trace();
+        v3f_profile_status_poll(host_seq);
         v3f_cdc_debug_poll(host_seq, &left, &right, &keys, nkro16);
         v3f_rgb_status_task(host_seq);
 
