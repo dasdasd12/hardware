@@ -29,6 +29,7 @@ extern "C" {
 #define DEF_UEP1                 0x01
 #define DEF_UEP2                 0x02
 #define DEF_UEP3                 0x03
+#define DEF_UEP4                 0x04
 #define DEF_USBD_UEP0_SIZE       64
 
 /* ─── USBHS 端点 DMA/CTRL 访问宏 ─── */
@@ -51,6 +52,7 @@ extern "C" {
 #define DEF_USB_EP1_HS_SIZE      64   /* NKRO Keyboard */
 #define DEF_USB_EP2_HS_SIZE      8    /* Consumer */
 #define DEF_USB_EP3_HS_SIZE      64   /* Custom Config */
+#define DEF_USB_EP4_HS_SIZE      8    /* Mouse Wheel */
 
 /* ─── 字符串索引（CH585SFR.h 已定义相同值，此处不重复定义）─── */
 /* DEF_STRING_DESC_LANG=0, MANU=1, PROD=2, SERN=3 */
@@ -69,6 +71,7 @@ extern __attribute__((aligned(4))) uint8_t USBHS_EP0_Buf[];
 extern __attribute__((aligned(4))) uint8_t USBHS_EP1_TX_Buf[];
 extern __attribute__((aligned(4))) uint8_t USBHS_EP2_TX_Buf[];
 extern __attribute__((aligned(4))) uint8_t USBHS_EP3_TX_Buf[];
+extern __attribute__((aligned(4))) uint8_t USBHS_EP4_TX_Buf[];
 extern __attribute__((aligned(4))) uint8_t USBHS_EP3_RX_Buf[];
 
 /* ─── 设备状态 ─── */

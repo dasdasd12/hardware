@@ -12,6 +12,10 @@
 #include "hiddev.h"
 #include "wchrf.h"
 
+#ifndef HID_CONSUMER_RESERVED
+#define HID_CONSUMER_RESERVED 0U
+#endif
+
 #define BLE_HID_LOG(...)            \
     do                              \
     {                               \
@@ -22,7 +26,10 @@
 #define BLE_HID_PHY_UPDATE_EVT        0x0002
 #define BLE_HID_KEY_TAP_DOWN_EVT      0x0004
 #define BLE_HID_KEY_TAP_UP_EVT        0x0008
-#define BLE_HID_ADV_INTERVAL          160
+#define BLE_HID_CONSUMER_TAP_DOWN_EVT 0x0010
+#define BLE_HID_CONSUMER_TAP_UP_EVT   0x0020
+#define BLE_HID_FAST_ADV_INTERVAL_MIN 32
+#define BLE_HID_FAST_ADV_INTERVAL_MAX 48
 #define BLE_HID_MIN_CONN_INTERVAL     16
 #define BLE_HID_MAX_CONN_INTERVAL     24
 #define BLE_HID_SLAVE_LATENCY         0
@@ -39,6 +46,10 @@
 #define BLE_HID_KEY_TAP_RETRY_MS      800
 #define BLE_HID_KEY_TAP_MAX_RETRY     20
 #define BLE_HID_KEY_TAP_QUEUE_SIZE    16
+#define BLE_HID_CONSUMER_TAP_HOLD_MS  40
+#define BLE_HID_CONSUMER_TAP_RETRY_MS 60
+#define BLE_HID_CONSUMER_TAP_MAX_RETRY 8
+#define BLE_HID_CONSUMER_TAP_QUEUE_SIZE 16
 #define BLE_HID_CLEAR_BONDS_ON_BOOT   FALSE
 
 typedef struct
@@ -46,6 +57,11 @@ typedef struct
     uint8_t modifier;
     uint8_t keycode;
 } bleHidKeyTap_t;
+
+typedef struct
+{
+    uint16_t usage;
+} bleHidConsumerTap_t;
 
 static uint8_t g_ble_task_id = INVALID_TASK_ID;
 static uint16_t g_conn_handle = GAP_CONNHANDLE_INIT;
@@ -57,6 +73,14 @@ static bleHidKeyTap_t g_key_tap_queue[BLE_HID_KEY_TAP_QUEUE_SIZE];
 static uint8_t g_key_tap_queue_head = 0;
 static uint8_t g_key_tap_queue_tail = 0;
 static uint8_t g_key_tap_queue_count = 0;
+static uint8_t g_consumer_tap_busy = FALSE;
+static uint8_t g_consumer_tap_retry_count = 0;
+static uint16_t g_consumer_tap_usage = HID_CONSUMER_RESERVED;
+static bleHidConsumerTap_t g_consumer_tap_queue[BLE_HID_CONSUMER_TAP_QUEUE_SIZE];
+static uint8_t g_consumer_tap_queue_head = 0;
+static uint8_t g_consumer_tap_queue_tail = 0;
+static uint8_t g_consumer_tap_queue_count = 0;
+static uint8_t g_ble_enabled = FALSE;
 
 static uint8_t scanRspData[] = {
     0x0E,
@@ -109,6 +133,7 @@ static uint8_t hidRptCB(uint8_t id, uint8_t type, uint16_t uuid,
 static void hidEvtCB(uint8_t evt);
 static void hidStateCB(gapRole_States_t newState, gapRoleEvent_t *pEvent);
 static void bleHidBuildKeyboardReport(uint8_t modifier, uint8_t keycode, uint8_t *report8);
+static void bleHidBuildConsumerReport(uint16_t usage, uint8_t *report);
 static void bleHidStartKeyTap(uint8_t modifier, uint8_t keycode);
 static void bleHidFinishCurrentKeyTap(void);
 static void bleHidStartNextQueuedTap(void);
@@ -116,6 +141,13 @@ static uint8_t bleHidKeyTapQueuePush(uint8_t modifier, uint8_t keycode);
 static uint8_t bleHidKeyTapQueuePop(bleHidKeyTap_t *tap);
 static void bleHidClearKeyTapQueue(void);
 static void bleHidResetKeyTapState(void);
+static void bleHidStartConsumerTap(uint16_t usage);
+static void bleHidFinishCurrentConsumerTap(void);
+static void bleHidStartNextQueuedConsumerTap(void);
+static uint8_t bleHidConsumerTapQueuePush(uint16_t usage);
+static uint8_t bleHidConsumerTapQueuePop(bleHidConsumerTap_t *tap);
+static void bleHidClearConsumerTapQueue(void);
+static void bleHidResetConsumerTapState(void);
 
 static hidDevCB_t hidCBs = {
     hidRptCB,
@@ -124,6 +156,12 @@ static hidDevCB_t hidCBs = {
     hidStateCB
 };
 
+static void bleHidUseFastAdvertising(void)
+{
+    GAP_SetParamValue(TGAP_DISC_ADV_INT_MIN, BLE_HID_FAST_ADV_INTERVAL_MIN);
+    GAP_SetParamValue(TGAP_DISC_ADV_INT_MAX, BLE_HID_FAST_ADV_INTERVAL_MAX);
+}
+
 void BLE_HID_Init(void)
 {
     g_ble_task_id = TMOS_ProcessEventRegister(BLE_HID_ProcessEvent);
@@ -131,7 +169,7 @@ void BLE_HID_Init(void)
     HidDev_Init();
 
     {
-        uint8_t adv_enable = TRUE;
+        uint8_t adv_enable = FALSE;
         uint8_t adv_filter_policy = GAP_FILTER_POLICY_ALL;
         GAPRole_SetParameter(GAPROLE_ADVERT_ENABLED, sizeof(uint8_t), &adv_enable);
         GAPRole_SetParameter(GAPROLE_ADV_FILTER_POLICY, sizeof(uint8_t), &adv_filter_policy);
@@ -160,11 +198,7 @@ void BLE_HID_Init(void)
         Batt_SetParameter(BATT_PARAM_CRITICAL_LEVEL, sizeof(uint8_t), &critical_level);
     }
 
-    {
-        uint16_t adv_interval = BLE_HID_ADV_INTERVAL;
-        GAP_SetParamValue(TGAP_DISC_ADV_INT_MIN, adv_interval);
-        GAP_SetParamValue(TGAP_DISC_ADV_INT_MAX, adv_interval);
-    }
+    bleHidUseFastAdvertising();
 
     {
         uint16_t min_interval = BLE_HID_MIN_CONN_INTERVAL;
@@ -320,6 +354,78 @@ uint16_t BLE_HID_ProcessEvent(uint8_t task_id, uint16_t events)
         return (events ^ BLE_HID_KEY_TAP_UP_EVT);
     }
 
+    if(events & BLE_HID_CONSUMER_TAP_DOWN_EVT)
+    {
+        uint8_t status;
+
+        if(!BLE_HID_IsConnected())
+        {
+            bleHidResetConsumerTapState();
+            return (events ^ BLE_HID_CONSUMER_TAP_DOWN_EVT);
+        }
+
+        if(g_consumer_tap_usage == HID_CONSUMER_RESERVED)
+        {
+            bleHidResetConsumerTapState();
+            return (events ^ BLE_HID_CONSUMER_TAP_DOWN_EVT);
+        }
+
+        status = BLE_HID_SendConsumer(g_consumer_tap_usage);
+        if(status == SUCCESS)
+        {
+            g_consumer_tap_retry_count = 0;
+            tmos_start_task(g_ble_task_id,
+                            BLE_HID_CONSUMER_TAP_UP_EVT,
+                            BLE_HID_CONSUMER_TAP_HOLD_MS);
+        }
+        else
+        {
+            g_consumer_tap_retry_count++;
+            if(g_consumer_tap_retry_count < BLE_HID_CONSUMER_TAP_MAX_RETRY)
+            {
+                tmos_start_task(g_ble_task_id,
+                                BLE_HID_CONSUMER_TAP_DOWN_EVT,
+                                BLE_HID_CONSUMER_TAP_RETRY_MS);
+            }
+            else
+            {
+                BLE_HID_LOG("%s: consumer tap down dropped usage=%04x\n",
+                            BLE_HID_DEVICE_NAME,
+                            (unsigned int)g_consumer_tap_usage);
+                bleHidFinishCurrentConsumerTap();
+            }
+        }
+        return (events ^ BLE_HID_CONSUMER_TAP_DOWN_EVT);
+    }
+
+    if(events & BLE_HID_CONSUMER_TAP_UP_EVT)
+    {
+        uint8_t status = BLE_HID_SendConsumer(HID_CONSUMER_RESERVED);
+
+        if(status == SUCCESS)
+        {
+            bleHidFinishCurrentConsumerTap();
+        }
+        else
+        {
+            g_consumer_tap_retry_count++;
+            if(g_consumer_tap_retry_count < BLE_HID_CONSUMER_TAP_MAX_RETRY)
+            {
+                tmos_start_task(g_ble_task_id,
+                                BLE_HID_CONSUMER_TAP_UP_EVT,
+                                BLE_HID_CONSUMER_TAP_RETRY_MS);
+            }
+            else
+            {
+                BLE_HID_LOG("%s: consumer tap up dropped usage=%04x\n",
+                            BLE_HID_DEVICE_NAME,
+                            (unsigned int)g_consumer_tap_usage);
+                bleHidFinishCurrentConsumerTap();
+            }
+        }
+        return (events ^ BLE_HID_CONSUMER_TAP_UP_EVT);
+    }
+
     return 0;
 }
 
@@ -341,6 +447,7 @@ uint8_t BLE_HID_GetQueuedTapCount(void)
 void BLE_HID_StartAdvert(void)
 {
     uint8_t en = TRUE;
+    bleHidUseFastAdvertising();
     GAPRole_SetParameter(GAPROLE_ADVERT_ENABLED, sizeof(uint8_t), &en);
 }
 
@@ -356,6 +463,7 @@ void BLE_HID_SetEnabled(uint8_t enabled)
     {
         bStatus_t switch_status;
 
+        g_ble_enabled = TRUE;
         (void)RFRole_Stop();
         switch_status = RFRole_SwitchMode(0U);
         BLE_HID_LOG("%s: ble enable switch=%x\n",
@@ -367,15 +475,31 @@ void BLE_HID_SetEnabled(uint8_t enabled)
         return;
     }
 
+    g_ble_enabled = FALSE;
     BLE_HID_StopAdvert();
     if(BLE_HID_IsConnected())
     {
         uint8_t release_report[BLE_HID_KBD_REPORT_LEN] = {0};
         (void)BLE_HID_SendKeyboard(release_report);
+        (void)BLE_HID_SendConsumer(HID_CONSUMER_RESERVED);
         (void)GAPRole_TerminateLink(g_conn_handle);
     }
     bleHidResetKeyTapState();
     bleHidClearKeyTapQueue();
+    bleHidResetConsumerTapState();
+    bleHidClearConsumerTapQueue();
+}
+
+void BLE_HID_DisableForRadio(uint16_t wait_ms)
+{
+    BLE_HID_SetEnabled(0U);
+    while((wait_ms != 0U) && (BLE_HID_IsConnected() != 0U))
+    {
+        TMOS_SystemProcess();
+        mDelaymS(1);
+        wait_ms--;
+    }
+    BLE_HID_StopAdvert();
 }
 
 uint8_t BLE_HID_SendKeyboard(const uint8_t *report8)
@@ -389,6 +513,22 @@ uint8_t BLE_HID_SendKeyboard(const uint8_t *report8)
                          HID_REPORT_TYPE_INPUT,
                          BLE_HID_KBD_REPORT_LEN,
                          (uint8_t *)report8);
+}
+
+uint8_t BLE_HID_SendConsumer(uint16_t usage)
+{
+    uint8_t report[BLE_HID_CONSUMER_REPORT_LEN];
+
+    if(!BLE_HID_IsConnected())
+    {
+        return bleNotReady;
+    }
+
+    bleHidBuildConsumerReport(usage, report);
+    return HidDev_Report(HID_RPT_ID_CONSUMER_IN,
+                         HID_REPORT_TYPE_INPUT,
+                         BLE_HID_CONSUMER_REPORT_LEN,
+                         report);
 }
 
 uint8_t BLE_HID_TriggerKeyTap(uint8_t keycode)
@@ -426,6 +566,34 @@ uint8_t BLE_HID_TriggerModifiedKeyTap(uint8_t modifier, uint8_t keycode)
     return SUCCESS;
 }
 
+uint8_t BLE_HID_TriggerConsumerTap(uint16_t usage)
+{
+    if(usage == HID_CONSUMER_RESERVED)
+    {
+        return INVALIDPARAMETER;
+    }
+
+    if(!BLE_HID_IsConnected())
+    {
+        return bleNotReady;
+    }
+
+    if(g_consumer_tap_busy)
+    {
+        if(!bleHidConsumerTapQueuePush(usage))
+        {
+            BLE_HID_LOG("%s: consumer tap queue full usage=%04x\n",
+                        BLE_HID_DEVICE_NAME,
+                        (unsigned int)usage);
+            return bleNoResources;
+        }
+        return SUCCESS;
+    }
+
+    bleHidStartConsumerTap(usage);
+    return SUCCESS;
+}
+
 static void bleHidBuildKeyboardReport(uint8_t modifier, uint8_t keycode, uint8_t *report8)
 {
     uint8_t i;
@@ -437,6 +605,24 @@ static void bleHidBuildKeyboardReport(uint8_t modifier, uint8_t keycode, uint8_t
 
     report8[0] = modifier;
     report8[2] = keycode;
+}
+
+static void bleHidBuildConsumerReport(uint16_t usage, uint8_t *report)
+{
+    report[0] = 0U;
+
+    if(usage == HID_CONSUMER_MUTE)
+    {
+        report[0] = 0x01U;
+    }
+    else if(usage == HID_CONSUMER_VOLUME_UP)
+    {
+        report[0] = 0x02U;
+    }
+    else if(usage == HID_CONSUMER_VOLUME_DOWN)
+    {
+        report[0] = 0x04U;
+    }
 }
 
 static void bleHidStartKeyTap(uint8_t modifier, uint8_t keycode)
@@ -545,6 +731,106 @@ static void bleHidResetKeyTapState(void)
     }
 }
 
+static void bleHidStartConsumerTap(uint16_t usage)
+{
+    g_consumer_tap_busy = TRUE;
+    g_consumer_tap_retry_count = 0;
+    g_consumer_tap_usage = usage;
+
+    if(g_ble_task_id != INVALID_TASK_ID)
+    {
+        tmos_set_event(g_ble_task_id, BLE_HID_CONSUMER_TAP_DOWN_EVT);
+    }
+}
+
+static void bleHidFinishCurrentConsumerTap(void)
+{
+    g_consumer_tap_busy = FALSE;
+    g_consumer_tap_retry_count = 0;
+    g_consumer_tap_usage = HID_CONSUMER_RESERVED;
+
+    if(g_ble_task_id != INVALID_TASK_ID)
+    {
+        tmos_stop_task(g_ble_task_id, BLE_HID_CONSUMER_TAP_DOWN_EVT);
+        tmos_stop_task(g_ble_task_id, BLE_HID_CONSUMER_TAP_UP_EVT);
+    }
+
+    bleHidStartNextQueuedConsumerTap();
+}
+
+static void bleHidStartNextQueuedConsumerTap(void)
+{
+    bleHidConsumerTap_t tap;
+
+    if(!BLE_HID_IsConnected())
+    {
+        bleHidClearConsumerTapQueue();
+        return;
+    }
+
+    if(bleHidConsumerTapQueuePop(&tap))
+    {
+        bleHidStartConsumerTap(tap.usage);
+    }
+}
+
+static uint8_t bleHidConsumerTapQueuePush(uint16_t usage)
+{
+    if(g_consumer_tap_queue_count >= BLE_HID_CONSUMER_TAP_QUEUE_SIZE)
+    {
+        return FALSE;
+    }
+
+    g_consumer_tap_queue[g_consumer_tap_queue_tail].usage = usage;
+    g_consumer_tap_queue_tail++;
+    if(g_consumer_tap_queue_tail >= BLE_HID_CONSUMER_TAP_QUEUE_SIZE)
+    {
+        g_consumer_tap_queue_tail = 0;
+    }
+
+    g_consumer_tap_queue_count++;
+    return TRUE;
+}
+
+static uint8_t bleHidConsumerTapQueuePop(bleHidConsumerTap_t *tap)
+{
+    if((tap == NULL) || (g_consumer_tap_queue_count == 0))
+    {
+        return FALSE;
+    }
+
+    *tap = g_consumer_tap_queue[g_consumer_tap_queue_head];
+    g_consumer_tap_queue_head++;
+    if(g_consumer_tap_queue_head >= BLE_HID_CONSUMER_TAP_QUEUE_SIZE)
+    {
+        g_consumer_tap_queue_head = 0;
+    }
+
+    g_consumer_tap_queue_count--;
+    return TRUE;
+}
+
+static void bleHidClearConsumerTapQueue(void)
+{
+    g_consumer_tap_queue_head = 0;
+    g_consumer_tap_queue_tail = 0;
+    g_consumer_tap_queue_count = 0;
+}
+
+static void bleHidResetConsumerTapState(void)
+{
+    g_consumer_tap_busy = FALSE;
+    g_consumer_tap_retry_count = 0;
+    g_consumer_tap_usage = HID_CONSUMER_RESERVED;
+    bleHidClearConsumerTapQueue();
+
+    if(g_ble_task_id != INVALID_TASK_ID)
+    {
+        tmos_stop_task(g_ble_task_id, BLE_HID_CONSUMER_TAP_DOWN_EVT);
+        tmos_stop_task(g_ble_task_id, BLE_HID_CONSUMER_TAP_UP_EVT);
+    }
+}
+
 static void hidStateCB(gapRole_States_t newState, gapRoleEvent_t *pEvent)
 {
     switch(newState & GAPROLE_STATE_ADV_MASK)
@@ -567,6 +853,7 @@ static void hidStateCB(gapRole_States_t newState, gapRoleEvent_t *pEvent)
             {
                 g_conn_handle = ((gapEstLinkReqEvent_t *)pEvent)->connectionHandle;
                 bleHidResetKeyTapState();
+                bleHidResetConsumerTapState();
                 BLE_HID_LOG("%s: connected status=%02x handle=%04x\n",
                             BLE_HID_DEVICE_NAME,
                             (unsigned int)pEvent->gap.hdr.status,
@@ -598,12 +885,16 @@ static void hidStateCB(gapRole_States_t newState, gapRoleEvent_t *pEvent)
             {
                 g_conn_handle = GAP_CONNHANDLE_INIT;
                 bleHidResetKeyTapState();
+                bleHidResetConsumerTapState();
                 BLE_HID_LOG("%s: disconnected status=%02x reason=%02x handle=%04x\n",
                             BLE_HID_DEVICE_NAME,
                             (unsigned int)pEvent->gap.hdr.status,
                             (unsigned int)pEvent->linkTerminate.reason,
                             (unsigned int)pEvent->linkTerminate.connectionHandle);
-                BLE_HID_StartAdvert();
+                if(g_ble_enabled != FALSE)
+                {
+                    BLE_HID_StartAdvert();
+                }
             }
             else if(pEvent->gap.opcode == GAP_END_DISCOVERABLE_DONE_EVENT)
             {

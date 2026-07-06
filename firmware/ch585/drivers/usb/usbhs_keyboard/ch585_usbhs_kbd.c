@@ -16,6 +16,7 @@ __attribute__((aligned(4))) uint8_t USBHS_EP0_Buf[DEF_USBD_UEP0_SIZE];
 __attribute__((aligned(4))) uint8_t USBHS_EP1_TX_Buf[DEF_USB_EP1_HS_SIZE];
 __attribute__((aligned(4))) uint8_t USBHS_EP2_TX_Buf[DEF_USB_EP2_HS_SIZE];
 __attribute__((aligned(4))) uint8_t USBHS_EP3_TX_Buf[DEF_USB_EP3_HS_SIZE];
+__attribute__((aligned(4))) uint8_t USBHS_EP4_TX_Buf[DEF_USB_EP4_HS_SIZE];
 __attribute__((aligned(4))) uint8_t USBHS_EP3_RX_Buf[DEF_USB_EP3_HS_SIZE];
 
 /* ─── 设备状态 ─── */
@@ -34,8 +35,8 @@ volatile uint16_t USBHS_SetupReqIndex;
 volatile uint16_t USBHS_SetupReqLen;
 
 /* ─── HID Class 暂存 ─── */
-volatile uint8_t  USBHS_HidIdle[3];        /* interface 0/1/2 */
-volatile uint8_t  USBHS_HidProtocol[3];
+volatile uint8_t  USBHS_HidIdle[4];        /* interface 0/1/2/3 */
+volatile uint8_t  USBHS_HidProtocol[4];
 
 /* ─── 端点忙标志 ─── */
 volatile uint8_t  USBHS_Endp_Busy[DEF_UEP_NUM];
@@ -51,18 +52,20 @@ void USBHS_KBD_Endp_Init(void)
     uint8_t i;
 
     /* 使能 TX: EP0/EP1/EP2/EP3，RX: EP0/EP3 */
-    R16_U2EP_TX_EN = RB_EP0_EN | RB_EP1_EN | RB_EP2_EN | RB_EP3_EN;
+    R16_U2EP_TX_EN = RB_EP0_EN | RB_EP1_EN | RB_EP2_EN | RB_EP3_EN | RB_EP4_EN;
     R16_U2EP_RX_EN = RB_EP0_EN | RB_EP3_EN;
 
     R32_U2EP0_MAX_LEN = DEF_USBD_UEP0_SIZE;
     R32_U2EP1_MAX_LEN = DEF_USB_EP1_HS_SIZE;
     R32_U2EP2_MAX_LEN = DEF_USB_EP2_HS_SIZE;
     R32_U2EP3_MAX_LEN = DEF_USB_EP3_HS_SIZE;
+    R32_U2EP4_MAX_LEN = DEF_USB_EP4_HS_SIZE;
 
     R32_U2EP0_DMA    = (uint32_t)(uint8_t *)USBHS_EP0_Buf;
     R32_U2EP1_TX_DMA = (uint32_t)(uint8_t *)USBHS_EP1_TX_Buf;
     R32_U2EP2_TX_DMA = (uint32_t)(uint8_t *)USBHS_EP2_TX_Buf;
     R32_U2EP3_TX_DMA = (uint32_t)(uint8_t *)USBHS_EP3_TX_Buf;
+    R32_U2EP4_TX_DMA = (uint32_t)(uint8_t *)USBHS_EP4_TX_Buf;
     R32_U2EP3_RX_DMA = (uint32_t)(uint8_t *)USBHS_EP3_RX_Buf;
 
     R8_U2EP0_TX_CTRL = USBHS_UEP_T_RES_NAK;
@@ -70,6 +73,7 @@ void USBHS_KBD_Endp_Init(void)
     R8_U2EP1_TX_CTRL = USBHS_UEP_T_RES_NAK;
     R8_U2EP2_TX_CTRL = USBHS_UEP_T_RES_NAK;
     R8_U2EP3_TX_CTRL = USBHS_UEP_T_RES_NAK;
+    R8_U2EP4_TX_CTRL = USBHS_UEP_T_RES_NAK;
     R8_U2EP3_RX_CTRL = USBHS_UEP_R_RES_ACK;
 
     for (i = 0; i < DEF_UEP_NUM; i++)
@@ -181,19 +185,19 @@ void USB2_DEVICE_IRQHandler(void)
                                         /* 通过 EP0 OUT 数据阶段处理 */
                                         break;
                                     case HID_SET_IDLE:
-                                        if (USBHS_SetupReqIndex <= 2)
+                                        if (USBHS_SetupReqIndex <= 3)
                                             USBHS_HidIdle[USBHS_SetupReqIndex] = (uint8_t)(USBHS_SetupReqValue >> 8);
                                         else
                                             errflag = 0xFF;
                                         break;
                                     case HID_SET_PROTOCOL:
-                                        if (USBHS_SetupReqIndex <= 2)
+                                        if (USBHS_SetupReqIndex <= 3)
                                             USBHS_HidProtocol[USBHS_SetupReqIndex] = (uint8_t)USBHS_SetupReqValue;
                                         else
                                             errflag = 0xFF;
                                         break;
                                     case HID_GET_IDLE:
-                                        if (USBHS_SetupReqIndex <= 2) {
+                                        if (USBHS_SetupReqIndex <= 3) {
                                             USBHS_EP0_Buf[0] = USBHS_HidIdle[USBHS_SetupReqIndex];
                                             len = 1;
                                         } else {
@@ -201,7 +205,7 @@ void USB2_DEVICE_IRQHandler(void)
                                         }
                                         break;
                                     case HID_GET_PROTOCOL:
-                                        if (USBHS_SetupReqIndex <= 2) {
+                                        if (USBHS_SetupReqIndex <= 3) {
                                             USBHS_EP0_Buf[0] = USBHS_HidProtocol[USBHS_SetupReqIndex];
                                             len = 1;
                                         } else {
@@ -262,6 +266,9 @@ void USB2_DEVICE_IRQHandler(void)
                                             } else if (USBHS_SetupReqIndex == 0x02) {
                                                 pUSBHS_Descr = &MyCfgDescr[68]; /* IF2 HID desc offset */
                                                 len = 9;
+                                            } else if (USBHS_SetupReqIndex == 0x03) {
+                                                pUSBHS_Descr = &MyCfgDescr[100]; /* IF3 HID desc offset */
+                                                len = 9;
                                             } else {
                                                 errflag = 0xFF;
                                             }
@@ -278,6 +285,9 @@ void USB2_DEVICE_IRQHandler(void)
                                                 len = 0;
                                                 pUSBHS_Descr = KeyRepDesc_Custom;
                                                 len = DEF_CUSTOM_REP_DESC_LEN;
+                                            } else if (USBHS_SetupReqIndex == 0x03) {
+                                                pUSBHS_Descr = KeyRepDesc_Mouse;
+                                                len = DEF_MOUSE_REP_DESC_LEN;
                                             } else {
                                                 errflag = 0xFF;
                                             }
@@ -328,6 +338,9 @@ void USB2_DEVICE_IRQHandler(void)
                                                 case (DEF_UEP_IN | DEF_UEP3):
                                                     R8_U2EP3_TX_CTRL = USBHS_UEP_T_TOG_DATA0 | USBHS_UEP_T_RES_NAK;
                                                     break;
+                                                case (DEF_UEP_IN | DEF_UEP4):
+                                                    R8_U2EP4_TX_CTRL = USBHS_UEP_T_TOG_DATA0 | USBHS_UEP_T_RES_NAK;
+                                                    break;
                                                 case DEF_UEP3:
                                                     R8_U2EP3_RX_CTRL = USBHS_UEP_R_TOG_DATA0 | USBHS_UEP_R_RES_ACK;
                                                     break;
@@ -365,6 +378,9 @@ void USB2_DEVICE_IRQHandler(void)
                                                 case (DEF_UEP_IN | DEF_UEP3):
                                                     R8_U2EP3_TX_CTRL = (R8_U2EP3_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_STALL;
                                                     break;
+                                                case (DEF_UEP_IN | DEF_UEP4):
+                                                    R8_U2EP4_TX_CTRL = (R8_U2EP4_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_STALL;
+                                                    break;
                                                 default:
                                                     errflag = 0xFF;
                                                     break;
@@ -397,6 +413,9 @@ void USB2_DEVICE_IRQHandler(void)
                                                 USBHS_EP0_Buf[0] = 0x01;
                                         } else if (ep == (DEF_UEP_IN | DEF_UEP3)) {
                                             if ((R8_U2EP3_TX_CTRL & USBHS_UEP_T_RES_MASK) == USBHS_UEP_T_RES_STALL)
+                                                USBHS_EP0_Buf[0] = 0x01;
+                                        } else if (ep == (DEF_UEP_IN | DEF_UEP4)) {
+                                            if ((R8_U2EP4_TX_CTRL & USBHS_UEP_T_RES_MASK) == USBHS_UEP_T_RES_STALL)
                                                 USBHS_EP0_Buf[0] = 0x01;
                                         } else {
                                             errflag = 0xFF;
@@ -516,6 +535,13 @@ void USB2_DEVICE_IRQHandler(void)
                     /* 通知上层EP3发送完成 */
                     extern void USB_HID_EP3_Complete(void);
                     USB_HID_EP3_Complete();
+                    break;
+
+                case DEF_UEP4:
+                    R8_U2EP4_TX_CTRL  = (R8_U2EP4_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
+                    R8_U2EP4_TX_CTRL ^= USBHS_UEP_T_TOG_DATA1;
+                    USBHS_Endp_Busy[DEF_UEP4] &= ~DEF_UEP_BUSY;
+                    R8_U2EP4_TX_CTRL &= ~USBHS_UEP_T_DONE;
                     break;
 
                 default:

@@ -2,7 +2,7 @@
  * rf_receiver.h - CH585 2.4G RF receiver protocol for USBHS HID output.
  *
  * Legacy frame format:
- * [0x55][len][16B kbd][2B consumer][target_id][seq][2B reserved][xor]
+ * [0x55][len][16B kbd][2B consumer][target_id][seq][wheel][reserved][xor]
  *
  * Runtime key-state short frame:
  * [0xB1][len=11][seq_lo][seq_hi][down_bits[8]][xor]
@@ -37,6 +37,7 @@ extern "C" {
 #define RF_RESERVED_OFFSET  20
 #define RF_TARGET_OFFSET    RF_RESERVED_OFFSET
 #define RF_SEQ_OFFSET       (RF_RESERVED_OFFSET + 1)
+#define RF_WHEEL_OFFSET     (RF_RESERVED_OFFSET + 2)
 #define RF_TARGET_BROADCAST 0
 
 #ifndef RF_LOCAL_TARGET_ID
@@ -52,6 +53,7 @@ extern "C" {
 void    RF_Receiver_Init(void);
 uint8_t RF_Receiver_GetKbdReport(uint8_t *out16);
 uint8_t RF_Receiver_GetConsumer(uint16_t *out_usage);
+uint8_t RF_Receiver_GetMouseWheel(int8_t *out_wheel);
 void    RF_Receiver_ServiceUsbHsReport(void);
 
 tmosEvents RFRx_ProcessEvent(tmosTaskID task_id, tmosEvents events);

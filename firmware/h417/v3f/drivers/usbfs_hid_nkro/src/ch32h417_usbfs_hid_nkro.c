@@ -15,8 +15,10 @@ static ch32h417_usbfs_hid_nkro_diag_t s_diag;
 
 #define H417_HID_REPORT_ID_NKRO      1U
 #define H417_HID_REPORT_ID_CONSUMER  2U
+#define H417_HID_REPORT_ID_MOUSE     3U
 #define H417_HID_NKRO_PACKET_BYTES   (AIK_NKRO_REPORT_BYTES + 1U)
 #define H417_HID_CONSUMER_PACKET_BYTES 3U
+#define H417_HID_MOUSE_PACKET_BYTES  5U
 
 void Delay_Us(uint32_t n)
 {
@@ -151,6 +153,40 @@ uint8_t ch32h417_usbfs_hid_nkro_submit_consumer(uint16_t usage)
                H417_HID_CONSUMER_PACKET_BYTES);
         USBFSD->UEP2_DMA = (uint32_t)USBFS_EP2_Buf;
         USBFSD_UEP_TLEN(DEF_UEP2) = H417_HID_CONSUMER_PACKET_BYTES;
+        USBFSD->UEP2_TX_CTRL =
+            (USBFSD->UEP2_TX_CTRL & (uint8_t)(~USBFS_UEP_T_RES_MASK)) |
+            USBFS_UEP_T_RES_ACK;
+        s_report_count++;
+        accepted = 1U;
+    }
+    refresh_diag();
+    NVIC_EnableIRQ(USBFS_IRQn);
+    return accepted;
+}
+
+uint8_t ch32h417_usbfs_hid_nkro_submit_mouse_wheel(int8_t wheel)
+{
+    uint8_t accepted = 0U;
+
+    if((wheel == 0) || (USBFS_DevEnumStatus == 0U) || (ep2_in_ready() == 0U))
+    {
+        refresh_diag();
+        return 0U;
+    }
+
+    NVIC_DisableIRQ(USBFS_IRQn);
+    if(ep2_in_ready() != 0U)
+    {
+        memset((void *)HID_Report_Buffer, 0, sizeof(HID_Report_Buffer));
+        HID_Report_Buffer[0] = H417_HID_REPORT_ID_MOUSE;
+        HID_Report_Buffer[1] = 0U;
+        HID_Report_Buffer[2] = 0U;
+        HID_Report_Buffer[3] = 0U;
+        HID_Report_Buffer[4] = (uint8_t)wheel;
+        memcpy((void *)USBFS_EP2_Buf, (void *)HID_Report_Buffer,
+               H417_HID_MOUSE_PACKET_BYTES);
+        USBFSD->UEP2_DMA = (uint32_t)USBFS_EP2_Buf;
+        USBFSD_UEP_TLEN(DEF_UEP2) = H417_HID_MOUSE_PACKET_BYTES;
         USBFSD->UEP2_TX_CTRL =
             (USBFSD->UEP2_TX_CTRL & (uint8_t)(~USBFS_UEP_T_RES_MASK)) |
             USBFS_UEP_T_RES_ACK;
