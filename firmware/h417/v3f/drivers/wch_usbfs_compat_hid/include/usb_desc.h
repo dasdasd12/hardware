@@ -70,7 +70,7 @@
  * exists , set the length to 0  */
 #define DEF_USBD_DEVICE_DESC_LEN     ((uint8_t)MyDevDescr[0])
 #define DEF_USBD_CONFIG_DESC_LEN     ((uint16_t)MyCfgDescr[2] + (uint16_t)(MyCfgDescr[3] << 8))
-#define DEF_USBD_REPORT_DESC_LEN     72
+#define DEF_USBD_REPORT_DESC_LEN     126
 #define DEF_USBD_LANG_DESC_LEN       ((uint16_t)MyLangDescr[0])
 #define DEF_USBD_MANU_DESC_LEN       ((uint16_t)MyManuInfo[0])
 #define DEF_USBD_PROD_DESC_LEN       ((uint16_t)MyProdInfo[0])

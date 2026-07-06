@@ -6,6 +6,8 @@
 
 #define V3F_TRACE_BASE ((volatile uint32_t *)0x20178000u)
 #define V3F_TRACE_MAGIC 0x56334650u
+#define V3F_TRACE_VIO18_INITIAL 47u
+#define V3F_TRACE_VIO18_CTLR    48u
 
 #ifndef V3F_WAKE_V5F
 #define V3F_WAKE_V5F 0
@@ -16,10 +18,28 @@
 volatile uint32_t WFE_MASK = 0;
 volatile uint32_t WFE_WkupSource = 0;
 
+static void v3f_board_delay_cycles(uint32_t cycles)
+{
+    volatile uint32_t i;
+
+    for(i = 0U; i < cycles; i++)
+    {
+        __asm volatile("nop");
+    }
+}
+
 void v3f_board_init(void)
 {
     SystemInit();
     RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE);
+
+    V3F_TRACE_BASE[V3F_TRACE_VIO18_INITIAL] =
+        (uint32_t)PWR_GetVIO18InitialStatus();
+    /* EVT reference code uses MODE3 for software-selected 3.3V VIO18. */
+    PWR_VIO18ModeCfg(PWR_VIO18CFGMODE_SW);
+    PWR_VIO18LevelCfg(PWR_VIO18Level_MODE3);
+    v3f_board_delay_cycles(10000U);
+    V3F_TRACE_BASE[V3F_TRACE_VIO18_CTLR] = PWR->CTLR;
 
 #if V3F_WAKE_V5F
     NVIC_WakeUp_V5F(V5F_START_ADDR);

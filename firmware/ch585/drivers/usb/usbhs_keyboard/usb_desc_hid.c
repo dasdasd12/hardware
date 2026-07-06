@@ -90,6 +90,36 @@ const uint8_t KeyRepDesc_Custom[] = {
     0xC0               // End Collection
 };
 
+const uint8_t KeyRepDesc_Mouse[] = {
+    0x05, 0x01,  // Usage Page (Generic Desktop)
+    0x09, 0x02,  // Usage (Mouse)
+    0xA1, 0x01,  // Collection (Application)
+    0x09, 0x01,  //   Usage (Pointer)
+    0xA1, 0x00,  //   Collection (Physical)
+    0x05, 0x09,  //     Usage Page (Button)
+    0x19, 0x01,  //     Usage Min (1)
+    0x29, 0x03,  //     Usage Max (3)
+    0x15, 0x00,  //     Logical Min (0)
+    0x25, 0x01,  //     Logical Max (1)
+    0x75, 0x01,  //     Report Size (1)
+    0x95, 0x03,  //     Report Count (3)
+    0x81, 0x02,  //     Input (Data,Var,Abs)
+    0x75, 0x05,  //     Report Size (5)
+    0x95, 0x01,  //     Report Count (1)
+    0x81, 0x03,  //     Input (Const,Var,Abs)
+    0x05, 0x01,  //     Usage Page (Generic Desktop)
+    0x09, 0x30,  //     Usage (X)
+    0x09, 0x31,  //     Usage (Y)
+    0x09, 0x38,  //     Usage (Wheel)
+    0x15, 0x81,  //     Logical Min (-127)
+    0x25, 0x7F,  //     Logical Max (127)
+    0x75, 0x08,  //     Report Size (8)
+    0x95, 0x03,  //     Report Count (3)
+    0x81, 0x06,  //     Input (Data,Var,Rel)
+    0xC0,        //   End Collection
+    0xC0         // End Collection
+};
+
 /* ─── 设备描述符 ─── */
 const uint8_t MyDevDescr[] = {
     0x12,                                    // bLength
@@ -108,12 +138,12 @@ const uint8_t MyDevDescr[] = {
     0x01                                     // bNumConfigurations
 };
 
-/* ─── 配置描述符（含3个接口）─── */
-/* wTotalLength = 9 + (9+9+7)×2 + (9+9+7+7) = 9+50+32 = 91 bytes */
+/* ─── 配置描述符（含4个接口）─── */
+/* wTotalLength = 9 + (9+9+7)*3 + (9+9+7+7) = 116 bytes */
 const uint8_t MyCfgDescr[] = {
     /* Configuration */
-    0x09, 0x02, 0x5B, 0x00, /* wTotalLength=91 */
-    0x03,                   /* bNumInterfaces */
+    0x09, 0x02, 0x74, 0x00, /* wTotalLength=116 */
+    0x04,                   /* bNumInterfaces */
     0x01, 0x00,             /* bConfigurationValue, iConfiguration */
     0xA0, 0x32,             /* bmAttributes（Bus+Remote Wakeup），MaxPower=100mA */
 
@@ -145,6 +175,15 @@ const uint8_t MyCfgDescr[] = {
     0x07, 0x05, 0x83, 0x03, 0x40, 0x00, 0x01,
     /* EP3 OUT，64B */
     0x07, 0x05, 0x03, 0x03, 0x40, 0x00, 0x01,
+
+    /* ── Interface 3：Mouse Wheel ── */
+    0x09, 0x04, 0x03, 0x00, 0x01, 0x03, 0x01, 0x02, 0x00,
+    /* HID Descriptor */
+    0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22,
+    (uint8_t)sizeof(KeyRepDesc_Mouse),
+    (uint8_t)(sizeof(KeyRepDesc_Mouse) >> 8),
+    /* EP4 IN，8B */
+    0x07, 0x05, 0x84, 0x03, 0x08, 0x00, 0x01,
 };
 
 /* ─── 语言描述符 ─── */

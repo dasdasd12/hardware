@@ -89,6 +89,7 @@ static const uint8_t hidReportMap[] = {
     0x05, 0x01, // Usage Pg (Generic Desktop)
     0x09, 0x06, // Usage (Keyboard)
     0xA1, 0x01, // Collection: (Application)
+    0x85, HID_RPT_ID_KEY_IN, // Report ID
                 //
     0x05, 0x07, // Usage Pg (Key Codes)
     0x19, 0xE0, // Usage Min (224)
@@ -129,9 +130,25 @@ static const uint8_t hidReportMap[] = {
     0x29, 0x81, // Usage Max (129)
     0x81, 0x00, // Input: (Data, Array)
                 //
+    0xC0,       // End Collection
+
+    0x05, 0x0C, // Usage Pg (Consumer)
+    0x09, 0x01, // Usage (Consumer Control)
+    0xA1, 0x01, // Collection: (Application)
+    0x85, HID_RPT_ID_CONSUMER_IN, // Report ID
+    0x15, 0x00, // Log Min (0)
+    0x25, 0x01, // Log Max (1)
+    0x09, 0xE2, // Usage (Mute)
+    0x09, 0xE9, // Usage (Volume Increment)
+    0x09, 0xEA, // Usage (Volume Decrement)
+    0x75, 0x01, // Report Size (1)
+    0x95, 0x03, // Report Count (3)
+    0x81, 0x02, // Input: (Data, Variable, Absolute)
+    0x75, 0x01, // Report Size (1)
+    0x95, 0x05, // Report Count (5)
+    0x81, 0x01, // Input: (Constant)
     0xC0        // End Collection
 };
-
 // HID report map length
 uint16_t hidReportMapLen = sizeof(hidReportMap);
 
@@ -174,6 +191,15 @@ static gattCharCfg_t hidReportKeyInClientCharCfg[GATT_MAX_NUM_CONN];
 // HID Report Reference characteristic descriptor, key input
 static uint8_t hidReportRefKeyIn[HID_REPORT_REF_LEN] =
     {HID_RPT_ID_KEY_IN, HID_REPORT_TYPE_INPUT};
+
+// HID Report characteristic, Consumer Control input
+static uint8_t       hidReportConsumerInProps = GATT_PROP_READ | GATT_PROP_NOTIFY;
+static uint8_t       hidReportConsumerIn;
+static gattCharCfg_t hidReportConsumerInClientCharCfg[GATT_MAX_NUM_CONN];
+
+// HID Report Reference characteristic descriptor, Consumer Control input
+static uint8_t hidReportRefConsumerIn[HID_REPORT_REF_LEN] =
+    {HID_RPT_ID_CONSUMER_IN, HID_REPORT_TYPE_INPUT};
 
 // HID Report characteristic, LED output
 static uint8_t hidReportLedOutProps = GATT_PROP_READ | GATT_PROP_WRITE | GATT_PROP_WRITE_NO_RSP;
@@ -313,6 +339,34 @@ static gattAttribute_t hidAttrTbl[] = {
         0,
         hidReportRefKeyIn},
 
+    // HID Report characteristic, Consumer Control input declaration
+    {
+        {ATT_BT_UUID_SIZE, characterUUID},
+        GATT_PERMIT_READ,
+        0,
+        &hidReportConsumerInProps},
+
+    // HID Report characteristic, Consumer Control input
+    {
+        {ATT_BT_UUID_SIZE, hidReportUUID},
+        GATT_PERMIT_ENCRYPT_READ,
+        0,
+        &hidReportConsumerIn},
+
+    // HID Report characteristic, Consumer Control client characteristic configuration
+    {
+        {ATT_BT_UUID_SIZE, clientCharCfgUUID},
+        GATT_PERMIT_READ | GATT_PERMIT_ENCRYPT_WRITE,
+        0,
+        (uint8_t *)&hidReportConsumerInClientCharCfg},
+
+    // HID Report Reference characteristic descriptor, Consumer Control input
+    {
+        {ATT_BT_UUID_SIZE, reportRefUUID},
+        GATT_PERMIT_READ,
+        0,
+        hidReportRefConsumerIn},
+
     // HID Report characteristic, LED output declaration
     {
         {ATT_BT_UUID_SIZE, characterUUID},
@@ -409,6 +463,11 @@ enum
     HID_REPORT_KEY_IN_IDX,       // HID Report characteristic, key input
     HID_REPORT_KEY_IN_CCCD_IDX,  // HID Report characteristic client characteristic configuration
     HID_REPORT_REF_KEY_IN_IDX,   // HID Report Reference characteristic descriptor, key input
+    HID_REPORT_CONSUMER_IN_DECL_IDX,  // HID Report characteristic, Consumer Control input declaration
+    HID_REPORT_CONSUMER_IN_IDX,       // HID Report characteristic, Consumer Control input
+    HID_REPORT_CONSUMER_IN_CCCD_IDX,  // HID Report characteristic client characteristic configuration
+    HID_REPORT_REF_CONSUMER_IN_IDX,   // HID Report Reference characteristic descriptor, Consumer Control input
+
     HID_REPORT_LED_OUT_DECL_IDX, // HID Report characteristic, LED output declaration
     HID_REPORT_LED_OUT_IDX,      // HID Report characteristic, LED output
     HID_REPORT_REF_LED_OUT_IDX,  // HID Report Reference characteristic descriptor, LED output
@@ -455,6 +514,7 @@ bStatus_t Hid_AddService(void)
 
     // Initialize Client Characteristic Configuration attributes
     GATTServApp_InitCharCfg(INVALID_CONNHANDLE, hidReportKeyInClientCharCfg);
+    GATTServApp_InitCharCfg(INVALID_CONNHANDLE, hidReportConsumerInClientCharCfg);
     GATTServApp_InitCharCfg(INVALID_CONNHANDLE, hidReportBootKeyInClientCharCfg);
 
     // Register GATT attribute list and CBs with GATT Server App
@@ -474,39 +534,45 @@ bStatus_t Hid_AddService(void)
     hidRptMap[0].cccdHandle = hidAttrTbl[HID_REPORT_KEY_IN_CCCD_IDX].handle;
     hidRptMap[0].mode = HID_PROTOCOL_MODE_REPORT;
 
-    // LED output report
-    hidRptMap[1].id = hidReportRefLedOut[0];
-    hidRptMap[1].type = hidReportRefLedOut[1];
-    hidRptMap[1].handle = hidAttrTbl[HID_REPORT_LED_OUT_IDX].handle;
-    hidRptMap[1].cccdHandle = 0;
+    // Consumer Control input report
+    hidRptMap[1].id = hidReportRefConsumerIn[0];
+    hidRptMap[1].type = hidReportRefConsumerIn[1];
+    hidRptMap[1].handle = hidAttrTbl[HID_REPORT_CONSUMER_IN_IDX].handle;
+    hidRptMap[1].cccdHandle = hidAttrTbl[HID_REPORT_CONSUMER_IN_CCCD_IDX].handle;
     hidRptMap[1].mode = HID_PROTOCOL_MODE_REPORT;
+
+    // LED output report
+    hidRptMap[2].id = hidReportRefLedOut[0];
+    hidRptMap[2].type = hidReportRefLedOut[1];
+    hidRptMap[2].handle = hidAttrTbl[HID_REPORT_LED_OUT_IDX].handle;
+    hidRptMap[2].cccdHandle = 0;
+    hidRptMap[2].mode = HID_PROTOCOL_MODE_REPORT;
 
     // Boot keyboard input report
     // Use same ID and type as key input report
-    hidRptMap[2].id = hidReportRefKeyIn[0];
-    hidRptMap[2].type = hidReportRefKeyIn[1];
-    hidRptMap[2].handle = hidAttrTbl[HID_BOOT_KEY_IN_IDX].handle;
-    hidRptMap[2].cccdHandle = hidAttrTbl[HID_BOOT_KEY_IN_CCCD_IDX].handle;
-    hidRptMap[2].mode = HID_PROTOCOL_MODE_BOOT;
+    hidRptMap[3].id = hidReportRefKeyIn[0];
+    hidRptMap[3].type = hidReportRefKeyIn[1];
+    hidRptMap[3].handle = hidAttrTbl[HID_BOOT_KEY_IN_IDX].handle;
+    hidRptMap[3].cccdHandle = hidAttrTbl[HID_BOOT_KEY_IN_CCCD_IDX].handle;
+    hidRptMap[3].mode = HID_PROTOCOL_MODE_BOOT;
 
     // Boot keyboard output report
     // Use same ID and type as LED output report
-    hidRptMap[3].id = hidReportRefLedOut[0];
-    hidRptMap[3].type = hidReportRefLedOut[1];
-    hidRptMap[3].handle = hidAttrTbl[HID_BOOT_KEY_OUT_IDX].handle;
-    hidRptMap[3].cccdHandle = 0;
-    hidRptMap[3].mode = HID_PROTOCOL_MODE_BOOT;
+    hidRptMap[4].id = hidReportRefLedOut[0];
+    hidRptMap[4].type = hidReportRefLedOut[1];
+    hidRptMap[4].handle = hidAttrTbl[HID_BOOT_KEY_OUT_IDX].handle;
+    hidRptMap[4].cccdHandle = 0;
+    hidRptMap[4].mode = HID_PROTOCOL_MODE_BOOT;
 
     // Feature report
-    hidRptMap[4].id = hidReportRefFeature[0];
-    hidRptMap[4].type = hidReportRefFeature[1];
-    hidRptMap[4].handle = hidAttrTbl[HID_FEATURE_IDX].handle;
-    hidRptMap[4].cccdHandle = 0;
-    hidRptMap[4].mode = HID_PROTOCOL_MODE_REPORT;
+    hidRptMap[5].id = hidReportRefFeature[0];
+    hidRptMap[5].type = hidReportRefFeature[1];
+    hidRptMap[5].handle = hidAttrTbl[HID_FEATURE_IDX].handle;
+    hidRptMap[5].cccdHandle = 0;
+    hidRptMap[5].mode = HID_PROTOCOL_MODE_REPORT;
 
     // Battery level input report
-    Batt_GetParameter(BATT_PARAM_BATT_LEVEL_IN_REPORT, &(hidRptMap[5]));
-
+    Batt_GetParameter(BATT_PARAM_BATT_LEVEL_IN_REPORT, &(hidRptMap[6]));
     // Setup report ID map
     HidDev_RegisterReports(HID_NUM_REPORTS, hidRptMap);
 

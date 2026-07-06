@@ -18,6 +18,7 @@
 /* 对外可见变量（hid层上层代码使用）*/
 uint8_t g_UsbKbdReport[KBD_REPORT_LEN];
 uint8_t g_UsbConsumerReport[CONSUMER_REPORT_LEN];
+uint8_t g_UsbMouseReport[MOUSE_REPORT_LEN];
 volatile uint8_t g_UsbConfigCmdReceived  = 0;
 uint8_t g_UsbConfigCmdBuf[CFG_EP_LEN];
 
@@ -36,6 +37,7 @@ void USB_HID_Init(void)
 {
     memset(g_UsbKbdReport, 0, sizeof(g_UsbKbdReport));
     memset(g_UsbConsumerReport, 0, sizeof(g_UsbConsumerReport));
+    memset(g_UsbMouseReport, 0, sizeof(g_UsbMouseReport));
 
     USBHS_KBD_Device_Init(ENABLE);
     PFIC_EnableIRQ(USB2_DEVICE_IRQn);
@@ -81,6 +83,23 @@ void USB_HID_SendConsumer(uint16_t usage)
     g_UsbConsumerReport[0] = (uint8_t)(usage & 0xFF);
     g_UsbConsumerReport[1] = (uint8_t)(usage >> 8);
     USBHS_Endp_DataUp(DEF_UEP2, g_UsbConsumerReport, CONSUMER_REPORT_LEN, DEF_UEP_DMA_LOAD);
+}
+
+/* -----------------------------------------------------------------------
+ * USB_HID_SendMouseWheel
+ * report: buttons=0, x=0, y=0, wheel=+/- delta
+ * ----------------------------------------------------------------------- */
+void USB_HID_SendMouseWheel(int8_t wheel)
+{
+    if(!USBHS_DevEnumStatus) return;
+    if(wheel == 0) return;
+    if(USBHS_Endp_Busy[DEF_UEP4] & DEF_UEP_BUSY) return;
+
+    g_UsbMouseReport[0] = 0;
+    g_UsbMouseReport[1] = 0;
+    g_UsbMouseReport[2] = 0;
+    g_UsbMouseReport[3] = (uint8_t)wheel;
+    USBHS_Endp_DataUp(DEF_UEP4, g_UsbMouseReport, MOUSE_REPORT_LEN, DEF_UEP_DMA_LOAD);
 }
 
 /* -----------------------------------------------------------------------

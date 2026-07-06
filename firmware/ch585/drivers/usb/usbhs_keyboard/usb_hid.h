@@ -24,6 +24,7 @@
  * 注：配置命令通过 EP3 传输，无 Report ID 区分 */
 #define KBD_REPORT_LEN    16
 #define CONSUMER_REPORT_LEN 2
+#define MOUSE_REPORT_LEN 4
 
 /* EP3 配置命令包长度 */
 #define CFG_EP_LEN        64
@@ -31,6 +32,7 @@
 extern volatile uint8_t USBHS_DevEnumStatus;
 extern uint8_t g_UsbKbdReport[KBD_REPORT_LEN];
 extern uint8_t g_UsbConsumerReport[CONSUMER_REPORT_LEN];
+extern uint8_t g_UsbMouseReport[MOUSE_REPORT_LEN];
 extern volatile uint8_t g_UsbConfigCmdReceived;
 extern uint8_t g_UsbConfigCmdBuf[CFG_EP_LEN];
 
@@ -39,6 +41,7 @@ void USB_HID_Enable(void);                            /* 启动 USBHS 控制器 
 void USB_HID_Disable(void);                           /* 停用 USBHS 控制器 */
 void USB_HID_SendKeyboard(const uint8_t *report);     /* report: KBD_REPORT_LEN 字节 */
 void USB_HID_SendConsumer(uint16_t usage);
+void USB_HID_SendMouseWheel(int8_t wheel);
 void USB_HID_SendConfigResp(const uint8_t *resp);
 uint8_t USB_HID_SendCustom64(const uint8_t *report);
 void USB_HID_SendADCMonitor(volatile uint16_t *adc9); /* 19 字节 ADC 监控包 */

@@ -81,6 +81,9 @@
 #define HID_MOD_RIGHT_ALT   0x40U
 #define HID_MOD_RIGHT_GUI   0x80U
 
+#define CH585_FN_LAYER_KEY       38U
+#define CH585_GLOBAL_DOWN_BYTES  ((AIK_KEY_COUNT_TOTAL + 7U) / 8U)
+
 typedef struct
 {
     uint8_t usage;
@@ -206,6 +209,51 @@ static uint8_t global_key_down(const aik_spi_half_state_v1_t *left,
     return half_key_down(left, (uint8_t)(key_id - AIK_KEY_COUNT_RIGHT));
 }
 
+static uint8_t fn_consumed_get(const uint8_t consumed[CH585_GLOBAL_DOWN_BYTES],
+                               uint8_t key_id)
+{
+    return (uint8_t)((consumed[key_id >> 3] >> (key_id & 7U)) & 1U);
+}
+
+static void fn_consumed_set(uint8_t consumed[CH585_GLOBAL_DOWN_BYTES],
+                            uint8_t key_id)
+{
+    consumed[key_id >> 3] |= (uint8_t)(1U << (key_id & 7U));
+}
+
+static void fn_consumed_clear(uint8_t consumed[CH585_GLOBAL_DOWN_BYTES],
+                              uint8_t key_id)
+{
+    consumed[key_id >> 3] &= (uint8_t)~(uint8_t)(1U << (key_id & 7U));
+}
+
+static void update_fn_consumed(const aik_spi_half_state_v1_t *left,
+                               const aik_spi_half_state_v1_t *right,
+                               uint8_t consumed[CH585_GLOBAL_DOWN_BYTES])
+{
+    uint8_t key_id;
+    uint8_t fn_down = global_key_down(left, right, CH585_FN_LAYER_KEY);
+
+    for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
+    {
+        if(global_key_down(left, right, key_id) == 0U)
+        {
+            fn_consumed_clear(consumed, key_id);
+        }
+    }
+
+    if(fn_down != 0U)
+    {
+        for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
+        {
+            if(global_key_down(left, right, key_id) != 0U)
+            {
+                fn_consumed_set(consumed, key_id);
+            }
+        }
+    }
+}
+
 static void apply_local_keyboard_controls(const aik_spi_half_state_v1_t *left,
                                           uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
@@ -240,6 +288,7 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
                                     const aik_spi_half_state_v1_t *right,
                                     uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
+    static uint8_t fn_consumed[CH585_GLOBAL_DOWN_BYTES];
     uint8_t key_id;
 
     if(nkro16 == 0)
@@ -248,11 +297,17 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
     }
 
     memset(nkro16, 0, AIK_NKRO_REPORT_BYTES);
+    update_fn_consumed(left, right, fn_consumed);
     for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
     {
         const ch585_key_output_t *output = &s_key_outputs[key_id];
 
         if(global_key_down(left, right, key_id) == 0U)
+        {
+            continue;
+        }
+
+        if(fn_consumed_get(fn_consumed, key_id) != 0U)
         {
             continue;
         }
@@ -290,4 +345,24 @@ uint16_t ch585_half_report_consumer_usage(const aik_spi_half_state_v1_t *left,
         return AIK_CONSUMER_USAGE_VOLUME_DOWN;
     }
     return AIK_CONSUMER_USAGE_NONE;
+}
+
+int8_t ch585_half_report_mouse_wheel(const aik_spi_half_state_v1_t *left,
+                                     const aik_spi_half_state_v1_t *right)
+{
+    (void)right;
+
+    if(left == 0)
+    {
+        return 0;
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_WHEEL_UP) != 0U)
+    {
+        return 1;
+    }
+    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN) != 0U)
+    {
+        return -1;
+    }
+    return 0;
 }

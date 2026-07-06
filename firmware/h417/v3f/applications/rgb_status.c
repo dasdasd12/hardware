@@ -8,22 +8,51 @@
 #define V3F_RGB_LED_COUNT 1
 #endif
 
+#define V3F_RGB_EFFECT_STATIC        0U
+#define V3F_RGB_EFFECT_SOLID_BREATH  1U
+#define V3F_RGB_EFFECT_RAINBOW_FLOW  2U
+#define V3F_RGB_EFFECT_BREATH_FLOW   3U
+
 #ifndef V3F_RGB_EFFECT_COUNT
-#define V3F_RGB_EFFECT_COUNT 3U
+#define V3F_RGB_EFFECT_COUNT 4U
+#endif
+
+#ifndef V3F_RGB_DEFAULT_EFFECT
+#define V3F_RGB_DEFAULT_EFFECT V3F_RGB_EFFECT_BREATH_FLOW
 #endif
 
 #ifndef V3F_RGB_UPDATE_TICKS
-#define V3F_RGB_UPDATE_TICKS 128U
+#define V3F_RGB_UPDATE_TICKS 32U
+#endif
+
+#ifndef V3F_RGB_PHASE_STEP
+#define V3F_RGB_PHASE_STEP 2U
+#endif
+
+#ifndef V3F_RGB_MAX_BRIGHTNESS
+#define V3F_RGB_MAX_BRIGHTNESS 255U
+#endif
+
+#ifndef V3F_RGB_DEFAULT_ENABLED
+#define V3F_RGB_DEFAULT_ENABLED 0U
+#endif
+
+#ifndef V3F_RGB_BOOT_RETRY_TICKS
+#define V3F_RGB_BOOT_RETRY_TICKS 256U
 #endif
 
 #if V3F_ENABLE_RGB_STATUS
 #include "ch32h417_pioc_rgb1w.h"
 
 static uint8_t s_rgb_grb[V3F_RGB_LED_COUNT * 3U];
-static uint8_t s_rgb_enabled = 1U;
-static uint8_t s_rgb_effect;
+static uint8_t s_rgb_enabled = (V3F_RGB_DEFAULT_ENABLED != 0U) ? 1U : 0U;
+static uint8_t s_rgb_effect = V3F_RGB_DEFAULT_EFFECT;
 static uint8_t s_rgb_phase;
 static uint16_t s_rgb_last_tick;
+static uint16_t s_rgb_boot_retry_ticks;
+static uint32_t s_rgb_render_count;
+static uint32_t s_rgb_error_count;
+static uint8_t s_rgb_last_result;
 #endif
 
 #if V3F_ENABLE_RGB_STATUS
@@ -108,14 +137,14 @@ static void rgb_render(void)
     }
     else if(s_rgb_effect == 0U)
     {
-        rgb_fill(0U, 24U, 32U);
+        rgb_fill(0U, V3F_RGB_MAX_BRIGHTNESS, V3F_RGB_MAX_BRIGHTNESS);
     }
-    else if(s_rgb_effect == 1U)
+    else if(s_rgb_effect == V3F_RGB_EFFECT_SOLID_BREATH)
     {
-        uint8_t brightness = (uint8_t)(8U + (rgb_triangle(s_rgb_phase) >> 3));
-        rgb_fill(0U, brightness, (uint8_t)(brightness + 8U));
+        uint8_t brightness = rgb_triangle(s_rgb_phase);
+        rgb_fill(0U, brightness, brightness);
     }
-    else
+    else if(s_rgb_effect == V3F_RGB_EFFECT_RAINBOW_FLOW)
     {
         for(i = 0U; i < V3F_RGB_LED_COUNT; i++)
         {
@@ -124,22 +153,49 @@ static void rgb_render(void)
             uint8_t blue;
             uint8_t hue = (uint8_t)(s_rgb_phase + (uint8_t)(i * 7U));
 
-            rgb_hue(hue, 24U, &red, &green, &blue);
+            rgb_hue(hue, V3F_RGB_MAX_BRIGHTNESS, &red, &green, &blue);
+            rgb_put(i, red, green, blue);
+        }
+    }
+    else
+    {
+        uint8_t breath = rgb_triangle(s_rgb_phase);
+
+        for(i = 0U; i < V3F_RGB_LED_COUNT; i++)
+        {
+            uint8_t red;
+            uint8_t green;
+            uint8_t blue;
+            uint8_t hue = (uint8_t)((uint8_t)(s_rgb_phase * 2U) +
+                                    (uint8_t)(i * 5U));
+
+            rgb_hue(hue, breath, &red, &green, &blue);
             rgb_put(i, red, green, blue);
         }
     }
 
-    (void)ch32h417_pioc_rgb1w_send_ram(&ch32h417_pioc_rgb1w_pin_pf13,
-                                       s_rgb_grb,
-                                       (uint16_t)sizeof(s_rgb_grb),
-                                       100000U);
+    s_rgb_last_result =
+        ch32h417_pioc_rgb1w_send_ram(&ch32h417_pioc_rgb1w_pin_pf13,
+                                     s_rgb_grb,
+                                     (uint16_t)sizeof(s_rgb_grb),
+                                     100000U);
+    s_rgb_render_count++;
+    if(s_rgb_last_result != CH32H417_PIOC_RGB1W_OK)
+    {
+        s_rgb_error_count++;
+    }
 }
 #endif
 
 void v3f_rgb_status_init(void)
 {
 #if V3F_ENABLE_RGB_STATUS
+    if(s_rgb_effect >= V3F_RGB_EFFECT_COUNT)
+    {
+        s_rgb_effect = V3F_RGB_EFFECT_STATIC;
+    }
     ch32h417_pioc_rgb1w_init(&ch32h417_pioc_rgb1w_pin_pf13);
+    s_rgb_boot_retry_ticks = V3F_RGB_BOOT_RETRY_TICKS;
     rgb_render();
 #endif
 }
@@ -148,10 +204,16 @@ void v3f_rgb_status_red_once(void)
 {
 #if V3F_ENABLE_RGB_STATUS
     rgb_fill(32U, 0U, 0U);
-    (void)ch32h417_pioc_rgb1w_send_ram(&ch32h417_pioc_rgb1w_pin_pf13,
-                                       s_rgb_grb,
-                                       (uint16_t)sizeof(s_rgb_grb),
-                                       100000U);
+    s_rgb_last_result =
+        ch32h417_pioc_rgb1w_send_ram(&ch32h417_pioc_rgb1w_pin_pf13,
+                                     s_rgb_grb,
+                                     (uint16_t)sizeof(s_rgb_grb),
+                                     100000U);
+    s_rgb_render_count++;
+    if(s_rgb_last_result != CH32H417_PIOC_RGB1W_OK)
+    {
+        s_rgb_error_count++;
+    }
 #endif
 }
 
@@ -189,6 +251,7 @@ void v3f_rgb_status_task(uint16_t tick)
 {
 #if V3F_ENABLE_RGB_STATUS
     uint16_t elapsed = (uint16_t)(tick - s_rgb_last_tick);
+    uint8_t boot_retry = (s_rgb_boot_retry_ticks != 0U) ? 1U : 0U;
 
     if(elapsed < V3F_RGB_UPDATE_TICKS)
     {
@@ -196,14 +259,58 @@ void v3f_rgb_status_task(uint16_t tick)
     }
 
     s_rgb_last_tick = tick;
-    s_rgb_phase = (uint8_t)(s_rgb_phase + 3U);
+    s_rgb_phase = (uint8_t)(s_rgb_phase + V3F_RGB_PHASE_STEP);
+    if(s_rgb_boot_retry_ticks != 0U)
+    {
+        s_rgb_boot_retry_ticks--;
+    }
     if((s_rgb_enabled == 0U) || (s_rgb_effect == 0U))
     {
+        if(boot_retry != 0U)
+        {
+            rgb_render();
+        }
         return;
     }
 
     rgb_render();
 #else
     (void)tick;
+#endif
+}
+
+uint8_t v3f_rgb_status_effect(void)
+{
+#if V3F_ENABLE_RGB_STATUS
+    return s_rgb_effect;
+#else
+    return 0U;
+#endif
+}
+
+uint8_t v3f_rgb_status_last_result(void)
+{
+#if V3F_ENABLE_RGB_STATUS
+    return s_rgb_last_result;
+#else
+    return 0U;
+#endif
+}
+
+uint32_t v3f_rgb_status_render_count(void)
+{
+#if V3F_ENABLE_RGB_STATUS
+    return s_rgb_render_count;
+#else
+    return 0U;
+#endif
+}
+
+uint32_t v3f_rgb_status_error_count(void)
+{
+#if V3F_ENABLE_RGB_STATUS
+    return s_rgb_error_count;
+#else
+    return 0U;
 #endif
 }

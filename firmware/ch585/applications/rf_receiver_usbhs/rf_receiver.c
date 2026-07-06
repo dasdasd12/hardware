@@ -17,7 +17,12 @@ static volatile uint8_t g_rx_buf_index;
 /* ─── 解码后的报告（供 USB 层读取）─── */
 static uint8_t  g_kbd_report[16];
 static uint16_t g_consumer_usage;
+static volatile int16_t g_mouse_wheel_pending;
 static volatile uint8_t g_report_ready = 0;
+static volatile uint8_t g_consumer_ready = 0;
+static volatile uint8_t g_mouse_wheel_ready = 0;
+static volatile uint32_t g_mouse_wheel_count = 0;
+static volatile int8_t g_last_mouse_wheel = 0;
 
 #define HID_KEY_MIN        0x04
 #define HID_KEY_MAX_NKRO   0x6F
@@ -95,6 +100,9 @@ static rfipRx_t      g_rx_param;
 /* ─── TMOS 事件位 ─── */
 #define RX_START_EVT    0x0001
 #define RX_STATS_EVT    0x0002
+#define RX_WATCHDOG_EVT 0x0004
+
+#define RX_WATCHDOG_PERIOD_MS 100U
 
 static volatile uint32_t g_rx_irq_count;
 static volatile uint32_t g_stress_ok_count;
@@ -111,6 +119,7 @@ static volatile uint8_t  g_have_stress_seq;
 static volatile int8_t   g_last_rssi;
 static volatile uint32_t g_usb_hs_sent_count;
 static volatile uint32_t g_usb_hs_drop_count;
+static volatile uint32_t g_rx_watchdog_rearm_count;
 static volatile uint8_t  g_usb_hs_report_pending;
 static volatile uint32_t g_kbd_nonzero_count;
 static uint8_t g_usb_hs_report[64];
@@ -296,8 +305,12 @@ void RF_RX_ProcessCallBack(rfRole_States_t sta, uint8_t id)
                 if(memcmp(g_kbd_report, next_report, sizeof(g_kbd_report)) != 0)
                 {
                     memcpy(g_kbd_report, next_report, sizeof(g_kbd_report));
-                    g_consumer_usage = 0;
                     g_report_ready = 1;
+                }
+                if(g_consumer_usage != 0U)
+                {
+                    g_consumer_usage = 0U;
+                    g_consumer_ready = 1U;
                 }
             }
 
@@ -321,7 +334,41 @@ void RF_RX_ProcessCallBack(rfRole_States_t sta, uint8_t id)
                     g_kbd_nonzero_count++;
                 }
                 /* Consumer */
-                g_consumer_usage = (uint16_t)p[RF_CONSUMER_OFFSET] | ((uint16_t)p[RF_CONSUMER_OFFSET + 1] << 8);
+                {
+                    uint16_t next_consumer_usage =
+                        (uint16_t)p[RF_CONSUMER_OFFSET] |
+                        ((uint16_t)p[RF_CONSUMER_OFFSET + 1] << 8);
+
+                    if(next_consumer_usage != g_consumer_usage)
+                    {
+                        g_consumer_usage = next_consumer_usage;
+                        g_consumer_ready = 1U;
+                    }
+                }
+                {
+                    int8_t wheel_delta = (int8_t)p[RF_WHEEL_OFFSET];
+
+                    if(wheel_delta > 0)
+                    {
+                        if(g_mouse_wheel_pending < 127)
+                        {
+                            g_mouse_wheel_pending++;
+                        }
+                        g_mouse_wheel_ready = 1;
+                        g_mouse_wheel_count++;
+                        g_last_mouse_wheel = wheel_delta;
+                    }
+                    else if(wheel_delta < 0)
+                    {
+                        if(g_mouse_wheel_pending > -127)
+                        {
+                            g_mouse_wheel_pending--;
+                        }
+                        g_mouse_wheel_ready = 1;
+                        g_mouse_wheel_count++;
+                        g_last_mouse_wheel = wheel_delta;
+                    }
+                }
                 g_report_ready = 1;
                 g_legacy_ok_count++;
             }
@@ -353,6 +400,21 @@ tmosEvents RFRx_ProcessEvent(tmosTaskID task_id, tmosEvents events)
         rx_start();
         return events ^ RX_START_EVT;
     }
+    if (events & RX_WATCHDOG_EVT) {
+        static uint32_t last_irq_seen;
+        uint32_t irq = g_rx_irq_count;
+
+        if(irq == last_irq_seen)
+        {
+            g_rx_watchdog_rearm_count++;
+            rx_start();
+        }
+        else
+        {
+            last_irq_seen = irq;
+        }
+        return events ^ RX_WATCHDOG_EVT;
+    }
     if (events & RX_STATS_EVT) {
         uint32_t key_state = g_key_state_ok_count;
 
@@ -364,6 +426,8 @@ tmosEvents RFRx_ProcessEvent(tmosTaskID task_id, tmosEvents events)
         static uint32_t last_bad_len;
         static uint32_t last_crcerr;
         static uint32_t last_key_state;
+        static uint32_t last_mouse_wheel;
+        static uint32_t last_watchdog;
 
         uint32_t irq = g_rx_irq_count;
         uint32_t ok = g_stress_ok_count;
@@ -371,21 +435,27 @@ tmosEvents RFRx_ProcessEvent(tmosTaskID task_id, tmosEvents events)
         uint32_t bad_xor = g_bad_xor_count;
         uint32_t bad_len = g_bad_len_count;
         uint32_t crcerr = g_crcerr_count;
+        uint32_t mouse_wheel = g_mouse_wheel_count;
+        uint32_t watchdog = g_rx_watchdog_rearm_count;
 
-        PRINT("rf8k rx=%lu stress/s=%lu key/s=%lu lost/s=%lu total_stress=%lu total_key=%lu total_lost=%lu bad_xor/s=%lu bad_len/s=%lu crc/s=%lu rssi=%d seq=%u key_seq=%u\r\n",
+        PRINT("rf8k rx=%lu stress/s=%lu key/s=%lu wheel/s=%lu lost/s=%lu wd/s=%lu total_stress=%lu total_key=%lu total_wheel=%lu total_lost=%lu bad_xor/s=%lu bad_len/s=%lu crc/s=%lu rssi=%d seq=%u key_seq=%u last_wheel=%d\r\n",
               irq - last_irq,
               ok - last_ok,
               key_state - last_key_state,
+              mouse_wheel - last_mouse_wheel,
               lost - last_lost,
+              watchdog - last_watchdog,
               ok,
               key_state,
+              mouse_wheel,
               lost,
               bad_xor - last_bad_xor,
               bad_len - last_bad_len,
               crcerr - last_crcerr,
               g_last_rssi,
               g_last_stress_seq,
-              g_last_key_state_seq);
+              g_last_key_state_seq,
+              (int)g_last_mouse_wheel);
 
         last_irq = irq;
         last_ok = ok;
@@ -394,6 +464,8 @@ tmosEvents RFRx_ProcessEvent(tmosTaskID task_id, tmosEvents events)
         last_bad_len = bad_len;
         last_crcerr = crcerr;
         last_key_state = key_state;
+        last_mouse_wheel = mouse_wheel;
+        last_watchdog = watchdog;
 #endif
 
         build_usb_hs_report((key_state != 0) ? g_last_key_state_seq : g_last_stress_seq);
@@ -439,8 +511,11 @@ void RF_Receiver_Init(void)
     /* 触发 TMOS 启动首次接收 */
     tmos_set_event(g_rx_task_id, RX_START_EVT);
     tmos_start_reload_task(g_rx_task_id, RX_STATS_EVT, MS1_TO_SYSTEM_TIME(1000));
+    tmos_start_reload_task(g_rx_task_id,
+                           RX_WATCHDOG_EVT,
+                           MS1_TO_SYSTEM_TIME(RX_WATCHDOG_PERIOD_MS));
 
-    PRINT("rf rx usbhs init: legacy keyboard + 8K key-state/stress short frames, 2M PHY\r\n");
+    PRINT("rf rx usbhs init: legacy keyboard/consumer/mouse-wheel + 8K key-state/stress short frames, 2M PHY\r\n");
 }
 
 /*******************************************************************************
@@ -478,6 +553,42 @@ void RF_Receiver_ServiceUsbHsReport(void)
  ******************************************************************************/
 uint8_t RF_Receiver_GetConsumer(uint16_t *out_usage)
 {
+    if((out_usage == 0) || (g_consumer_ready == 0U))
+    {
+        return 0;
+    }
+
     *out_usage = g_consumer_usage;
+    g_consumer_ready = 0U;
+    return 1;
+}
+
+uint8_t RF_Receiver_GetMouseWheel(int8_t *out_wheel)
+{
+    if((out_wheel == 0) || (g_mouse_wheel_ready == 0))
+    {
+        return 0;
+    }
+
+    if(g_mouse_wheel_pending > 0)
+    {
+        g_mouse_wheel_pending--;
+        *out_wheel = 1;
+    }
+    else if(g_mouse_wheel_pending < 0)
+    {
+        g_mouse_wheel_pending++;
+        *out_wheel = -1;
+    }
+    else
+    {
+        g_mouse_wheel_ready = 0;
+        return 0;
+    }
+
+    if(g_mouse_wheel_pending == 0)
+    {
+        g_mouse_wheel_ready = 0;
+    }
     return 1;
 }
