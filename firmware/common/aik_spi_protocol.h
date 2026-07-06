@@ -43,12 +43,17 @@ extern "C" {
 #define AIK_LEFT_LOCAL_BIT_SCR_RIGHT  38U
 #define AIK_LEFT_LOCAL_BIT_SCR_LEFT   39U
 #define AIK_LEFT_LOCAL_BIT_SCR_CENTER 40U
-#define AIK_HALF_FRAME_BITS_LEFT      41U
+#define AIK_LEFT_LOCAL_BIT_SCR_WHEEL_UP   41U
+#define AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN 42U
+#define AIK_HALF_FRAME_BITS_LEFT      43U
 
 #define AIK_RIGHT_LOCAL_BIT_EC11_CW   41U
 #define AIK_RIGHT_LOCAL_BIT_EC11_CCW  42U
 #define AIK_RIGHT_LOCAL_BIT_EC11_MUTE 43U
-#define AIK_HALF_FRAME_BITS_RIGHT     44U
+#define AIK_RIGHT_LOCAL_ROTARY_CW_COUNT_SHIFT   44U
+#define AIK_RIGHT_LOCAL_ROTARY_CCW_COUNT_SHIFT  46U
+#define AIK_RIGHT_LOCAL_ROTARY_COUNT_MASK       0x03U
+#define AIK_HALF_FRAME_BITS_RIGHT     48U
 
 #define AIK_CONSUMER_USAGE_NONE        0x0000U
 #define AIK_CONSUMER_USAGE_MUTE        0x00E2U
@@ -183,6 +188,43 @@ static inline void aik_spi_half_set_bit(aik_spi_half_state_v1_t *state,
     }
 }
 
+static inline uint8_t aik_spi_half_get_2bit(const aik_spi_half_state_v1_t *state,
+                                            uint8_t bit_shift)
+{
+    uint8_t value = 0U;
+
+    if((state == 0) || ((uint8_t)(bit_shift + 1U) >=
+                        (AIK_HALF_DOWN_BITS_BYTES * 8U)))
+    {
+        return 0U;
+    }
+
+    value = aik_spi_half_bit_down(state, bit_shift);
+    value |= (uint8_t)(aik_spi_half_bit_down(state,
+                                             (uint8_t)(bit_shift + 1U)) << 1);
+    return value;
+}
+
+static inline void aik_spi_half_set_2bit(aik_spi_half_state_v1_t *state,
+                                         uint8_t bit_shift,
+                                         uint8_t value)
+{
+    if((state == 0) || ((uint8_t)(bit_shift + 1U) >=
+                        (AIK_HALF_DOWN_BITS_BYTES * 8U)))
+    {
+        return;
+    }
+
+    if((value & 0x01U) != 0U)
+    {
+        aik_spi_half_set_bit(state, bit_shift);
+    }
+    if((value & 0x02U) != 0U)
+    {
+        aik_spi_half_set_bit(state, (uint8_t)(bit_shift + 1U));
+    }
+}
+
 static inline uint16_t aik_spi_host_cmd_consumer_usage(
     const aik_spi_host_cmd_v1_t *cmd)
 {
@@ -202,6 +244,26 @@ static inline void aik_spi_host_cmd_set_consumer_usage(
     {
         cmd->reserved[0] = (uint8_t)(usage & 0xFFU);
         cmd->reserved[1] = (uint8_t)(usage >> 8);
+    }
+}
+
+static inline int8_t aik_spi_host_cmd_consumer_delta(
+    const aik_spi_host_cmd_v1_t *cmd)
+{
+    if(cmd == 0)
+    {
+        return 0;
+    }
+    return (int8_t)cmd->reserved[2];
+}
+
+static inline void aik_spi_host_cmd_set_consumer_delta(
+    aik_spi_host_cmd_v1_t *cmd,
+    int8_t delta)
+{
+    if(cmd != 0)
+    {
+        cmd->reserved[2] = (uint8_t)delta;
     }
 }
 

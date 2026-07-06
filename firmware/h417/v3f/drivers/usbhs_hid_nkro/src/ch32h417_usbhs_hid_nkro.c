@@ -21,8 +21,10 @@ static ch32h417_usbhs_hid_nkro_diag_t s_diag;
 
 #define H417_HID_REPORT_ID_NKRO      1U
 #define H417_HID_REPORT_ID_CONSUMER  2U
+#define H417_HID_REPORT_ID_MOUSE     3U
 #define H417_HID_NKRO_PACKET_BYTES   (AIK_NKRO_REPORT_BYTES + 1U)
 #define H417_HID_CONSUMER_PACKET_BYTES 3U
+#define H417_HID_MOUSE_PACKET_BYTES  5U
 
 static void refresh_diag(void)
 {
@@ -154,6 +156,35 @@ uint8_t ch32h417_usbhs_hid_nkro_submit_consumer(uint16_t usage)
         s_pending_report[1] = (uint8_t)(usage & 0xFFU);
         s_pending_report[2] = (uint8_t)(usage >> 8);
         s_pending_len = H417_HID_CONSUMER_PACKET_BYTES;
+        s_pending_full = 1U;
+        arm_pending_if_ready_locked();
+        accepted = 1U;
+    }
+    refresh_diag();
+    NVIC_EnableIRQ(USBHS_IRQn);
+    return accepted;
+}
+
+uint8_t ch32h417_usbhs_hid_nkro_submit_mouse_wheel(int8_t wheel)
+{
+    uint8_t accepted = 0U;
+
+    if(wheel == 0)
+    {
+        refresh_diag();
+        return 0U;
+    }
+
+    NVIC_DisableIRQ(USBHS_IRQn);
+    if((USBHS_DevEnumStatus != 0U) && (s_pending_full == 0U) &&
+       (s_in_flight == 0U))
+    {
+        s_pending_report[0] = H417_HID_REPORT_ID_MOUSE;
+        s_pending_report[1] = 0U;
+        s_pending_report[2] = 0U;
+        s_pending_report[3] = 0U;
+        s_pending_report[4] = (uint8_t)wheel;
+        s_pending_len = H417_HID_MOUSE_PACKET_BYTES;
         s_pending_full = 1U;
         arm_pending_if_ready_locked();
         accepted = 1U;

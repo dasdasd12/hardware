@@ -5,7 +5,11 @@
 #include "CH58x_common.h"
 
 #ifndef CH585_SPI0_SLAVE_LINK_TMOS_HOOK
+#if defined(CH585_BLE_HID_ENABLE) && (CH585_BLE_HID_ENABLE != 0)
+#define CH585_SPI0_SLAVE_LINK_TMOS_HOOK 1
+#else
 #define CH585_SPI0_SLAVE_LINK_TMOS_HOOK 0
+#endif
 #endif
 
 #if CH585_SPI0_SLAVE_LINK_TMOS_HOOK

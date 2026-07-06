@@ -99,6 +99,7 @@ void Main_Circulation(void)
 {
     uint8_t nkro16[16];
     uint16_t consumer_usage;
+    int8_t mouse_wheel;
 
     while(1)
     {
@@ -111,11 +112,16 @@ void Main_Circulation(void)
         if(RF_Receiver_GetKbdReport(nkro16))
         {
             USB_HID_SendKeyboard(nkro16);
+        }
 
-            if(RF_Receiver_GetConsumer(&consumer_usage))
-            {
-                USB_HID_SendConsumer(consumer_usage);
-            }
+        if(RF_Receiver_GetConsumer(&consumer_usage))
+        {
+            USB_HID_SendConsumer(consumer_usage);
+        }
+
+        if(RF_Receiver_GetMouseWheel(&mouse_wheel))
+        {
+            USB_HID_SendMouseWheel(mouse_wheel);
         }
     }
 }
