@@ -1775,6 +1775,10 @@ static void load_l8_clut_after_layer_start(void)
     (void)ch32h417_ltdc_rgb_layer1_load_clut_rgb888(
         s_gpha_l8_ltdc_clut_rgb888,
         CH32H417_LTDC_RGB_CLUT_ENTRIES);
+#elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_LTDC_UI_FRAMES
+    (void)ch32h417_ltdc_rgb_layer1_load_clut_rgb888(
+        v5f_ltdc_ui_frames_clut_rgb888(),
+        CH32H417_LTDC_RGB_CLUT_ENTRIES);
 #else
     ch32h417_ltdc_rgb_layer1_load_grayscale_clut();
 #endif
@@ -3870,6 +3874,14 @@ static void run_ltdc_rgb565_diag_test(void)
 }
 #endif
 
+#if APP_V5F_HW_TEST == APP_V5F_HW_TEST_LTDC_UI_FRAMES
+static void run_ltdc_ui_frames_test(void)
+{
+    g_v5f_hw_test_diag.phase = V5F_HW_PHASE_RUNNING;
+    v5f_ltdc_ui_frames_run(s_lcd_fb);
+}
+#endif
+
 static int lcd_start_layer_at(uint16_t width,
                               uint16_t height,
                               uint32_t pixel_format,
@@ -5577,6 +5589,9 @@ static void v5f_hw_thread_entry(void *parameter)
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_FLASH_L8_ASSETS
     ch32h417_ltdc_rgb_fb_fill_l8(l8_fb(), V5F_L8_FB_BYTES, 0u);
     result = lcd_start_l8_fullscreen();
+#elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_LTDC_UI_FRAMES
+    ch32h417_ltdc_rgb_fb_fill_l8(l8_fb(), V5F_L8_FB_BYTES, 0u);
+    result = lcd_start_l8_fullscreen();
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_LTDC_RGB565_DIAG
     fb_draw_rgb565_channel_diag();
     result = lcd_start_rgb565_window();
@@ -5612,6 +5627,8 @@ static void v5f_hw_thread_entry(void *parameter)
     run_ltdc_test();
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_LTDC_L8_PALETTE_IMAGE
     run_ltdc_l8_palette_image_test();
+#elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_LTDC_UI_FRAMES
+    run_ltdc_ui_frames_test();
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_LTDC_RGB565_DIAG
     run_ltdc_rgb565_diag_test();
 #elif APP_V5F_HW_TEST == APP_V5F_HW_TEST_SDRAM_MEMTEST

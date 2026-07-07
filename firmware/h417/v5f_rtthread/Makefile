@@ -45,6 +45,7 @@ RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
 #   ltdc  - full-screen L8 grayscale image LTDC framebuffer test
 #   ltdc_l8_palette_image - full-screen 256-color L8 palette image test
 #   ltdc_rgb565_diag - RGB565 direct-output diagnostic bands
+#   ltdc_ui_frames - three-frame Claude Code style L8 UI demo
 #   gpha_r2m_fill - GPHA register-to-memory fill animation
 #   gpha_pfc_l8_rgb565 - GPHA L8/CLUT to RGB565 pixel-format conversion
 #   gpha_blend_rgb565 - GPHA ARGB4444-over-RGB565 blend to RGB565
@@ -99,6 +100,9 @@ APP_V5F_HW_TEST_ID := 16
 else ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
 APP_ENABLE_V5F_HW_TEST := 1
 APP_V5F_HW_TEST_ID := 17
+else ifeq ($(APP_V5F_HW_TEST),ltdc_ui_frames)
+APP_ENABLE_V5F_HW_TEST := 1
+APP_V5F_HW_TEST_ID := 18
 else
 $(error Unknown APP_V5F_HW_TEST '$(APP_V5F_HW_TEST)')
 endif
@@ -263,6 +267,9 @@ APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/h417_v5f_sdram_offic
 endif
 ifeq ($(APP_V5F_HW_TEST),flash_l8_assets)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/gd5f1g_l8_asset_store.c
+endif
+ifeq ($(APP_V5F_HW_TEST),ltdc_ui_frames)
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/v5f_ltdc_ui_frames.c
 endif
 ifeq ($(APP_V5F_HW_TEST),ltdc)
 APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/ltdc/v5f_ltdc_gray_image.S

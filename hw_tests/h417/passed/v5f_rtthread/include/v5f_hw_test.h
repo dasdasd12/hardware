@@ -21,6 +21,7 @@
 #define APP_V5F_HW_TEST_CH585_SPI_SPEED 15
 #define APP_V5F_HW_TEST_CH585_ADC_KEY_CAL 16
 #define APP_V5F_HW_TEST_SDRAM_OFFICIAL_16BIT 17
+#define APP_V5F_HW_TEST_LTDC_UI_FRAMES 18
 
 typedef struct
 {
@@ -54,5 +55,9 @@ typedef struct
 extern volatile v5f_hw_test_diag_t g_v5f_hw_test_diag;
 
 int v5f_hw_test_start(void);
+
+/* v5f_ltdc_ui_frames.c - three-frame Claude Code style L8 UI demo */
+const uint8_t *v5f_ltdc_ui_frames_clut_rgb888(void);
+void v5f_ltdc_ui_frames_run(uint8_t *framebuffer);
 
 #endif

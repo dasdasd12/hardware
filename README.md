@@ -76,6 +76,7 @@ make -C firmware/ch585 clean
 make -B -C hw_tests/h417 HW_TEST=h417_v5f_ltdc
 make -B -C hw_tests/h417 HW_TEST=h417_v5f_ltdc_l8_palette_image
 make -B -C hw_tests/h417 HW_TEST=h417_v5f_ltdc_rgb565_diag
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_ltdc_ui_frames
 make -B -C hw_tests/h417 HW_TEST=h417_v5f_flash
 make -B -C hw_tests/h417 HW_TEST=h417_v5f_flash_l8_assets
 make -B -C hw_tests/h417 HW_TEST=h417_v5f_gpha_r2m_fill
