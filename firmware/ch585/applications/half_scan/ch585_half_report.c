@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "aik_profile_format.h"
+
 #define HID_USAGE_A             0x04U
 #define HID_USAGE_B             0x05U
 #define HID_USAGE_C             0x06U
@@ -90,7 +92,7 @@ typedef struct
     uint8_t modifier_mask;
 } ch585_key_output_t;
 
-static const ch585_key_output_t s_key_outputs[AIK_KEY_COUNT_TOTAL] =
+static const ch585_key_output_t s_factory_key_outputs[AIK_KEY_COUNT_TOTAL] =
 {
     { HID_USAGE_F12, 0U },
     { HID_USAGE_F11, 0U },
@@ -171,6 +173,121 @@ static const ch585_key_output_t s_key_outputs[AIK_KEY_COUNT_TOTAL] =
     { 0U, HID_MOD_LEFT_CTRL },
 };
 
+typedef struct
+{
+    uint8_t target_kind;   /* AIK_HP_TARGET_* */
+    uint16_t value;
+} ch585_local_binding_t;
+
+#define CH585_LOCAL_SIGNAL_COUNT 11U
+
+static const ch585_local_binding_t
+s_factory_locals[CH585_LOCAL_SIGNAL_COUNT] =
+{
+    /* AIK_HP_SIGNAL_FIVEWAY_UP    */ { AIK_HP_TARGET_KEYBOARD, HID_USAGE_UP_ARROW },
+    /* AIK_HP_SIGNAL_FIVEWAY_DOWN  */ { AIK_HP_TARGET_KEYBOARD, HID_USAGE_DOWN_ARROW },
+    /* AIK_HP_SIGNAL_FIVEWAY_LEFT  */ { AIK_HP_TARGET_KEYBOARD, HID_USAGE_LEFT_ARROW },
+    /* AIK_HP_SIGNAL_FIVEWAY_RIGHT */ { AIK_HP_TARGET_KEYBOARD, HID_USAGE_RIGHT_ARROW },
+    /* AIK_HP_SIGNAL_FIVEWAY_PRESS */ { AIK_HP_TARGET_KEYBOARD, HID_USAGE_ENTER },
+    /* AIK_HP_SIGNAL_WHEEL_UP      */ { AIK_HP_TARGET_MOUSE_WHEEL, 0x0001U },
+    /* AIK_HP_SIGNAL_WHEEL_DOWN    */ { AIK_HP_TARGET_MOUSE_WHEEL, 0x00FFU },
+    /* (reserved)                  */ { AIK_HP_TARGET_NONE, 0U },
+    /* AIK_HP_SIGNAL_EC11_CW       */ { AIK_HP_TARGET_CONSUMER, AIK_CONSUMER_USAGE_VOLUME_UP },
+    /* AIK_HP_SIGNAL_EC11_CCW      */ { AIK_HP_TARGET_CONSUMER, AIK_CONSUMER_USAGE_VOLUME_DOWN },
+    /* AIK_HP_SIGNAL_EC11_PRESS    */ { AIK_HP_TARGET_CONSUMER, AIK_CONSUMER_USAGE_MUTE },
+};
+
+static ch585_key_output_t s_key_outputs[AIK_KEY_COUNT_TOTAL];
+static ch585_local_binding_t s_locals[CH585_LOCAL_SIGNAL_COUNT];
+static uint8_t s_tables_ready;
+
+static void half_report_ensure_tables(void)
+{
+    if(s_tables_ready == 0U)
+    {
+        ch585_half_report_reset_factory();
+    }
+}
+
+void ch585_half_report_reset_factory(void)
+{
+    memcpy(s_key_outputs, s_factory_key_outputs, sizeof(s_key_outputs));
+    memcpy(s_locals, s_factory_locals, sizeof(s_locals));
+    s_tables_ready = 1U;
+}
+
+void ch585_half_report_set_key_outputs(
+    const uint8_t pairs[AIK_KEY_COUNT_TOTAL * 2U])
+{
+    uint8_t key_id;
+
+    half_report_ensure_tables();
+    for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
+    {
+        s_key_outputs[key_id].usage = pairs[(uint16_t)key_id * 2U];
+        s_key_outputs[key_id].modifier_mask =
+            pairs[((uint16_t)key_id * 2U) + 1U];
+    }
+}
+
+void ch585_half_report_clear_locals(void)
+{
+    half_report_ensure_tables();
+    memset(s_locals, 0, sizeof(s_locals));
+}
+
+void ch585_half_report_set_local(uint8_t signal_id, uint8_t target_kind,
+                                 uint16_t value)
+{
+    half_report_ensure_tables();
+    if(signal_id < CH585_LOCAL_SIGNAL_COUNT)
+    {
+        s_locals[signal_id].target_kind = target_kind;
+        s_locals[signal_id].value = value;
+    }
+}
+
+static uint8_t local_signal_down(uint8_t signal_id,
+                                 const aik_spi_half_state_v1_t *left,
+                                 const aik_spi_half_state_v1_t *right)
+{
+    switch(signal_id)
+    {
+        case AIK_HP_SIGNAL_FIVEWAY_UP:
+            return (left != 0) ?
+                   aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_UP) : 0U;
+        case AIK_HP_SIGNAL_FIVEWAY_DOWN:
+            return (left != 0) ?
+                   aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_DOWN) : 0U;
+        case AIK_HP_SIGNAL_FIVEWAY_LEFT:
+            return (left != 0) ?
+                   aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_LEFT) : 0U;
+        case AIK_HP_SIGNAL_FIVEWAY_RIGHT:
+            return (left != 0) ?
+                   aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_RIGHT) : 0U;
+        case AIK_HP_SIGNAL_FIVEWAY_PRESS:
+            return (left != 0) ?
+                   aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_CENTER) : 0U;
+        case AIK_HP_SIGNAL_WHEEL_UP:
+            return (left != 0) ?
+                   aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_WHEEL_UP) : 0U;
+        case AIK_HP_SIGNAL_WHEEL_DOWN:
+            return (left != 0) ?
+                   aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN) : 0U;
+        case AIK_HP_SIGNAL_EC11_CW:
+            return (right != 0) ?
+                   aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_CW) : 0U;
+        case AIK_HP_SIGNAL_EC11_CCW:
+            return (right != 0) ?
+                   aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_CCW) : 0U;
+        case AIK_HP_SIGNAL_EC11_PRESS:
+            return (right != 0) ?
+                   aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_MUTE) : 0U;
+        default:
+            return 0U;
+    }
+}
+
 static uint8_t half_key_down(const aik_spi_half_state_v1_t *half,
                              uint8_t key_id)
 {
@@ -207,6 +324,23 @@ static uint8_t global_key_down(const aik_spi_half_state_v1_t *left,
     }
 
     return half_key_down(left, (uint8_t)(key_id - AIK_KEY_COUNT_RIGHT));
+}
+
+static uint8_t s_release_gate[CH585_GLOBAL_DOWN_BYTES];
+
+void ch585_half_report_arm_release_gate(const aik_spi_half_state_v1_t *left,
+                                        const aik_spi_half_state_v1_t *right)
+{
+    uint8_t key_id;
+
+    memset(s_release_gate, 0, sizeof(s_release_gate));
+    for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
+    {
+        if(global_key_down(left, right, key_id) != 0U)
+        {
+            s_release_gate[key_id >> 3] |= (uint8_t)(1U << (key_id & 7U));
+        }
+    }
 }
 
 static uint8_t fn_consumed_get(const uint8_t consumed[CH585_GLOBAL_DOWN_BYTES],
@@ -255,32 +389,25 @@ static void update_fn_consumed(const aik_spi_half_state_v1_t *left,
 }
 
 static void apply_local_keyboard_controls(const aik_spi_half_state_v1_t *left,
+                                          const aik_spi_half_state_v1_t *right,
                                           uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
-    if(left == 0)
-    {
-        return;
-    }
+    uint8_t signal_id;
 
-    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_UP) != 0U)
+    for(signal_id = 0U; signal_id < CH585_LOCAL_SIGNAL_COUNT; signal_id++)
     {
-        nkro16_set_usage(nkro16, HID_USAGE_UP_ARROW);
-    }
-    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_DOWN) != 0U)
-    {
-        nkro16_set_usage(nkro16, HID_USAGE_DOWN_ARROW);
-    }
-    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_RIGHT) != 0U)
-    {
-        nkro16_set_usage(nkro16, HID_USAGE_RIGHT_ARROW);
-    }
-    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_LEFT) != 0U)
-    {
-        nkro16_set_usage(nkro16, HID_USAGE_LEFT_ARROW);
-    }
-    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_CENTER) != 0U)
-    {
-        nkro16_set_usage(nkro16, HID_USAGE_ENTER);
+        const ch585_local_binding_t *binding = &s_locals[signal_id];
+
+        if(binding->target_kind != AIK_HP_TARGET_KEYBOARD)
+        {
+            continue;
+        }
+        if(local_signal_down(signal_id, left, right) == 0U)
+        {
+            continue;
+        }
+        nkro16[0] |= (uint8_t)((binding->value >> 8) & 0xFFU);
+        nkro16_set_usage(nkro16, (uint8_t)(binding->value & 0xFFU));
     }
 }
 
@@ -297,12 +424,20 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
     }
 
     memset(nkro16, 0, AIK_NKRO_REPORT_BYTES);
+    half_report_ensure_tables();
     update_fn_consumed(left, right, fn_consumed);
     for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
     {
         const ch585_key_output_t *output = &s_key_outputs[key_id];
+        uint8_t gate_bit = (uint8_t)(1U << (key_id & 7U));
 
         if(global_key_down(left, right, key_id) == 0U)
+        {
+            s_release_gate[key_id >> 3] &= (uint8_t)~gate_bit;
+            continue;
+        }
+
+        if((s_release_gate[key_id >> 3] & gate_bit) != 0U)
         {
             continue;
         }
@@ -320,29 +455,29 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
         nkro16_set_usage(nkro16, output->usage);
     }
 
-    apply_local_keyboard_controls(left, nkro16);
+    apply_local_keyboard_controls(left, right, nkro16);
 }
 
 uint16_t ch585_half_report_consumer_usage(const aik_spi_half_state_v1_t *left,
                                           const aik_spi_half_state_v1_t *right)
 {
-    (void)left;
+    static const uint8_t priority[3] = {
+        AIK_HP_SIGNAL_EC11_PRESS,
+        AIK_HP_SIGNAL_EC11_CW,
+        AIK_HP_SIGNAL_EC11_CCW
+    };
+    uint8_t i;
 
-    if(right == 0)
+    half_report_ensure_tables();
+    for(i = 0U; i < 3U; i++)
     {
-        return AIK_CONSUMER_USAGE_NONE;
-    }
-    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_MUTE) != 0U)
-    {
-        return AIK_CONSUMER_USAGE_MUTE;
-    }
-    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_CW) != 0U)
-    {
-        return AIK_CONSUMER_USAGE_VOLUME_UP;
-    }
-    if(aik_spi_half_bit_down(right, AIK_RIGHT_LOCAL_BIT_EC11_CCW) != 0U)
-    {
-        return AIK_CONSUMER_USAGE_VOLUME_DOWN;
+        const ch585_local_binding_t *binding = &s_locals[priority[i]];
+
+        if((binding->target_kind == AIK_HP_TARGET_CONSUMER) &&
+           (local_signal_down(priority[i], left, right) != 0U))
+        {
+            return binding->value;
+        }
     }
     return AIK_CONSUMER_USAGE_NONE;
 }
@@ -350,19 +485,22 @@ uint16_t ch585_half_report_consumer_usage(const aik_spi_half_state_v1_t *left,
 int8_t ch585_half_report_mouse_wheel(const aik_spi_half_state_v1_t *left,
                                      const aik_spi_half_state_v1_t *right)
 {
-    (void)right;
+    static const uint8_t priority[2] = {
+        AIK_HP_SIGNAL_WHEEL_UP,
+        AIK_HP_SIGNAL_WHEEL_DOWN
+    };
+    uint8_t i;
 
-    if(left == 0)
+    half_report_ensure_tables();
+    for(i = 0U; i < 2U; i++)
     {
-        return 0;
-    }
-    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_WHEEL_UP) != 0U)
-    {
-        return 1;
-    }
-    if(aik_spi_half_bit_down(left, AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN) != 0U)
-    {
-        return -1;
+        const ch585_local_binding_t *binding = &s_locals[priority[i]];
+
+        if((binding->target_kind == AIK_HP_TARGET_MOUSE_WHEEL) &&
+           (local_signal_down(priority[i], left, right) != 0U))
+        {
+            return (int8_t)(binding->value & 0xFFU);
+        }
     }
     return 0;
 }

@@ -3,7 +3,7 @@
  * Author             : WCH
  * Version            : V1.2
  * Date               : 2022/01/18
- * Description        : Ó²¼þÈÎÎñ´¦Àíº¯Êý¼°BLEºÍÓ²¼þ³õÊ¼»¯
+ * Description        : Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½BLEï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½
  *********************************************************************************
  * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
  * Attention: This software (modified or not) and binary are used for
@@ -11,7 +11,7 @@
  *******************************************************************************/
 
 /******************************************************************************/
-/* Í·ÎÄ¼þ°üº¬ */
+/* Í·ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ */
 #include "HAL.h"
 
 tmosTaskID halTaskID;
@@ -19,7 +19,7 @@ uint32_t g_LLE_IRQLibHandlerLocation;
 /*******************************************************************************
  * @fn      Lib_Calibration_LSI
  *
- * @brief   ÄÚ²¿32kÐ£×¼
+ * @brief   ï¿½Ú²ï¿½32kÐ£×¼
  *
  * @param   None.
  *
@@ -30,7 +30,32 @@ void Lib_Calibration_LSI(void)
     Calibration_LSI(Level_64);
 }
 
+#ifndef CH585_BLE_PAIRING_EXT_EEPROM
+#define CH585_BLE_PAIRING_EXT_EEPROM 0
+#endif
+
 #if(defined(BLE_SNV)) && (BLE_SNV == TRUE)
+#if CH585_BLE_PAIRING_EXT_EEPROM
+/* BLE pairing (SNV) data lives in the external HX24LC16B I2C EEPROM
+ * (left half, U2); the SNV address window maps to external offset 0.
+ * EEPROM bytes are directly rewritable, so no erase step is needed. */
+#include "ch585_eeprom_i2c.h"
+
+uint32_t Lib_Read_Flash(uint32_t addr, uint32_t num, uint32_t *pBuf)
+{
+    (void)ch585_eeprom_i2c_read((uint16_t)(addr - BLE_SNV_ADDR),
+                                (uint8_t *)pBuf, (uint16_t)(num * 4));
+    return 0;
+}
+
+uint32_t Lib_Write_Flash(uint32_t addr, uint32_t num, uint32_t *pBuf)
+{
+    (void)ch585_eeprom_i2c_write((uint16_t)(addr - BLE_SNV_ADDR),
+                                 (const uint8_t *)pBuf,
+                                 (uint16_t)(num * 4));
+    return 0;
+}
+#else
 /*******************************************************************************
  * @fn      Lib_Read_Flash
  *
@@ -92,12 +117,13 @@ uint32_t Lib_Write_Flash(uint32_t addr, uint32_t num, uint32_t *pBuf)
     }
     return 0;
 }
+#endif /* CH585_BLE_PAIRING_EXT_EEPROM */
 #endif
 
 /*******************************************************************************
  * @fn      CH58x_BLEInit
  *
- * @brief   BLE ¿â³õÊ¼»¯
+ * @brief   BLE ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½
  *
  * @param   None.
  *
@@ -113,7 +139,7 @@ void CH58x_BLEInit(void)
         while(1);
     }
 
-    __SysTick_Config(SysTick_LOAD_RELOAD_Msk);// ÅäÖÃSysTick²¢´ò¿ªÖÐ¶Ï
+    __SysTick_Config(SysTick_LOAD_RELOAD_Msk);// ï¿½ï¿½ï¿½ï¿½SysTickï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½
     PFIC_DisableIRQ(SysTick_IRQn);
 
     g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_IRQLibHandler;
@@ -140,13 +166,13 @@ void CH58x_BLEInit(void)
     cfg.ConnectNumber = (PERIPHERAL_MAX_CONNECTION & 3) | (CENTRAL_MAX_CONNECTION << 2);
     cfg.srandCB = SYS_GetSysTickCnt;
 #if(defined TEM_SAMPLE) && (TEM_SAMPLE == TRUE)
-    cfg.tsCB = HAL_GetInterTempValue; // ¸ù¾ÝÎÂ¶È±ä»¯Ð£×¼RFºÍÄÚ²¿RC( ´óÓÚ7ÉãÊÏ¶È )
+    cfg.tsCB = HAL_GetInterTempValue; // ï¿½ï¿½ï¿½ï¿½ï¿½Â¶È±ä»¯Ð£×¼RFï¿½ï¿½ï¿½Ú²ï¿½RC( ï¿½ï¿½ï¿½ï¿½7ï¿½ï¿½ï¿½Ï¶ï¿½ )
   #if(CLK_OSC32K)
-    cfg.rcCB = Lib_Calibration_LSI; // ÄÚ²¿32KÊ±ÖÓÐ£×¼
+    cfg.rcCB = Lib_Calibration_LSI; // ï¿½Ú²ï¿½32KÊ±ï¿½ï¿½Ð£×¼
   #endif
 #endif
 #if(defined(HAL_SLEEP)) && (HAL_SLEEP == TRUE)
-    cfg.idleCB = CH58x_LowPower; // ÆôÓÃË¯Ãß
+    cfg.idleCB = CH58x_LowPower; // ï¿½ï¿½ï¿½ï¿½Ë¯ï¿½ï¿½
 #endif
 #if(defined(BLE_MAC)) && (BLE_MAC == TRUE)
     for(i = 0; i < 6; i++)
@@ -159,7 +185,7 @@ void CH58x_BLEInit(void)
         GetMACAddress(MacAddr);
         for(i = 0; i < 6; i++)
         {
-            cfg.MacAddr[i] = MacAddr[i]; // Ê¹ÓÃÐ¾Æ¬macµØÖ·
+            cfg.MacAddr[i] = MacAddr[i]; // Ê¹ï¿½ï¿½Ð¾Æ¬macï¿½ï¿½Ö·
         }
     }
 #endif
@@ -167,7 +193,7 @@ void CH58x_BLEInit(void)
     {
         while(1);
     }
-    // BLE_Lib Õ¼ÓÃÁËVTF Interrupt 2ºÅºÍ3ºÅ
+    // BLE_Lib Õ¼ï¿½ï¿½ï¿½ï¿½VTF Interrupt 2ï¿½Åºï¿½3ï¿½ï¿½
     i = BLE_LibInit(&cfg);
     if(i)
     {
@@ -179,7 +205,7 @@ void CH58x_BLEInit(void)
 /*******************************************************************************
  * @fn      HAL_ProcessEvent
  *
- * @brief   Ó²¼þ²ãÊÂÎñ´¦Àí
+ * @brief   Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
  *
  * @param   task_id - The TMOS assigned task ID.
  * @param   events  - events to process.  This is a bit map and can
@@ -192,7 +218,7 @@ tmosEvents HAL_ProcessEvent(tmosTaskID task_id, tmosEvents events)
     uint8_t *msgPtr;
 
     if(events & SYS_EVENT_MSG)
-    { // ´¦ÀíHAL²ãÏûÏ¢£¬µ÷ÓÃtmos_msg_receive¶ÁÈ¡ÏûÏ¢£¬´¦ÀíÍê³ÉºóÉ¾³ýÏûÏ¢¡£
+    { // ï¿½ï¿½ï¿½ï¿½HALï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½tmos_msg_receiveï¿½ï¿½È¡ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Éºï¿½É¾ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½
         msgPtr = tmos_msg_receive(task_id);
         if(msgPtr)
         {
@@ -219,16 +245,16 @@ tmosEvents HAL_ProcessEvent(tmosTaskID task_id, tmosEvents events)
     if(events & HAL_REG_INIT_EVENT)
     {
         uint8_t x32Kpw;
-#if(defined BLE_CALIBRATION_ENABLE) && (BLE_CALIBRATION_ENABLE == TRUE) // Ð£×¼ÈÎÎñ£¬µ¥´ÎÐ£×¼ºÄÊ±Ð¡ÓÚ10ms
+#if(defined BLE_CALIBRATION_ENABLE) && (BLE_CALIBRATION_ENABLE == TRUE) // Ð£×¼ï¿½ï¿½ï¿½ñ£¬µï¿½ï¿½ï¿½Ð£×¼ï¿½ï¿½Ê±Ð¡ï¿½ï¿½10ms
 #ifndef RF_8K
-        BLE_RegInit();                                                  // Ð£×¼RF£¬»á¹Ø±ÕRF²¢¸Ä±äRFÏà¹Ø¼Ä´æÆ÷£¬Èç¹ûÊ¹ÓÃÁËRFÊÕ·¢º¯ÊýÐè×¢ÒâÐ£×¼ºóÔÙÖØÐÂÆôÓÃ
+        BLE_RegInit();                                                  // Ð£×¼RFï¿½ï¿½ï¿½ï¿½Ø±ï¿½RFï¿½ï¿½ï¿½Ä±ï¿½RFï¿½ï¿½Ø¼Ä´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½ï¿½ï¿½RFï¿½Õ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½Ð£×¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 #endif
 #if(CLK_OSC32K)
-        Lib_Calibration_LSI(); // Ð£×¼ÄÚ²¿RC
+        Lib_Calibration_LSI(); // Ð£×¼ï¿½Ú²ï¿½RC
 #elif(HAL_SLEEP)
         x32Kpw = (R8_XT32K_TUNE & 0xfc) | 0x01;
         sys_safe_access_enable();
-        R8_XT32K_TUNE = x32Kpw; // LSEÇý¶¯µçÁ÷½µµÍµ½¶î¶¨µçÁ÷
+        R8_XT32K_TUNE = x32Kpw; // LSEï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Íµï¿½ï¿½î¶¨ï¿½ï¿½ï¿½ï¿½
         sys_safe_access_disable();
 #endif
         tmos_start_task(halTaskID, HAL_REG_INIT_EVENT, MS1_TO_SYSTEM_TIME(BLE_CALIBRATION_PERIOD));
@@ -247,7 +273,7 @@ tmosEvents HAL_ProcessEvent(tmosTaskID task_id, tmosEvents events)
 /*******************************************************************************
  * @fn      HAL_Init
  *
- * @brief   Ó²¼þ³õÊ¼»¯
+ * @brief   Ó²ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½
  *
  * @param   None.
  *
@@ -267,17 +293,17 @@ void HAL_Init()
     HAL_KeyInit();
 #endif
 #if(defined BLE_CALIBRATION_ENABLE) && (BLE_CALIBRATION_ENABLE == TRUE)
-    tmos_start_task(halTaskID, HAL_REG_INIT_EVENT, 800); // Ìí¼ÓÐ£×¼ÈÎÎñ£¬500msÆô¶¯£¬µ¥´ÎÐ£×¼ºÄÊ±Ð¡ÓÚ10ms
+    tmos_start_task(halTaskID, HAL_REG_INIT_EVENT, 800); // ï¿½ï¿½ï¿½ï¿½Ð£×¼ï¿½ï¿½ï¿½ï¿½500msï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð£×¼ï¿½ï¿½Ê±Ð¡ï¿½ï¿½10ms
 #endif
-//    tmos_start_task( halTaskID, HAL_TEST_EVENT, 1600 );    // Ìí¼ÓÒ»¸ö²âÊÔÈÎÎñ
+//    tmos_start_task( halTaskID, HAL_TEST_EVENT, 1600 );    // ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 }
 
 /*******************************************************************************
  * @fn      HAL_GetInterTempValue
  *
- * @brief   »ñÈ¡ÄÚ²¿ÎÂ¸Ð²ÉÑùÖµ£¬Èç¹ûÊ¹ÓÃÁËADCÖÐ¶Ï²ÉÑù£¬ÐèÔÚ´Ëº¯ÊýÖÐÔÝÊ±ÆÁ±ÎÖÐ¶Ï.
+ * @brief   ï¿½ï¿½È¡ï¿½Ú²ï¿½ï¿½Â¸Ð²ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½ï¿½ï¿½ADCï¿½Ð¶Ï²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú´Ëºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½.
  *
- * @return  ÄÚ²¿ÎÂ¸Ð²ÉÑùÖµ.
+ * @return  ï¿½Ú²ï¿½ï¿½Â¸Ð²ï¿½ï¿½ï¿½Öµ.
  */
 uint16_t HAL_GetInterTempValue(void)
 {

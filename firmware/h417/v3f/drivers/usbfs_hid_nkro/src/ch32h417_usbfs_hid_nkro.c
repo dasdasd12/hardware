@@ -5,10 +5,10 @@
 #include "ch32h417.h"
 #include "ch32h417_usb.h"
 #include "ch32h417_usbfs_device.h"
-#include "usbd_compatibility_hid.h"
+#include "usbfs_compatibility_hid.h"
 
-uint8_t HID_Report_Buffer[64];
-volatile uint8_t HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
+uint8_t USBFS_HID_Report_Buffer[64];
+volatile uint8_t USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 
 static uint32_t s_report_count;
 static ch32h417_usbfs_hid_nkro_diag_t s_diag;
@@ -67,12 +67,12 @@ static uint8_t ep2_in_ready(void)
 void ch32h417_usbfs_hid_nkro_init(void)
 {
     NVIC_DisableIRQ(USBFS_IRQn);
-    memset((void *)HID_Report_Buffer, 0, sizeof(HID_Report_Buffer));
-    memset((void *)&RingBuffer_Comm, 0, sizeof(RingBuffer_Comm));
-    memset((void *)Data_Buffer, 0, DEF_RING_BUFFER_SIZE);
+    memset((void *)USBFS_HID_Report_Buffer, 0, sizeof(USBFS_HID_Report_Buffer));
+    memset((void *)&USBFS_RingBuffer_Comm, 0, sizeof(USBFS_RingBuffer_Comm));
+    memset((void *)USBFS_Data_Buffer, 0, DEF_RING_BUFFER_SIZE);
     memset(&s_diag, 0, sizeof(s_diag));
     s_report_count = 0U;
-    HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
+    USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 
     USBFS_RCC_Init();
     USBFS_Device_Init(ENABLE);
@@ -90,10 +90,10 @@ void ch32h417_usbfs_hid_nkro_send(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
     NVIC_DisableIRQ(USBFS_IRQn);
     if(ep2_in_ready() != 0U)
     {
-        memset((void *)HID_Report_Buffer, 0, sizeof(HID_Report_Buffer));
-        HID_Report_Buffer[0] = H417_HID_REPORT_ID_NKRO;
-        memcpy((void *)&HID_Report_Buffer[1], nkro16, AIK_NKRO_REPORT_BYTES);
-        memcpy((void *)USBFS_EP2_Buf, (void *)HID_Report_Buffer,
+        memset((void *)USBFS_HID_Report_Buffer, 0, sizeof(USBFS_HID_Report_Buffer));
+        USBFS_HID_Report_Buffer[0] = H417_HID_REPORT_ID_NKRO;
+        memcpy((void *)&USBFS_HID_Report_Buffer[1], nkro16, AIK_NKRO_REPORT_BYTES);
+        memcpy((void *)USBFS_EP2_Buf, (void *)USBFS_HID_Report_Buffer,
                H417_HID_NKRO_PACKET_BYTES);
         USBFSD->UEP2_DMA = (uint32_t)USBFS_EP2_Buf;
         USBFSD_UEP_TLEN(DEF_UEP2) = H417_HID_NKRO_PACKET_BYTES;
@@ -145,11 +145,11 @@ uint8_t ch32h417_usbfs_hid_nkro_submit_consumer(uint16_t usage)
     NVIC_DisableIRQ(USBFS_IRQn);
     if(ep2_in_ready() != 0U)
     {
-        memset((void *)HID_Report_Buffer, 0, sizeof(HID_Report_Buffer));
-        HID_Report_Buffer[0] = H417_HID_REPORT_ID_CONSUMER;
-        HID_Report_Buffer[1] = (uint8_t)(usage & 0xFFU);
-        HID_Report_Buffer[2] = (uint8_t)(usage >> 8);
-        memcpy((void *)USBFS_EP2_Buf, (void *)HID_Report_Buffer,
+        memset((void *)USBFS_HID_Report_Buffer, 0, sizeof(USBFS_HID_Report_Buffer));
+        USBFS_HID_Report_Buffer[0] = H417_HID_REPORT_ID_CONSUMER;
+        USBFS_HID_Report_Buffer[1] = (uint8_t)(usage & 0xFFU);
+        USBFS_HID_Report_Buffer[2] = (uint8_t)(usage >> 8);
+        memcpy((void *)USBFS_EP2_Buf, (void *)USBFS_HID_Report_Buffer,
                H417_HID_CONSUMER_PACKET_BYTES);
         USBFSD->UEP2_DMA = (uint32_t)USBFS_EP2_Buf;
         USBFSD_UEP_TLEN(DEF_UEP2) = H417_HID_CONSUMER_PACKET_BYTES;
@@ -177,13 +177,13 @@ uint8_t ch32h417_usbfs_hid_nkro_submit_mouse_wheel(int8_t wheel)
     NVIC_DisableIRQ(USBFS_IRQn);
     if(ep2_in_ready() != 0U)
     {
-        memset((void *)HID_Report_Buffer, 0, sizeof(HID_Report_Buffer));
-        HID_Report_Buffer[0] = H417_HID_REPORT_ID_MOUSE;
-        HID_Report_Buffer[1] = 0U;
-        HID_Report_Buffer[2] = 0U;
-        HID_Report_Buffer[3] = 0U;
-        HID_Report_Buffer[4] = (uint8_t)wheel;
-        memcpy((void *)USBFS_EP2_Buf, (void *)HID_Report_Buffer,
+        memset((void *)USBFS_HID_Report_Buffer, 0, sizeof(USBFS_HID_Report_Buffer));
+        USBFS_HID_Report_Buffer[0] = H417_HID_REPORT_ID_MOUSE;
+        USBFS_HID_Report_Buffer[1] = 0U;
+        USBFS_HID_Report_Buffer[2] = 0U;
+        USBFS_HID_Report_Buffer[3] = 0U;
+        USBFS_HID_Report_Buffer[4] = (uint8_t)wheel;
+        memcpy((void *)USBFS_EP2_Buf, (void *)USBFS_HID_Report_Buffer,
                H417_HID_MOUSE_PACKET_BYTES);
         USBFSD->UEP2_DMA = (uint32_t)USBFS_EP2_Buf;
         USBFSD_UEP_TLEN(DEF_UEP2) = H417_HID_MOUSE_PACKET_BYTES;

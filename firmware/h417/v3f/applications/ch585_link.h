@@ -30,6 +30,11 @@ uint8_t v3f_ch585_link_query_profile_status(
     uint8_t half_id,
     uint16_t host_seq,
     aik_spi_profile_status_v1_t *out);
+/* Send one AIK_SPI_CMD_PROFILE_* command and read back the transfer
+ * acknowledge frame (retrying the read while the half prepares it). */
+uint8_t v3f_ch585_link_profile_cmd(uint8_t half_id,
+                                   const aik_spi_host_cmd_v1_t *cmd,
+                                   aik_spi_profile_xfer_v1_t *out);
 void v3f_ch585_link_stats(uint8_t half_id, v3f_ch585_link_stats_t *stats);
 
 #endif
