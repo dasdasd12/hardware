@@ -6,6 +6,14 @@
 #include "aik_spi_protocol.h"
 #include "ch585_ads7948_mux_acq.h"
 #include "ch585_half_report.h"
+#include "ch585_profile.h"
+
+#ifndef CH585_BLE_PAIRING_EXT_EEPROM
+#define CH585_BLE_PAIRING_EXT_EEPROM 0
+#endif
+#if CH585_BLE_PAIRING_EXT_EEPROM
+#include "ch585_eeprom_i2c.h"
+#endif
 #if CH585_BLE_HID_ENABLE
 #include "ble_hid.h"
 #endif
@@ -108,6 +116,7 @@ static mag_key_engine_t s_engine;
 static aik_spi_half_state_v1_t s_tx_frame __attribute__((aligned(4)));
 static aik_spi_host_cmd_v1_t s_rx_cmd __attribute__((aligned(4)));
 static aik_spi_profile_status_v1_t s_profile_status __attribute__((aligned(4)));
+static aik_spi_profile_xfer_v1_t s_profile_xfer __attribute__((aligned(4)));
 static aik_spi_half_state_v1_t s_right_frame __attribute__((aligned(4)));
 static uint8_t s_rf_nkro16[AIK_NKRO_REPORT_BYTES];
 #if CH585_BLE_HID_ENABLE
@@ -116,6 +125,7 @@ static uint8_t s_ble_boot8[BLE_HID_KBD_REPORT_LEN];
 static uint16_t s_compact_raw[AIK_KEY_COUNT_RIGHT];
 static int s_last_spi_result;
 static uint8_t s_profile_status_pending;
+static uint8_t s_profile_xfer_pending;
 static uint8_t s_right_frame_valid;
 static uint8_t s_local_rotary_last_ab;
 static int8_t s_local_rotary_accum;
@@ -606,12 +616,15 @@ static void half_scan_prepare_profile_status(uint16_t ack_seq)
     memset(&s_profile_status, 0, sizeof(s_profile_status));
     s_profile_status.ack_seq = ack_seq;
     s_profile_status.half_id = (uint8_t)CH585_HALF_ID;
-    s_profile_status.flags = AIK_PROFILE_STATUS_FLAG_VALID |
-                             AIK_PROFILE_STATUS_FLAG_DEFAULT;
-    s_profile_status.profile_id16 = AIK_PROFILE_DEBUG_ID16;
-    s_profile_status.generation16 = AIK_PROFILE_DEBUG_GENERATION16;
+    ch585_profile_fill_status(&s_profile_status);
     aik_spi_profile_status_finish(&s_profile_status);
     s_profile_status_pending = 1U;
+}
+
+static void half_scan_prepare_profile_xfer(void)
+{
+    ch585_profile_fill_xfer(&s_profile_xfer);
+    s_profile_xfer_pending = 1U;
 }
 
 #if CH585_BLE_HID_ENABLE
@@ -841,6 +854,21 @@ static void half_scan_apply_host_cmd(void)
         return;
     }
 
+    if((s_rx_cmd.cmd >= AIK_SPI_CMD_PROFILE_BEGIN) &&
+       (s_rx_cmd.cmd <= AIK_SPI_CMD_PROFILE_GET_XFER))
+    {
+        ch585_profile_handle_transfer_cmd(&s_rx_cmd, &s_engine);
+        if((s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_COMMIT) ||
+           (s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_SET_ACTIVE))
+        {
+            ch585_half_report_arm_release_gate(
+                &s_tx_frame,
+                s_right_frame_valid ? &s_right_frame : 0);
+        }
+        half_scan_prepare_profile_xfer();
+        return;
+    }
+
 #if CH585_SPI_ACCEPT_HOST_CMD
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
     if(s_rx_cmd.cmd == AIK_SPI_CMD_POLL)
@@ -1061,6 +1089,11 @@ static void half_scan_init(void)
           (unsigned int)CH585_RF_TX_ENABLE,
           (unsigned int)CH585_BLE_HID_ENABLE,
           (unsigned int)CH585_HALF_SCAN_DEBUG_UART);
+#if CH585_BLE_PAIRING_EXT_EEPROM
+    /* SNV callbacks hit the external EEPROM as soon as the BLE stack
+     * starts; bring the I2C bus up first. */
+    ch585_eeprom_i2c_init();
+#endif
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
     CH58x_BLEInit();
 #endif
@@ -1097,6 +1130,9 @@ static void half_scan_init(void)
     (void)mag_key_engine_init(&s_engine,
                               aik_spi_half_key_count((uint8_t)CH585_HALF_ID),
                               &cfg);
+
+    ch585_half_report_reset_factory();
+    ch585_profile_boot_load(&s_engine);
 
     ch585_spi0_slave_link_init();
 #if CH585_RF_TX_ENABLE
@@ -1156,7 +1192,15 @@ int main(void)
         {
             half_scan_apply_host_cmd();
         }
-        if(s_profile_status_pending != 0U)
+        if(s_profile_xfer_pending != 0U)
+        {
+            s_last_spi_result =
+                ch585_spi0_slave_link_serve_tx_frame(
+                    (const uint8_t *)&s_profile_xfer,
+                    AIK_SPI_HALF_STATE_SIZE);
+            s_profile_xfer_pending = 0U;
+        }
+        else if(s_profile_status_pending != 0U)
         {
             s_last_spi_result =
                 ch585_spi0_slave_link_serve_tx_frame(

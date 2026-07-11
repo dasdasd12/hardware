@@ -15,12 +15,27 @@ extern "C" {
 #define AIK_SPI_HALF_MAGIC 0x5AU
 #define AIK_SPI_HALF_TYPE_STATE 0x11U
 #define AIK_SPI_HALF_TYPE_PROFILE_STATUS 0x21U
+#define AIK_SPI_HALF_TYPE_PROFILE_XFER 0x22U
 #define AIK_SPI_VERSION 1U
 
 #define AIK_SPI_CMD_POLL 0U
 #define AIK_SPI_CMD_POLL_WITH_RF 1U
 #define AIK_SPI_CMD_PUSH_RIGHT_STATE 2U
 #define AIK_SPI_CMD_GET_PROFILE_STATUS 0x40U
+
+/* Profile transfer command group. All commands keep the fixed 32-byte
+ * aik_spi_host_cmd_v1_t frame; command payloads live in the 24-byte
+ * region normally used by nkro16[16] + reserved[8] (bytes 6..29).
+ * The half responds to each of these with an
+ * AIK_SPI_HALF_TYPE_PROFILE_XFER frame whose ack_seq echoes host_seq. */
+#define AIK_SPI_CMD_PROFILE_BEGIN      0x41U
+#define AIK_SPI_CMD_PROFILE_CHUNK      0x42U
+#define AIK_SPI_CMD_PROFILE_COMMIT     0x43U
+#define AIK_SPI_CMD_PROFILE_ABORT      0x44U
+#define AIK_SPI_CMD_PROFILE_SET_ACTIVE 0x45U
+#define AIK_SPI_CMD_PROFILE_GET_XFER   0x46U /* read back the transfer state
+                                                without side effects (used to
+                                                poll a slow flash commit) */
 
 #define AIK_OUTPUT_MODE_USBHS 0U
 #define AIK_OUTPUT_MODE_RF24  1U
@@ -65,6 +80,28 @@ extern "C" {
 
 #define AIK_PROFILE_STATUS_FLAG_VALID   0x01U
 #define AIK_PROFILE_STATUS_FLAG_DEFAULT 0x02U
+#define AIK_PROFILE_STATUS_FLAG_BUSY    0x04U
+#define AIK_PROFILE_STATUS_FLAG_ERROR   0x08U
+#define AIK_PROFILE_STATUS_SLOT_SHIFT   4U
+#define AIK_PROFILE_STATUS_SLOT_MASK    0x70U
+
+/* Profile transfer flags (aik_spi_profile_begin_v1_t / _commit_v1_t). */
+#define AIK_SPI_PROFILE_FLAG_ACTIVATE 0x01U /* activate after commit */
+#define AIK_SPI_PROFILE_FLAG_PERSIST  0x02U /* write slot to Data-Flash */
+
+/* Profile transfer state machine (aik_spi_profile_xfer_v1_t.state). */
+#define AIK_SPI_XFER_STATE_IDLE       0x00U
+#define AIK_SPI_XFER_STATE_RECEIVING  0x01U
+#define AIK_SPI_XFER_STATE_WRITING    0x02U
+#define AIK_SPI_XFER_STATE_DONE       0x03U
+#define AIK_SPI_XFER_ERR_CRC          0x80U
+#define AIK_SPI_XFER_ERR_RANGE        0x81U
+#define AIK_SPI_XFER_ERR_STORE        0x82U
+#define AIK_SPI_XFER_ERR_STATE        0x83U
+#define AIK_SPI_XFER_ERR_UNSUPPORTED  0x84U
+
+#define AIK_SPI_PROFILE_CHUNK_DATA_MAX 20U
+#define AIK_SPI_HOST_CMD_PAYLOAD_SIZE  24U
 
 #if defined(__GNUC__)
 #define AIK_SPI_PACKED __attribute__((packed))
@@ -105,12 +142,69 @@ typedef struct AIK_SPI_PACKED
     uint16_t crc16;
 } aik_spi_profile_status_v1_t;
 
+/* Response frame for the profile transfer command group. Same fixed
+ * 12-byte footprint as the other half->host frames. */
+typedef struct AIK_SPI_PACKED
+{
+    uint8_t magic;
+    uint8_t type;                /* AIK_SPI_HALF_TYPE_PROFILE_XFER */
+    uint16_t ack_seq;            /* host_seq of the last processed cmd */
+    uint8_t half_id;
+    uint8_t state;               /* AIK_SPI_XFER_STATE_* / _ERR_* */
+    uint16_t received_len;       /* bytes assembled so far */
+    uint16_t detail;             /* expected total_len or error detail */
+    uint16_t crc16;
+} aik_spi_profile_xfer_v1_t;
+
+/* Command payloads carried in aik_spi_host_cmd_v1_t bytes 6..29
+ * (the nkro16[16] + reserved[8] region). */
+typedef struct AIK_SPI_PACKED
+{
+    uint8_t slot_id;             /* AIK_PROFILE_SLOT_* */
+    uint8_t patch_flags;         /* AIK_SPI_PROFILE_FLAG_* */
+    uint16_t total_len;
+    uint16_t total_crc16;        /* aik_hp_crc of the full patch */
+    uint16_t profile_id16;
+    uint16_t generation16;
+    uint16_t reserved;
+} aik_spi_profile_begin_v1_t;
+
+typedef struct AIK_SPI_PACKED
+{
+    uint16_t offset;
+    uint8_t len;                 /* 1..AIK_SPI_PROFILE_CHUNK_DATA_MAX */
+    uint8_t reserved;
+    uint8_t data[AIK_SPI_PROFILE_CHUNK_DATA_MAX];
+} aik_spi_profile_chunk_v1_t;
+
+typedef struct AIK_SPI_PACKED
+{
+    uint8_t slot_id;
+    uint8_t patch_flags;
+    uint16_t total_len;
+    uint16_t total_crc16;
+    uint16_t reserved;
+} aik_spi_profile_commit_v1_t;
+
+typedef struct AIK_SPI_PACKED
+{
+    uint8_t slot_id;             /* 0 = factory default */
+    uint8_t flags;
+    uint16_t reserved;
+} aik_spi_profile_set_active_v1_t;
+
 typedef char aik_spi_host_cmd_v1_size_check[
     (sizeof(aik_spi_host_cmd_v1_t) == AIK_SPI_HOST_CMD_SIZE) ? 1 : -1];
 typedef char aik_spi_half_state_v1_size_check[
     (sizeof(aik_spi_half_state_v1_t) == AIK_SPI_HALF_STATE_SIZE) ? 1 : -1];
 typedef char aik_spi_profile_status_v1_size_check[
     (sizeof(aik_spi_profile_status_v1_t) == AIK_SPI_HALF_STATE_SIZE) ? 1 : -1];
+typedef char aik_spi_profile_xfer_v1_size_check[
+    (sizeof(aik_spi_profile_xfer_v1_t) == AIK_SPI_HALF_STATE_SIZE) ? 1 : -1];
+typedef char aik_spi_profile_begin_v1_size_check[
+    (sizeof(aik_spi_profile_begin_v1_t) <= AIK_SPI_HOST_CMD_PAYLOAD_SIZE) ? 1 : -1];
+typedef char aik_spi_profile_chunk_v1_size_check[
+    (sizeof(aik_spi_profile_chunk_v1_t) <= AIK_SPI_HOST_CMD_PAYLOAD_SIZE) ? 1 : -1];
 
 static inline uint16_t aik_spi_crc16_ccitt(const uint8_t *data, uint16_t len)
 {
@@ -349,6 +443,98 @@ static inline uint8_t aik_spi_profile_status_matches_debug_profile(
            ((status->flags & AIK_PROFILE_STATUS_FLAG_VALID) != 0U) &&
            (status->profile_id16 == AIK_PROFILE_DEBUG_ID16) &&
            (status->generation16 == AIK_PROFILE_DEBUG_GENERATION16);
+}
+
+static inline uint8_t aik_spi_profile_status_active_slot(
+    const aik_spi_profile_status_v1_t *status)
+{
+    return (uint8_t)((status->flags & AIK_PROFILE_STATUS_SLOT_MASK) >>
+                     AIK_PROFILE_STATUS_SLOT_SHIFT);
+}
+
+/* The 24-byte command payload region starts at the nkro16 field and
+ * spans through reserved[] (bytes 6..29 of the packed 32-byte frame). */
+static inline uint8_t *aik_spi_host_cmd_payload(aik_spi_host_cmd_v1_t *cmd)
+{
+    return cmd->nkro16;
+}
+
+static inline const uint8_t *aik_spi_host_cmd_payload_const(
+    const aik_spi_host_cmd_v1_t *cmd)
+{
+    return cmd->nkro16;
+}
+
+static inline void aik_spi_host_cmd_clear_payload(aik_spi_host_cmd_v1_t *cmd)
+{
+    uint8_t i;
+    uint8_t *payload = aik_spi_host_cmd_payload(cmd);
+
+    for(i = 0U; i < AIK_SPI_HOST_CMD_PAYLOAD_SIZE; i++)
+    {
+        payload[i] = 0U;
+    }
+}
+
+static inline void aik_spi_host_cmd_set_payload(aik_spi_host_cmd_v1_t *cmd,
+                                                const void *payload,
+                                                uint8_t len)
+{
+    uint8_t i;
+    const uint8_t *src = (const uint8_t *)payload;
+    uint8_t *dst = aik_spi_host_cmd_payload(cmd);
+
+    aik_spi_host_cmd_clear_payload(cmd);
+    if(len > AIK_SPI_HOST_CMD_PAYLOAD_SIZE)
+    {
+        len = AIK_SPI_HOST_CMD_PAYLOAD_SIZE;
+    }
+    for(i = 0U; i < len; i++)
+    {
+        dst[i] = src[i];
+    }
+}
+
+static inline void aik_spi_host_cmd_get_payload(
+    const aik_spi_host_cmd_v1_t *cmd,
+    void *payload,
+    uint8_t len)
+{
+    uint8_t i;
+    const uint8_t *src = aik_spi_host_cmd_payload_const(cmd);
+    uint8_t *dst = (uint8_t *)payload;
+
+    if(len > AIK_SPI_HOST_CMD_PAYLOAD_SIZE)
+    {
+        len = AIK_SPI_HOST_CMD_PAYLOAD_SIZE;
+    }
+    for(i = 0U; i < len; i++)
+    {
+        dst[i] = src[i];
+    }
+}
+
+static inline uint16_t aik_spi_profile_xfer_crc(
+    const aik_spi_profile_xfer_v1_t *xfer)
+{
+    return aik_spi_crc16_ccitt((const uint8_t *)xfer,
+                               (uint16_t)offsetof(aik_spi_profile_xfer_v1_t,
+                                                  crc16));
+}
+
+static inline void aik_spi_profile_xfer_finish(aik_spi_profile_xfer_v1_t *xfer)
+{
+    xfer->magic = AIK_SPI_HALF_MAGIC;
+    xfer->type = AIK_SPI_HALF_TYPE_PROFILE_XFER;
+    xfer->crc16 = aik_spi_profile_xfer_crc(xfer);
+}
+
+static inline uint8_t aik_spi_profile_xfer_valid(
+    const aik_spi_profile_xfer_v1_t *xfer)
+{
+    return (xfer->magic == AIK_SPI_HALF_MAGIC) &&
+           (xfer->type == AIK_SPI_HALF_TYPE_PROFILE_XFER) &&
+           (xfer->crc16 == aik_spi_profile_xfer_crc(xfer));
 }
 
 #ifdef __cplusplus

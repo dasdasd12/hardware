@@ -11,10 +11,10 @@
 * microcontroller manufactured by Nanjing Qinheng Microelectronics.
 *******************************************************************************/
 
-#include "usb_desc.h"
+#include "usbfs_desc.h"
 
 /* Device Descriptor */
-const uint8_t  MyDevDescr[] =
+const uint8_t  USBFS_MyDevDescr[] =
 {
     0x12,                                               // bLength
     0x01,                                               // bDescriptorType (Device)
@@ -235,13 +235,13 @@ const uint8_t  MyHIDReportDesc[ ] =
 };
 
 /* Language Descriptor */
-const uint8_t  MyLangDescr[] =
+const uint8_t  USBFS_MyLangDescr[] =
 {
     0x04, 0x03, 0x09, 0x04
 };
 
 /* Manufacturer Descriptor */
-const uint8_t  MyManuInfo[ ] =
+const uint8_t  USBFS_MyManuInfo[ ] =
 {
     0x0E, 
     0x03, 
@@ -254,7 +254,7 @@ const uint8_t  MyManuInfo[ ] =
 };
 
 /* Product Information */
-const uint8_t MyProdInfo[ ]  =
+const uint8_t USBFS_MyProdInfo[ ]  =
 {
     0x22,
     0x03, 
@@ -277,7 +277,7 @@ const uint8_t MyProdInfo[ ]  =
 };
 
 /* Serial Number Information */
-const uint8_t  MySerNumInfo[ ] =
+const uint8_t  USBFS_MySerNumInfo[ ] =
 {
     0x16, 
     0x03, 

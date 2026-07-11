@@ -18,7 +18,7 @@
 
 #include "debug.h"
 #include "string.h"
-#include "usb_desc.h"
+#include "usbfs_desc.h"
 #include "ch32h417_usb.h"
 
 /******************************************************************************/
@@ -103,8 +103,8 @@ extern __attribute__ ((aligned(4))) uint8_t USBFS_EP4_Buf[];
 
 
 /* Interrupt Service Routine Declaration*/
-extern RING_BUFF_COMM  RingBuffer_Comm;
-extern __attribute__ ((aligned(4))) uint8_t Data_Buffer[ ];
+extern RING_BUFF_COMM  USBFS_RingBuffer_Comm;
+extern __attribute__ ((aligned(4))) uint8_t USBFS_Data_Buffer[ ];
 
 /******************************************************************************/
 /* external functions */

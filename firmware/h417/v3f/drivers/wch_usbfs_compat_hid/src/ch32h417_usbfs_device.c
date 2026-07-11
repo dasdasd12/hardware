@@ -10,9 +10,9 @@
 * microcontroller manufactured by Nanjing Qinheng Microelectronics.
 *******************************************************************************/
 #include "ch32h417_usbfs_device.h"
-#include "usb_desc.h"
+#include "usbfs_desc.h"
 #include "ch32h417_usb.h"
-#include "usbd_compatibility_hid.h"
+#include "usbfs_compatibility_hid.h"
 /*******************************************************************************/
 /* Variable Definition */
 
@@ -51,8 +51,8 @@ __attribute__ ((aligned(4))) uint8_t USBFS_EP4_Buf[DEF_USB_EP4_FS_SIZE];
 #endif
 
 /* Ring buffer */
-RING_BUFF_COMM  RingBuffer_Comm;
-__attribute__ ((aligned(4))) uint8_t Data_Buffer[DEF_RING_BUFFER_SIZE];
+RING_BUFF_COMM  USBFS_RingBuffer_Comm;
+__attribute__ ((aligned(4))) uint8_t USBFS_Data_Buffer[DEF_RING_BUFFER_SIZE];
 
 /******************************************************************************/
 /* Function declarations */
@@ -69,13 +69,16 @@ void USBFS_RCC_Init(void)
 {
     if((RCC->PLLCFGR & RCC_SYSPLL_SEL) != RCC_SYSPLL_USBHS)
     {
-        /* Initialize USBHS 480M PLL */
-        RCC_USBHS_PLLCmd(DISABLE);
-        RCC_USBHSPLLCLKConfig((RCC->CTLR & RCC_HSERDY) ? RCC_USBHSPLLSource_HSE : RCC_USBHSPLLSource_HSI);
-        RCC_USBHSPLLReferConfig(RCC_USBHSPLLRefer_25M);
-        RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
-        RCC_USBHS_PLLCmd(ENABLE);
-        while (!(RCC->CTLR & RCC_USBHS_PLLRDY));
+        if((RCC->CTLR & RCC_USBHS_PLLRDY) == 0U)
+        {
+            /* USBFS and USBHS share this PLL; do not drop an active HS link. */
+            RCC_USBHS_PLLCmd(DISABLE);
+            RCC_USBHSPLLCLKConfig((RCC->CTLR & RCC_HSERDY) ? RCC_USBHSPLLSource_HSE : RCC_USBHSPLLSource_HSI);
+            RCC_USBHSPLLReferConfig(RCC_USBHSPLLRefer_25M);
+            RCC_USBHSPLLClockSourceDivConfig(RCC_USBHSPLL_IN_Div1);
+            RCC_USBHS_PLLCmd(ENABLE);
+            while (!(RCC->CTLR & RCC_USBHS_PLLRDY));
+        }
     }
     RCC_USBFSCLKConfig(RCC_USBFSCLKSource_USBHSPLL);
     RCC_USBFS48ClockSourceDivConfig(RCC_USBFS_Div10);
@@ -101,7 +104,7 @@ void USBFS_Device_Endp_Init( void )
 #endif
 
     USBFSD->UEP0_DMA = (uint32_t)USBFS_EP0_Buf;
-    USBFSD->UEP1_DMA = (uint32_t)Data_Buffer;
+    USBFSD->UEP1_DMA = (uint32_t)USBFS_Data_Buffer;
     USBFSD->UEP2_DMA = (uint32_t)USBFS_EP2_Buf;
 #if V3F_ENABLE_USBFS_CDC_DEBUG
     USBFSD->UEP3_DMA = (uint32_t)USBFS_EP3_Buf;
@@ -207,7 +210,7 @@ void USBFS_IRQHandler( void )
                         {
                             USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_TOG | USBFS_UEP_R_RES_ACK;
                         }
-						
+
                         if ( ( USBFS_SetupReqType & USB_REQ_TYP_MASK ) != USB_REQ_TYP_STANDARD )
                         {
                             /* Non-standard request endpoint 0 Data upload */
@@ -294,8 +297,8 @@ void USBFS_IRQHandler( void )
                                         switch( USBFS_SetupReqCode )
                                         {
                                             case HID_SET_REPORT:
-                                                memcpy(&HID_Report_Buffer[0],USBFS_EP0_Buf,DEF_USBD_UEP0_SIZE);
-                                                HID_Set_Report_Flag = SET_REPORT_WAIT_DEAL;
+                                                memcpy(&USBFS_HID_Report_Buffer[0],USBFS_EP0_Buf,DEF_USBD_UEP0_SIZE);
+                                                USBFS_HID_Set_Report_Flag = SET_REPORT_WAIT_DEAL;
                                                 USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_TOG | USBFS_UEP_T_RES_NAK;
                                                 break;
                                             default:
@@ -323,18 +326,18 @@ void USBFS_IRQHandler( void )
                         {
                             /* Write In Buffer */
                             USBFSD->UEP1_RX_CTRL ^= USBFS_UEP_R_TOG;
-                            RingBuffer_Comm.PackLen[RingBuffer_Comm.LoadPtr] = USBFSD->RX_LEN;
-                            RingBuffer_Comm.LoadPtr ++;
-                            if(RingBuffer_Comm.LoadPtr == DEF_Ring_Buffer_Max_Blks)
+                            USBFS_RingBuffer_Comm.PackLen[USBFS_RingBuffer_Comm.LoadPtr] = USBFSD->RX_LEN;
+                            USBFS_RingBuffer_Comm.LoadPtr ++;
+                            if(USBFS_RingBuffer_Comm.LoadPtr == DEF_Ring_Buffer_Max_Blks)
                             {
-                                RingBuffer_Comm.LoadPtr = 0;
+                                USBFS_RingBuffer_Comm.LoadPtr = 0;
                             }
-                            USBFSD->UEP1_DMA = (uint32_t)(&Data_Buffer[(RingBuffer_Comm.LoadPtr) * DEF_USBD_FS_PACK_SIZE]);
-                            RingBuffer_Comm.RemainPack ++;
-                            if(RingBuffer_Comm.RemainPack >= DEF_Ring_Buffer_Max_Blks-DEF_RING_BUFFER_REMINE)
+                            USBFSD->UEP1_DMA = (uint32_t)(&USBFS_Data_Buffer[(USBFS_RingBuffer_Comm.LoadPtr) * DEF_USBD_FS_PACK_SIZE]);
+                            USBFS_RingBuffer_Comm.RemainPack ++;
+                            if(USBFS_RingBuffer_Comm.RemainPack >= DEF_Ring_Buffer_Max_Blks-DEF_RING_BUFFER_REMINE)
                             {
                                 USBFSD->UEP1_RX_CTRL = (USBFSD->UEP1_RX_CTRL & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_RES_NAK;
-                                RingBuffer_Comm.StopFlag = 1;
+                                USBFS_RingBuffer_Comm.StopFlag = 1;
                             }
                         }
                         break;
@@ -417,7 +420,7 @@ void USBFS_IRQHandler( void )
                                 if( USBFS_SetupReqIndex == DEF_USBD_HID_INTERFACE )
                                 {
                                     len = DEF_USBD_UEP0_SIZE;
-                                    memcpy(USBFS_EP0_Buf,&HID_Report_Buffer[0],DEF_USBD_UEP0_SIZE);
+                                    memcpy(USBFS_EP0_Buf,&USBFS_HID_Report_Buffer[0],DEF_USBD_UEP0_SIZE);
                                 }
                                 else
                                 {
@@ -486,7 +489,7 @@ void USBFS_IRQHandler( void )
                             {
                                 /* get usb device descriptor */
                                 case USB_DESCR_TYP_DEVICE:
-                                    pUSBFS_Descr = MyDevDescr;
+                                    pUSBFS_Descr = USBFS_MyDevDescr;
                                     len = DEF_USBD_DEVICE_DESC_LEN;
                                     break;
 
@@ -526,25 +529,25 @@ void USBFS_IRQHandler( void )
                                     {
                                         /* Descriptor 0, Language descriptor */
                                         case DEF_STRING_DESC_LANG:
-                                            pUSBFS_Descr = MyLangDescr;
+                                            pUSBFS_Descr = USBFS_MyLangDescr;
                                             len = DEF_USBD_LANG_DESC_LEN;
                                             break;
 
                                         /* Descriptor 1, Manufacturers String descriptor */
                                         case DEF_STRING_DESC_MANU:
-                                            pUSBFS_Descr = MyManuInfo;
+                                            pUSBFS_Descr = USBFS_MyManuInfo;
                                             len = DEF_USBD_MANU_DESC_LEN;
                                             break;
 
                                         /* Descriptor 2, Product String descriptor */
                                         case DEF_STRING_DESC_PROD:
-                                            pUSBFS_Descr = MyProdInfo;
+                                            pUSBFS_Descr = USBFS_MyProdInfo;
                                             len = DEF_USBD_PROD_DESC_LEN;
                                             break;
 
                                         /* Descriptor 3, Serial-number String descriptor */
                                         case DEF_STRING_DESC_SERN:
-                                            pUSBFS_Descr = MySerNumInfo;
+                                            pUSBFS_Descr = USBFS_MySerNumInfo;
                                             len = DEF_USBD_SN_DESC_LEN;
                                             break;
 
@@ -553,7 +556,7 @@ void USBFS_IRQHandler( void )
                                             break;
                                     }
                                     break;
-  
+
                                 default :
                                     errflag = 0xFF;
                                     break;

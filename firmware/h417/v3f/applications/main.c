@@ -6,6 +6,9 @@
 #include "ch585_link.h"
 #include "default_profile.h"
 #include "half_state.h"
+#include "pc_link.h"
+#include "profile_runtime.h"
+#include "profile_sync.h"
 #include "rf_report_bridge.h"
 #include "rgb_status.h"
 
@@ -25,6 +28,14 @@ typedef ch32h417_usbhs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define v3f_usb_hid_nkro_reports ch32h417_usbhs_hid_nkro_reports
 #define v3f_usb_hid_nkro_debug_write ch32h417_usbhs_hid_nkro_debug_write
 #define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbhs_hid_nkro_diag_snapshot
+#if V3F_ENABLE_USBFS_CDC
+/* Dual-controller build: USBHS keeps HID, USBFS carries the CDC
+ * config/debug channel, so CDC writes go through the USBFS driver. */
+#include "ch32h417.h"
+#include "ch32h417_usbfs_hid_nkro.h"
+#undef v3f_usb_hid_nkro_debug_write
+#define v3f_usb_hid_nkro_debug_write ch32h417_usbfs_hid_nkro_debug_write
+#endif
 #else
 #include "ch32h417_usbfs_hid_nkro.h"
 typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
@@ -62,6 +73,10 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 
 #ifndef V3F_ENABLE_USBFS_CDC_DEBUG
 #define V3F_ENABLE_USBFS_CDC_DEBUG 0
+#endif
+
+#ifndef V3F_ENABLE_USBFS_CDC
+#define V3F_ENABLE_USBFS_CDC 0
 #endif
 
 #ifndef V3F_OUTPUT_MODE_DEFAULT
@@ -650,25 +665,16 @@ static void v3f_report_diag_trace(const v3f_global_key_state_t *keys,
 static void v3f_profile_status_poll(uint16_t host_seq)
 {
 #if V3F_ENABLE_PROFILE_STATUS_SYNC
-    aik_spi_profile_status_v1_t status;
-
 #if V3F_PROFILE_STATUS_PERIOD_TICKS == 0
+    (void)host_seq;
     return;
 #else
     if((host_seq % V3F_PROFILE_STATUS_PERIOD_TICKS) != 31U)
     {
         return;
     }
+    v3f_profile_sync_status_poll(host_seq);
 #endif
-
-    memset(&status, 0, sizeof(status));
-    (void)v3f_ch585_link_query_profile_status(AIK_HALF_ID_LEFT,
-                                              host_seq,
-                                              &status);
-    memset(&status, 0, sizeof(status));
-    (void)v3f_ch585_link_query_profile_status(AIK_HALF_ID_RIGHT,
-                                              host_seq,
-                                              &status);
 #else
     (void)host_seq;
 #endif
@@ -741,7 +747,8 @@ static void v3f_cdc_debug_poll(uint16_t tick,
                                const v3f_global_key_state_t *keys,
                                const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
-#if V3F_ENABLE_USBFS_CDC_DEBUG
+#if V3F_ENABLE_USBFS_CDC_DEBUG && !V3F_ENABLE_USBFS_CDC
+    /* The configuration protocol owns CDC IN while USBFS carries profiles. */
     static uint16_t last_tick;
     static uint8_t phase;
     v3f_ch585_link_stats_t left_stats;
@@ -921,7 +928,17 @@ int main(void)
     memset(zero_nkro16, 0, sizeof(zero_nkro16));
 
     v3f_board_init();
+    /* Bring USB up before profile parsing so enumeration can isolate early boot faults. */
     v3f_usb_hid_nkro_init();
+#if V3F_ENABLE_USBHS_8K && V3F_ENABLE_USBFS_CDC
+    ch32h417_usbfs_hid_nkro_init();
+    /* Keep the 8K HID interrupt ahead of CDC bulk traffic. */
+    NVIC_SetPriority(USBHS_IRQn, 0x00U);
+    NVIC_SetPriority(USBFS_IRQn, 0x80U);
+#endif
+    (void)v3f_profile_runtime_init();
+    v3f_profile_sync_init();
+    v3f_profile_sync_mark_all_dirty();
     v3f_ch585_link_init();
     v3f_rgb_status_init();
     v3f_rgb_status_set_enabled(0U);
@@ -930,6 +947,7 @@ int main(void)
     {
         uint8_t got_left;
         uint8_t got_right;
+        uint8_t sync_mask = v3f_profile_sync_poll(host_seq);
         uint8_t previous_output_mode = output_mode;
         uint16_t consumer_usage;
         uint16_t right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
@@ -943,7 +961,9 @@ int main(void)
                                 host_seq,
                                 0,
                                 output_mode);
-        got_right = v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx);
+        got_right = ((sync_mask & (1U << AIK_HALF_ID_RIGHT)) == 0U) ?
+                    v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx) :
+                    0U;
         update_half_cache(&right, got_right, &rx);
         age_half_cache_on_usb_report(&right, got_right);
         (void)v3f_rotary_count_delta_from_right(
@@ -981,7 +1001,9 @@ int main(void)
                                     0,
                                     output_mode);
         }
-        got_left = v3f_ch585_link_poll(AIK_HALF_ID_LEFT, &left_cmd, &rx);
+        got_left = ((sync_mask & (1U << AIK_HALF_ID_LEFT)) == 0U) ?
+                   v3f_ch585_link_poll(AIK_HALF_ID_LEFT, &left_cmd, &rx) :
+                   0U;
         update_half_cache(&left, got_left, &rx);
         age_half_cache_on_usb_report(&left, got_left);
         if((v3f_output_mode_is_wireless(output_mode) != 0U) &&
@@ -1005,10 +1027,14 @@ int main(void)
                                 nkro16,
                                 output_mode);
 
-        got_left = v3f_ch585_link_poll(AIK_HALF_ID_LEFT, &left_cmd, &rx);
+        got_left = ((sync_mask & (1U << AIK_HALF_ID_LEFT)) == 0U) ?
+                   v3f_ch585_link_poll(AIK_HALF_ID_LEFT, &left_cmd, &rx) :
+                   0U;
         update_half_cache(&left, got_left, &rx);
 
-        got_right = v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx);
+        got_right = ((sync_mask & (1U << AIK_HALF_ID_RIGHT)) == 0U) ?
+                    v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx) :
+                    0U;
         update_half_cache(&right, got_right, &rx);
         (void)v3f_rotary_count_delta_from_right(
             right.valid ? &right.frame : 0);
@@ -1021,6 +1047,14 @@ int main(void)
         v3f_half_state_merge(left.valid ? &left.frame : 0,
                              right.valid ? &right.frame : 0,
                              &keys);
+        if(v3f_profile_runtime_rearm_take() != 0U)
+        {
+            /* Table swap: neutralise held keys until re-pressed and
+             * force one empty report so nothing sticks. */
+            v3f_profile_runtime_rearm_latch(&keys);
+            usb_nkro_release_pending = 1U;
+            usb_consumer_release_pending = 1U;
+        }
         output_mode = v3f_output_mode_update_from_keys(&keys, output_mode);
         if(v3f_output_mode_is_wireless(output_mode) == 0U)
         {
@@ -1029,14 +1063,31 @@ int main(void)
             last_wireless_right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
         }
         v3f_lighting_update_from_keys(&keys);
-        v3f_fn_layer_consume_keys(&keys);
-        v3f_default_profile_build_nkro16(&keys, nkro16);
-        v3f_apply_local_keyboard_controls(left.valid ? &left.frame : 0,
-                                          nkro16);
-        consumer_usage = v3f_consumer_usage_from_local_controls(
-            right.valid ? &right.frame : 0);
-        mouse_wheel = v3f_mouse_wheel_from_local_controls(
-            left.valid ? &left.frame : 0);
+        if(v3f_profile_runtime_valid() != 0U)
+        {
+            if(v3f_profile_runtime_get()->has_fn_overlay == 0U)
+            {
+                v3f_fn_layer_consume_keys(&keys);
+            }
+            v3f_profile_runtime_build_nkro16(&keys, nkro16);
+            v3f_profile_runtime_apply_local_keyboard(
+                left.valid ? &left.frame : 0, nkro16);
+            consumer_usage = v3f_profile_runtime_consumer_usage(
+                right.valid ? &right.frame : 0);
+            mouse_wheel = v3f_profile_runtime_mouse_wheel(
+                left.valid ? &left.frame : 0);
+        }
+        else
+        {
+            v3f_fn_layer_consume_keys(&keys);
+            v3f_default_profile_build_nkro16(&keys, nkro16);
+            v3f_apply_local_keyboard_controls(left.valid ? &left.frame : 0,
+                                              nkro16);
+            consumer_usage = v3f_consumer_usage_from_local_controls(
+                right.valid ? &right.frame : 0);
+            mouse_wheel = v3f_mouse_wheel_from_local_controls(
+                left.valid ? &left.frame : 0);
+        }
         if(output_mode == AIK_OUTPUT_MODE_USBHS)
         {
             v3f_consumer_delta_accumulate(&usb_consumer_delta_pending,
@@ -1162,6 +1213,7 @@ int main(void)
         v3f_report_diag_trace(&keys, nkro16);
         v3f_usb_diag_trace();
         v3f_profile_status_poll(host_seq);
+        v3f_pc_link_poll();
         v3f_cdc_debug_poll(host_seq, &left, &right, &keys, nkro16);
         v3f_rgb_status_task(host_seq);
 
