@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixed-position TUI for CH585 half_scan debug UART output."""
+"""Fixed-position TUI for CH585 half_scan UART diagnostic output."""
 
 from __future__ import print_function
 
@@ -20,7 +20,7 @@ ANSI_MAIN_SCREEN = "\x1b[?1049l"
 
 START_RE = re.compile(
     r"half_scan\s+start\s+half=(?P<half>\d+)\s+sys=(?P<sys>\d+)\s+"
-    r"keys=(?P<keys>\d+)\s+rf=(?P<rf>\d+)\s+uart_dbg=(?P<uart>\d+)"
+    r"keys=(?P<keys>\d+)\s+rf=(?P<rf>\d+)\s+uart_diag=(?P<uart>\d+)"
 )
 STATUS_RE = re.compile(
     r"hs\s+half=(?P<half>\d+)\s+seq=(?P<seq>\d+)\s+scan=(?P<scan>\d+)\s+"
@@ -44,7 +44,7 @@ class HalfScanState(object):
         self.sys_hz = None
         self.key_count = None
         self.rf_enabled = None
-        self.uart_debug = None
+        self.uart_diag = None
         self.seq = None
         self.scan = None
         self.raw_min_key = None
@@ -121,7 +121,7 @@ def parse_line(state, line):
         state.sys_hz = parse_int(match, "sys")
         state.key_count = parse_int(match, "keys")
         state.rf_enabled = parse_int(match, "rf")
-        state.uart_debug = parse_int(match, "uart")
+        state.uart_diag = parse_int(match, "uart")
         state.last_update = time.time()
         return True
 
@@ -251,14 +251,14 @@ def screen_lines(state, width=100, max_rows=24):
     down_keys = state.down_keys()
 
     lines = [
-        "CH585 Half Scan Debug  side=%s half=%s age=%s frames=%s" %
+        "CH585 Half Scan UART Monitor  side=%s half=%s age=%s frames=%s" %
         (state.side_name(), value_or_unknown(state.half), age, state.frames_seen),
         "%s %s %s %s" %
         (
             key_value("sys", state.sys_hz),
             key_value("keys", state.key_count),
             key_value("rf", state.rf_enabled),
-            key_value("uart_dbg", state.uart_debug),
+            key_value("uart_diag", state.uart_diag),
         ),
         "seq=%s scan=%s host=%s cmd=%s hseq=%s" %
         (
@@ -398,7 +398,7 @@ def iter_serial_lines(port, baud):
 
 def demo_lines_once():
     return [
-        "half_scan start half=0 sys=78000000 keys=36 rf=0 uart_dbg=1",
+        "half_scan start half=0 sys=78000000 keys=36 rf=0 uart_diag=1",
         "hs half=0 seq=100 scan=331 raw_min=7:490 pos_max=0:0 down=000000000000 first=255 spi=0 abort=0 last=0 host=0 cmd=0 hseq=0 rxcnt=12 rx=00000000 hcrc=0000/84c0",
         "hs half=0 seq=200 scan=680 raw_min=5:330 pos_max=5:1000 down=200000000000 first=5 spi=87 abort=0 last=0 host=0 cmd=0 hseq=0 rxcnt=12 rx=00000000 hcrc=0000/84c0",
     ]
@@ -447,7 +447,7 @@ def run_raw(line_iter):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Fixed-position TUI for CH585 half_scan debug UART output."
+        description="Fixed-position TUI for CH585 half_scan UART diagnostic output."
     )
     parser.add_argument("--port", default=None, help="Serial port, for example COM7")
     parser.add_argument("--baud", default=921600, type=int, help="UART baud rate")
@@ -461,7 +461,7 @@ def main(argv=None):
         lines = demo_iter(args.demo_delay)
     else:
         if not args.port:
-            print("missing --port, for example: python firmware/ch585/tools/ch585_half_scan_debug_tui.py --port COM7")
+            print("missing --port, for example: python firmware/ch585/tools/ch585_half_scan_uart_monitor.py --port COM7")
             return 2
         lines = iter_serial_lines(args.port, args.baud)
 

@@ -75,8 +75,8 @@ extern "C" {
 #define AIK_CONSUMER_USAGE_VOLUME_UP   0x00E9U
 #define AIK_CONSUMER_USAGE_VOLUME_DOWN 0x00EAU
 
-#define AIK_PROFILE_DEBUG_ID16 0xA117U
-#define AIK_PROFILE_DEBUG_GENERATION16 1U
+#define AIK_PROFILE_FACTORY_ID16         0x0C77U
+#define AIK_PROFILE_FACTORY_GENERATION16 1U
 
 #define AIK_PROFILE_STATUS_FLAG_VALID   0x01U
 #define AIK_PROFILE_STATUS_FLAG_DEFAULT 0x02U
@@ -434,15 +434,15 @@ static inline uint8_t aik_spi_profile_status_valid(
            (status->crc16 == aik_spi_profile_status_crc(status));
 }
 
-static inline uint8_t aik_spi_profile_status_matches_debug_profile(
+static inline uint8_t aik_spi_profile_status_matches_factory_profile(
     const aik_spi_profile_status_v1_t *status,
     uint8_t half_id)
 {
     return (aik_spi_profile_status_valid(status) != 0U) &&
            (status->half_id == half_id) &&
            ((status->flags & AIK_PROFILE_STATUS_FLAG_VALID) != 0U) &&
-           (status->profile_id16 == AIK_PROFILE_DEBUG_ID16) &&
-           (status->generation16 == AIK_PROFILE_DEBUG_GENERATION16);
+            (status->profile_id16 == AIK_PROFILE_FACTORY_ID16) &&
+            (status->generation16 == AIK_PROFILE_FACTORY_GENERATION16);
 }
 
 static inline uint8_t aik_spi_profile_status_active_slot(

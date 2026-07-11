@@ -7,7 +7,7 @@ PROJECT_NAME ?= ch585_$(APP)
 BUILD_ROOT   ?= build
 BUILD_VARIANT ?= $(APP)
 HALF_SCAN_CLOCK_DEFS := -DSYSCLK_FREQ=CLK_SOURCE_HSE_PLL_78MHz -DFREQ_SYS=78000000
-HALF_SCAN_DEBUG_UART_DEFS := -DCH585_HALF_SCAN_DEBUG_UART=1 -DDEBUG=Debug_UART1
+HALF_SCAN_UART_DIAG_DEFS := -DCH585_HALF_SCAN_UART_DIAG=1 -DDEBUG=Debug_UART1
 
 CC      := "$(PREFIX)gcc"
 AS      := "$(PREFIX)gcc" -x assembler-with-cpp
@@ -108,7 +108,7 @@ OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_rf half_scan_left_rf_debug_uart half_scan_left_ble_debug_uart half_scan_left_output_switch_debug_uart half_scan_left_debug_uart half_scan_right_debug_uart rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
+.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_rf half_scan_left_keyboard half_scan_right_keyboard half_scan_left_rf_uart_diag half_scan_left_ble_uart_diag half_scan_left_keyboard_uart_diag half_scan_left_uart_diag half_scan_right_uart_diag rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
 
 all: firmware
 
@@ -127,20 +127,26 @@ half_scan_right:
 half_scan_left_rf:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_rf BUILD_VARIANT=half_scan_left_rf DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1" firmware
 
-half_scan_left_rf_debug_uart:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_rf_debug_uart BUILD_VARIANT=half_scan_left_rf_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1" firmware
+half_scan_left_keyboard:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_keyboard BUILD_VARIANT=half_scan_left_keyboard DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1 -DCH585_BLE_HID_ENABLE=1 -DCH585_BLE_PAIRING_EXT_EEPROM=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
 
-half_scan_left_ble_debug_uart:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_ble_debug_uart BUILD_VARIANT=half_scan_left_ble_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0 -DCH585_BLE_HID_ENABLE=1 -DCH585_BLE_PAIRING_EXT_EEPROM=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
+half_scan_right_keyboard:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right_keyboard BUILD_VARIANT=half_scan_right_keyboard DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
 
-half_scan_left_output_switch_debug_uart:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_output_switch_debug_uart BUILD_VARIANT=half_scan_left_output_switch_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1 -DCH585_BLE_HID_ENABLE=1 -DCH585_BLE_PAIRING_EXT_EEPROM=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
+half_scan_left_rf_uart_diag:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_rf_uart_diag BUILD_VARIANT=half_scan_left_rf_uart_diag DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_UART_DIAG_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1" firmware
 
-half_scan_left_debug_uart:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_debug_uart BUILD_VARIANT=half_scan_left_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0" firmware
+half_scan_left_ble_uart_diag:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_ble_uart_diag BUILD_VARIANT=half_scan_left_ble_uart_diag DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_UART_DIAG_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0 -DCH585_BLE_HID_ENABLE=1 -DCH585_BLE_PAIRING_EXT_EEPROM=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
 
-half_scan_right_debug_uart:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right_debug_uart BUILD_VARIANT=half_scan_right_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
+half_scan_left_keyboard_uart_diag:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_keyboard_uart_diag BUILD_VARIANT=half_scan_left_keyboard_uart_diag DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_UART_DIAG_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1 -DCH585_BLE_HID_ENABLE=1 -DCH585_BLE_PAIRING_EXT_EEPROM=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
+
+half_scan_left_uart_diag:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_uart_diag BUILD_VARIANT=half_scan_left_uart_diag DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_UART_DIAG_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0" firmware
+
+half_scan_right_uart_diag:
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right_uart_diag BUILD_VARIANT=half_scan_right_uart_diag DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_UART_DIAG_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
 
 rf_basic rf_receiver_usbhs:
 	@$(MAKE) APP=$@ firmware

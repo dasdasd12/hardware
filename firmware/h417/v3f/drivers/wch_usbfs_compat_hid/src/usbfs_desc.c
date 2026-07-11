@@ -19,7 +19,7 @@ const uint8_t  USBFS_MyDevDescr[] =
     0x12,                                               // bLength
     0x01,                                               // bDescriptorType (Device)
     0x10, 0x01,                                         // bcdUSB 1.10
-#if V3F_ENABLE_USBFS_CDC_DEBUG
+#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
     0xEF,                                               // bDeviceClass Miscellaneous
     0x02,                                               // bDeviceSubClass Common Class
     0x01,                                               // bDeviceProtocol IAD
@@ -41,7 +41,7 @@ const uint8_t  USBFS_MyDevDescr[] =
 /* Configuration Descriptor */
 const uint8_t  MyCfgDescr[] =
 {
-#if V3F_ENABLE_USBFS_CDC_DEBUG
+#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
     /* Configuration Descriptor */
     0x09,                           // bLength
     0x02,                           // bDescriptorType

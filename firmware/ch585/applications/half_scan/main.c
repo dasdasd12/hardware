@@ -39,16 +39,16 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_SPI_ACCEPT_HOST_CMD (CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE)
 #endif
 
-#ifndef CH585_HALF_SCAN_DEBUG_UART
-#define CH585_HALF_SCAN_DEBUG_UART 0
+#ifndef CH585_HALF_SCAN_UART_DIAG
+#define CH585_HALF_SCAN_UART_DIAG 0
 #endif
 
-#ifndef CH585_HALF_SCAN_DEBUG_UART_BAUD
-#define CH585_HALF_SCAN_DEBUG_UART_BAUD 921600U
+#ifndef CH585_HALF_SCAN_UART_DIAG_BAUD
+#define CH585_HALF_SCAN_UART_DIAG_BAUD 921600U
 #endif
 
-#ifndef CH585_HALF_SCAN_DEBUG_PERIOD_FRAMES
-#define CH585_HALF_SCAN_DEBUG_PERIOD_FRAMES 100U
+#ifndef CH585_HALF_SCAN_UART_DIAG_PERIOD_FRAMES
+#define CH585_HALF_SCAN_UART_DIAG_PERIOD_FRAMES 100U
 #endif
 
 #ifndef CH585_LOCAL_ROTARY_PULSE_FRAMES
@@ -107,8 +107,8 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_LOCAL_SWITCH_GESTURE_ENTER   2U
 #define CH585_LOCAL_SWITCH_GESTURE_DIR     3U
 
-#if CH585_HALF_SCAN_DEBUG_UART && !defined(DEBUG)
-#error CH585_HALF_SCAN_DEBUG_UART requires DEBUG=Debug_UART1 or another WCH DEBUG UART.
+#if CH585_HALF_SCAN_UART_DIAG && !defined(DEBUG)
+#error CH585_HALF_SCAN_UART_DIAG requires DEBUG=Debug_UART1 or another WCH DEBUG UART.
 #endif
 
 static ch585_ads7948_mux_acq_t s_acq;
@@ -133,10 +133,10 @@ static uint8_t s_local_rotary_cw_frames;
 static uint8_t s_local_rotary_ccw_frames;
 static uint32_t s_local_rotary_cw_total;
 static uint32_t s_local_rotary_ccw_total;
-static uint8_t s_local_rotary_debug_last_raw_ab;
-static uint32_t s_local_rotary_debug_edge_count;
-static volatile uint32_t s_local_rotary_debug_irq_count;
-static volatile uint16_t s_local_rotary_debug_irq_flags;
+static uint8_t s_local_rotary_diag_last_raw_ab;
+static uint32_t s_local_rotary_diag_edge_count;
+static volatile uint32_t s_local_rotary_diag_irq_count;
+static volatile uint16_t s_local_rotary_diag_irq_flags;
 static int16_t s_local_mouse_wheel_pending;
 static uint8_t s_local_button_last_raw;
 static uint8_t s_local_button_stable;
@@ -216,11 +216,11 @@ static void half_scan_local_gpio_init(void)
     GPIOADigitalCfg(ENABLE, GPIO_Pin_7 | GPIO_Pin_10 | GPIO_Pin_11);
     GPIOBDigitalCfg(ENABLE, GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7);
     GPIOA_ModeCfg(GPIO_Pin_10 | GPIO_Pin_11, GPIO_ModeIN_PU);
-    s_local_rotary_debug_last_raw_ab = half_scan_read_rotary_raw_ab();
-    s_local_rotary_debug_edge_count = 0U;
-    s_local_rotary_debug_irq_count = 0U;
-    s_local_rotary_debug_irq_flags = 0U;
-#if CH585_HALF_SCAN_DEBUG_UART
+    s_local_rotary_diag_last_raw_ab = half_scan_read_rotary_raw_ab();
+    s_local_rotary_diag_edge_count = 0U;
+    s_local_rotary_diag_irq_count = 0U;
+    s_local_rotary_diag_irq_flags = 0U;
+#if CH585_HALF_SCAN_UART_DIAG
     GPIOA_ClearITFlagBit(GPIO_Pin_10 | GPIO_Pin_11);
     GPIOA_ITModeCfg(GPIO_Pin_10 | GPIO_Pin_11, GPIO_ITMode_FallEdge);
     PFIC_EnableIRQ(GPIO_A_IRQn);
@@ -346,10 +346,10 @@ static void half_scan_local_rotary_poll(void)
         (int8_t)CH585_LOCAL_ROTARY_QUAD_STEPS_PER_EVENT_RIGHT :
         (int8_t)CH585_LOCAL_ROTARY_QUAD_STEPS_PER_EVENT;
 
-    if(raw_ab != s_local_rotary_debug_last_raw_ab)
+    if(raw_ab != s_local_rotary_diag_last_raw_ab)
     {
-        s_local_rotary_debug_last_raw_ab = raw_ab;
-        s_local_rotary_debug_edge_count++;
+        s_local_rotary_diag_last_raw_ab = raw_ab;
+        s_local_rotary_diag_edge_count++;
     }
 
     s_local_rotary_last_ab = next_ab;
@@ -919,18 +919,18 @@ static void half_scan_apply_host_cmd(void)
 #endif
 }
 
-#if CH585_HALF_SCAN_DEBUG_UART
-static void half_scan_debug_uart_init(void)
+#if CH585_HALF_SCAN_UART_DIAG
+static void half_scan_uart_diag_init(void)
 {
     GPIOPinRemap(DISABLE, RB_PIN_UART1);
     GPIOA_SetBits(GPIO_Pin_9);
     GPIOA_ModeCfg(GPIO_Pin_8, GPIO_ModeIN_PU);
     GPIOA_ModeCfg(GPIO_Pin_9, GPIO_ModeOut_PP_5mA);
     UART1_DefInit();
-    UART1_BaudRateCfg(CH585_HALF_SCAN_DEBUG_UART_BAUD);
+    UART1_BaudRateCfg(CH585_HALF_SCAN_UART_DIAG_BAUD);
 }
 
-static uint8_t half_scan_debug_first_down(uint8_t key_count)
+static uint8_t half_scan_uart_diag_first_down(uint8_t key_count)
 {
     uint8_t key;
 
@@ -944,16 +944,16 @@ static uint8_t half_scan_debug_first_down(uint8_t key_count)
     return 0xFFU;
 }
 
-static void half_scan_debug_poll(uint8_t key_count)
+static void half_scan_uart_diag_poll(uint8_t key_count)
 {
     ch585_spi0_slave_link_stats_t spi_stats;
     uint16_t host_crc;
     uint16_t host_calc_crc;
     int8_t mouse_wheel_now;
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
-    int8_t last_output_mouse_wheel_debug = s_last_output_mouse_wheel;
+    int8_t last_output_mouse_wheel_diag = s_last_output_mouse_wheel;
 #else
-    int8_t last_output_mouse_wheel_debug = 0;
+    int8_t last_output_mouse_wheel_diag = 0;
 #endif
     uint8_t key;
     uint8_t rotary_ab;
@@ -968,7 +968,7 @@ static void half_scan_debug_poll(uint8_t key_count)
     uint8_t host_ok = 0U;
 #endif
 
-    if((s_tx_frame.half_seq % CH585_HALF_SCAN_DEBUG_PERIOD_FRAMES) != 0U)
+    if((s_tx_frame.half_seq % CH585_HALF_SCAN_UART_DIAG_PERIOD_FRAMES) != 0U)
     {
         return;
     }
@@ -1016,7 +1016,7 @@ static void half_scan_debug_poll(uint8_t key_count)
           (unsigned int)s_tx_frame.down_bits[3],
           (unsigned int)s_tx_frame.down_bits[4],
           (unsigned int)s_tx_frame.down_bits[5],
-          (unsigned int)half_scan_debug_first_down(key_count),
+          (unsigned int)half_scan_uart_diag_first_down(key_count),
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
           (unsigned int)s_output_mode,
 #else
@@ -1036,9 +1036,9 @@ static void half_scan_debug_poll(uint8_t key_count)
           (unsigned int)host_crc,
           (unsigned int)host_calc_crc,
           (unsigned int)rotary_raw_ab,
-          (unsigned long)s_local_rotary_debug_edge_count,
-          (unsigned long)s_local_rotary_debug_irq_count,
-          (unsigned int)s_local_rotary_debug_irq_flags,
+          (unsigned long)s_local_rotary_diag_edge_count,
+          (unsigned long)s_local_rotary_diag_irq_count,
+          (unsigned int)s_local_rotary_diag_irq_flags,
           (unsigned int)rotary_ab,
           (int)s_local_rotary_accum,
           (unsigned int)s_local_rotary_cw_frames,
@@ -1047,7 +1047,7 @@ static void half_scan_debug_poll(uint8_t key_count)
           (unsigned long)s_local_rotary_ccw_total,
           (int)mouse_wheel_now,
           (int)s_local_mouse_wheel_pending,
-          (int)last_output_mouse_wheel_debug);
+          (int)last_output_mouse_wheel_diag);
 #if CH585_BLE_HID_ENABLE
     PRINT("ble conn=%u sent=%lu drop=%lu boot=%02x %02x %02x %02x %02x %02x %02x %02x\r\n",
           (unsigned int)BLE_HID_IsConnected(),
@@ -1064,11 +1064,11 @@ static void half_scan_debug_poll(uint8_t key_count)
 #endif
 }
 #else
-static void half_scan_debug_uart_init(void)
+static void half_scan_uart_diag_init(void)
 {
 }
 
-static void half_scan_debug_poll(uint8_t key_count)
+static void half_scan_uart_diag_poll(uint8_t key_count)
 {
     (void)key_count;
 }
@@ -1081,14 +1081,14 @@ static void half_scan_init(void)
 
     HSECFG_Capacitance(HSECap_18p);
     SetSysClock(SYSCLK_FREQ);
-    half_scan_debug_uart_init();
-    PRINT("half_scan start half=%u sys=%lu keys=%u rf=%u ble=%u uart_dbg=%u\r\n",
+    half_scan_uart_diag_init();
+    PRINT("half_scan start half=%u sys=%lu keys=%u rf=%u ble=%u uart_diag=%u\r\n",
           (unsigned int)CH585_HALF_ID,
           (unsigned long)GetSysClock(),
           (unsigned int)aik_spi_half_key_count((uint8_t)CH585_HALF_ID),
           (unsigned int)CH585_RF_TX_ENABLE,
           (unsigned int)CH585_BLE_HID_ENABLE,
-          (unsigned int)CH585_HALF_SCAN_DEBUG_UART);
+          (unsigned int)CH585_HALF_SCAN_UART_DIAG);
 #if CH585_BLE_PAIRING_EXT_EEPROM
     /* SNV callbacks hit the external EEPROM as soon as the BLE stack
      * starts; bring the I2C bus up first. */
@@ -1157,7 +1157,7 @@ static void half_scan_init(void)
     half_scan_build_frame();
 }
 
-#if CH585_HALF_SCAN_DEBUG_UART
+#if CH585_HALF_SCAN_UART_DIAG
 __INTERRUPT
 void GPIOA_IRQHandler(void)
 {
@@ -1166,8 +1166,8 @@ void GPIOA_IRQHandler(void)
 
     if(rotary_flags != 0U)
     {
-        s_local_rotary_debug_irq_count++;
-        s_local_rotary_debug_irq_flags |= rotary_flags;
+        s_local_rotary_diag_irq_count++;
+        s_local_rotary_diag_irq_flags |= rotary_flags;
     }
 
     if(flags != 0U)
@@ -1219,7 +1219,7 @@ int main(void)
         half_scan_compact_raw(&s_acq, s_compact_raw, key_count);
         (void)mag_key_engine_update(&s_engine, s_compact_raw);
         half_scan_build_frame();
-        half_scan_debug_poll(key_count);
+        half_scan_uart_diag_poll(key_count);
 #if CH585_RF_TX_ENABLE
         ch585_rf_nkro_tx_poll();
 #elif CH585_BLE_HID_ENABLE

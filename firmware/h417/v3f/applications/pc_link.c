@@ -433,7 +433,7 @@ static void pc_feed_byte(char c)
 
 static void pc_cdc_write(const char *line)
 {
-    (void)ch32h417_usbfs_hid_nkro_debug_write(line);
+    (void)ch32h417_usbfs_hid_nkro_cdc_write(line);
 }
 
 void v3f_pc_link_poll(void)

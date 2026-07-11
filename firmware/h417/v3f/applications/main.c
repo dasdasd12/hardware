@@ -26,15 +26,14 @@ typedef ch32h417_usbhs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define v3f_usb_hid_nkro_submit_consumer ch32h417_usbhs_hid_nkro_submit_consumer
 #define v3f_usb_hid_nkro_submit_mouse_wheel ch32h417_usbhs_hid_nkro_submit_mouse_wheel
 #define v3f_usb_hid_nkro_reports ch32h417_usbhs_hid_nkro_reports
-#define v3f_usb_hid_nkro_debug_write ch32h417_usbhs_hid_nkro_debug_write
+#define v3f_usb_cdc_write ch32h417_usbhs_hid_nkro_cdc_write
 #define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbhs_hid_nkro_diag_snapshot
-#if V3F_ENABLE_USBFS_CDC
-/* Dual-controller build: USBHS keeps HID, USBFS carries the CDC
- * config/debug channel, so CDC writes go through the USBFS driver. */
+#if V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE
+/* Dual-controller build: USBHS keeps HID while USBFS carries CDC. */
 #include "ch32h417.h"
 #include "ch32h417_usbfs_hid_nkro.h"
-#undef v3f_usb_hid_nkro_debug_write
-#define v3f_usb_hid_nkro_debug_write ch32h417_usbfs_hid_nkro_debug_write
+#undef v3f_usb_cdc_write
+#define v3f_usb_cdc_write ch32h417_usbfs_hid_nkro_cdc_write
 #endif
 #else
 #include "ch32h417_usbfs_hid_nkro.h"
@@ -46,7 +45,7 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define v3f_usb_hid_nkro_submit_consumer ch32h417_usbfs_hid_nkro_submit_consumer
 #define v3f_usb_hid_nkro_submit_mouse_wheel ch32h417_usbfs_hid_nkro_submit_mouse_wheel
 #define v3f_usb_hid_nkro_reports ch32h417_usbfs_hid_nkro_reports
-#define v3f_usb_hid_nkro_debug_write ch32h417_usbfs_hid_nkro_debug_write
+#define v3f_usb_cdc_write ch32h417_usbfs_hid_nkro_cdc_write
 #define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbfs_hid_nkro_diag_snapshot
 #endif
 
@@ -71,20 +70,20 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_ENABLE_SPI_HOST_CMD 0
 #endif
 
-#ifndef V3F_ENABLE_USBFS_CDC_DEBUG
-#define V3F_ENABLE_USBFS_CDC_DEBUG 0
-#endif
-
 #ifndef V3F_ENABLE_USBFS_CDC
 #define V3F_ENABLE_USBFS_CDC 0
+#endif
+
+#ifndef V3F_ENABLE_USBFS_CDC_TRACE
+#define V3F_ENABLE_USBFS_CDC_TRACE 0
 #endif
 
 #ifndef V3F_OUTPUT_MODE_DEFAULT
 #define V3F_OUTPUT_MODE_DEFAULT AIK_OUTPUT_MODE_USBHS
 #endif
 
-#ifndef V3F_CDC_DEBUG_PERIOD_TICKS
-#define V3F_CDC_DEBUG_PERIOD_TICKS 25U
+#ifndef V3F_CDC_TRACE_PERIOD_TICKS
+#define V3F_CDC_TRACE_PERIOD_TICKS 25U
 #endif
 
 #ifndef V3F_ENABLE_PROFILE_STATUS_SYNC
@@ -741,13 +740,13 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
 #endif
 }
 
-static void v3f_cdc_debug_poll(uint16_t tick,
+static void v3f_cdc_trace_poll(uint16_t tick,
                                const v3f_half_cache_t *left,
                                const v3f_half_cache_t *right,
                                const v3f_global_key_state_t *keys,
                                const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
-#if V3F_ENABLE_USBFS_CDC_DEBUG && !V3F_ENABLE_USBFS_CDC
+#if V3F_ENABLE_USBFS_CDC_TRACE && !V3F_ENABLE_USBFS_CDC
     /* The configuration protocol owns CDC IN while USBFS carries profiles. */
     static uint16_t last_tick;
     static uint8_t phase;
@@ -756,7 +755,7 @@ static void v3f_cdc_debug_poll(uint16_t tick,
     char line[160];
     int len;
 
-    if((uint16_t)(tick - last_tick) < V3F_CDC_DEBUG_PERIOD_TICKS)
+    if((uint16_t)(tick - last_tick) < V3F_CDC_TRACE_PERIOD_TICKS)
     {
         return;
     }
@@ -864,11 +863,11 @@ static void v3f_cdc_debug_poll(uint16_t tick,
         default:
             len = snprintf(line, sizeof(line),
                            "P H=%04x/%u L ok=%lu bad=%lu m=%u id=%04x g=%u f=%02x R ok=%lu bad=%lu m=%u id=%04x g=%u f=%02x\r\n",
-                           (unsigned int)AIK_PROFILE_DEBUG_ID16,
-                           (unsigned int)AIK_PROFILE_DEBUG_GENERATION16,
+                           (unsigned int)AIK_PROFILE_FACTORY_ID16,
+                           (unsigned int)AIK_PROFILE_FACTORY_GENERATION16,
                            (unsigned long)left_stats.profile_status_ok,
                            (unsigned long)left_stats.profile_status_invalid,
-                           (unsigned int)aik_spi_profile_status_matches_debug_profile(
+                           (unsigned int)aik_spi_profile_status_matches_factory_profile(
                                &left_stats.last_profile_status,
                                AIK_HALF_ID_LEFT),
                            (unsigned int)left_stats.last_profile_status.profile_id16,
@@ -876,7 +875,7 @@ static void v3f_cdc_debug_poll(uint16_t tick,
                            (unsigned int)left_stats.last_profile_status.flags,
                            (unsigned long)right_stats.profile_status_ok,
                            (unsigned long)right_stats.profile_status_invalid,
-                           (unsigned int)aik_spi_profile_status_matches_debug_profile(
+                           (unsigned int)aik_spi_profile_status_matches_factory_profile(
                                &right_stats.last_profile_status,
                                AIK_HALF_ID_RIGHT),
                            (unsigned int)right_stats.last_profile_status.profile_id16,
@@ -888,7 +887,7 @@ static void v3f_cdc_debug_poll(uint16_t tick,
     phase = (uint8_t)((phase + 1U) % 8U);
     if(len > 0)
     {
-        (void)v3f_usb_hid_nkro_debug_write(line);
+        (void)v3f_usb_cdc_write(line);
     }
 #else
     (void)tick;
@@ -930,7 +929,8 @@ int main(void)
     v3f_board_init();
     /* Bring USB up before profile parsing so enumeration can isolate early boot faults. */
     v3f_usb_hid_nkro_init();
-#if V3F_ENABLE_USBHS_8K && V3F_ENABLE_USBFS_CDC
+#if V3F_ENABLE_USBHS_8K && \
+    (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
     ch32h417_usbfs_hid_nkro_init();
     /* Keep the 8K HID interrupt ahead of CDC bulk traffic. */
     NVIC_SetPriority(USBHS_IRQn, 0x00U);
@@ -1214,7 +1214,7 @@ int main(void)
         v3f_usb_diag_trace();
         v3f_profile_status_poll(host_seq);
         v3f_pc_link_poll();
-        v3f_cdc_debug_poll(host_seq, &left, &right, &keys, nkro16);
+        v3f_cdc_trace_poll(host_seq, &left, &right, &keys, nkro16);
         v3f_rgb_status_task(host_seq);
 
         host_seq++;

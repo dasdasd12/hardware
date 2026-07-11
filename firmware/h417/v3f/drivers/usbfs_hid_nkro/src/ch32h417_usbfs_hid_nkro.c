@@ -203,9 +203,9 @@ uint32_t ch32h417_usbfs_hid_nkro_reports(void)
     return s_report_count;
 }
 
-uint8_t ch32h417_usbfs_hid_nkro_debug_write(const char *line)
+uint8_t ch32h417_usbfs_hid_nkro_cdc_write(const char *line)
 {
-#if V3F_ENABLE_USBFS_CDC_DEBUG
+#if V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE
     uint8_t sent;
     uint16_t len;
 
@@ -216,7 +216,7 @@ uint8_t ch32h417_usbfs_hid_nkro_debug_write(const char *line)
 
     len = (uint16_t)strlen(line);
     NVIC_DisableIRQ(USBFS_IRQn);
-    sent = USBFS_CDC_Debug_Send((const uint8_t *)line, len);
+    sent = USBFS_CDC_Send((const uint8_t *)line, len);
     NVIC_EnableIRQ(USBFS_IRQn);
     return sent;
 #else

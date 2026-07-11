@@ -38,14 +38,13 @@ V3F_ENABLE_RGB_STATUS ?= 0
 V3F_RGB_LED_COUNT ?= 1
 V3F_ENABLE_RF_BRIDGE ?= 0
 V3F_ENABLE_SPI_HOST_CMD ?= 0
-V3F_ENABLE_USBFS_CDC_DEBUG ?= 0
 V3F_OUTPUT_MODE_DEFAULT ?= 0
 # Second USB controller: USBFS runs the CDC config channel while USBHS
 # keeps the 8K HID path. Only meaningful with V3F_ENABLE_USBHS_8K=1.
 V3F_ENABLE_USBFS_CDC ?= 0
-ifeq ($(V3F_ENABLE_USBFS_CDC),1)
-V3F_ENABLE_USBFS_CDC_DEBUG := 1
-endif
+# Optional CDC trace-only build for controller diagnostics. It stays off
+# in the keyboard build because the configuration protocol owns CDC IN.
+V3F_ENABLE_USBFS_CDC_TRACE ?= 0
 
 # Defines
 DEFS := -DCore_V3F
@@ -57,9 +56,9 @@ DEFS += -DV3F_ENABLE_RGB_STATUS=$(V3F_ENABLE_RGB_STATUS)
 DEFS += -DV3F_RGB_LED_COUNT=$(V3F_RGB_LED_COUNT)
 DEFS += -DV3F_ENABLE_RF_BRIDGE=$(V3F_ENABLE_RF_BRIDGE)
 DEFS += -DV3F_ENABLE_SPI_HOST_CMD=$(V3F_ENABLE_SPI_HOST_CMD)
-DEFS += -DV3F_ENABLE_USBFS_CDC_DEBUG=$(V3F_ENABLE_USBFS_CDC_DEBUG)
 DEFS += -DV3F_OUTPUT_MODE_DEFAULT=$(V3F_OUTPUT_MODE_DEFAULT)
 DEFS += -DV3F_ENABLE_USBFS_CDC=$(V3F_ENABLE_USBFS_CDC)
+DEFS += -DV3F_ENABLE_USBFS_CDC_TRACE=$(V3F_ENABLE_USBFS_CDC_TRACE)
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 DEFS += -DV3F_USBSS_OFFICIAL_OWNER=1
 endif
@@ -74,7 +73,7 @@ INC += -I"$(PROJECT_ROOT)/drivers/rgb1w_pioc/include"
 ifeq ($(V3F_ENABLE_USBHS_8K),1)
 INC += -I"$(PROJECT_ROOT)/drivers/usbhs_hid_nkro/include"
 INC += -I"$(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/include"
-ifeq ($(V3F_ENABLE_USBFS_CDC),1)
+ifneq ($(filter 1,$(V3F_ENABLE_USBFS_CDC) $(V3F_ENABLE_USBFS_CDC_TRACE)),)
 INC += -I"$(PROJECT_ROOT)/drivers/usbfs_hid_nkro/include"
 INC += -I"$(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/include"
 endif
@@ -107,7 +106,7 @@ ifeq ($(V3F_ENABLE_USBHS_8K),1)
 APP_SRC += $(PROJECT_ROOT)/drivers/usbhs_hid_nkro/src/ch32h417_usbhs_hid_nkro.c
 APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/src/ch32h417_usbhs_device.c
 APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/src/usb_desc.c
-ifeq ($(V3F_ENABLE_USBFS_CDC),1)
+ifneq ($(filter 1,$(V3F_ENABLE_USBFS_CDC) $(V3F_ENABLE_USBFS_CDC_TRACE)),)
 APP_SRC += $(PROJECT_ROOT)/drivers/usbfs_hid_nkro/src/ch32h417_usbfs_hid_nkro.c
 APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/src/ch32h417_usbfs_device.c
 APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/src/usbfs_desc.c
