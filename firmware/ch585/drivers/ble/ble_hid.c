@@ -468,6 +468,7 @@ void BLE_HID_SetEnabled(uint8_t enabled)
         switch_status = RFRole_SwitchMode(0U);
         BLE_HID_LOG("%s: ble enable switch=%x\n",
                     BLE_HID_DEVICE_NAME, switch_status);
+        (void)switch_status;
         if(!BLE_HID_IsConnected())
         {
             BLE_HID_StartAdvert();

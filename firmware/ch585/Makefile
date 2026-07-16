@@ -1,5 +1,5 @@
 # CH585 firmware build entry.
-# Default target builds the half keyboard scan firmware.
+# Default target builds both production keyboard halves.
 
 PREFIX       ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 APP          ?= half_scan
@@ -110,7 +110,7 @@ DEPS := $(OBJS:.o=.d)
 
 .PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_rf half_scan_left_rf_debug_uart half_scan_left_ble_debug_uart half_scan_left_output_switch_debug_uart half_scan_left_debug_uart half_scan_right_debug_uart rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
 
-all: firmware
+all: half_scan_left half_scan_right
 
 firmware: $(ELF) $(BUILD)/$(PROJECT_NAME).hex $(BUILD)/$(PROJECT_NAME).bin $(BUILD)/$(PROJECT_NAME).lst
 	@$(SIZE) "$(ELF)"
@@ -119,7 +119,7 @@ half_scan:
 	@$(MAKE) APP=$@ firmware
 
 half_scan_left:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left BUILD_VARIANT=half_scan_left DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0" firmware
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left BUILD_VARIANT=half_scan_left DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1 -DCH585_BLE_HID_ENABLE=1 -DCH585_BLE_PAIRING_EXT_EEPROM=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
 
 half_scan_right:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right BUILD_VARIANT=half_scan_right DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware

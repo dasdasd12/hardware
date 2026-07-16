@@ -3,6 +3,8 @@
 
 #include <string.h>
 
+#include "aik_approval_control.h"
+#include "aik_host_shortcut.h"
 #include "aik_spi_protocol.h"
 #include "ch585_ads7948_mux_acq.h"
 #include "ch585_half_report.h"
@@ -72,7 +74,7 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #endif
 
 #ifndef CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES
-#define CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES 6U
+#define CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES 50U
 #endif
 
 #ifndef CH585_LOCAL_SWITCH_ENTER_PULSE_FRAMES
@@ -286,12 +288,14 @@ static int8_t half_scan_take_local_mouse_wheel(void)
     if(s_local_mouse_wheel_pending > 0)
     {
         s_local_mouse_wheel_pending--;
-        return 1;
+        return ch585_half_report_mouse_wheel_step(
+            AIK_HP_SIGNAL_WHEEL_UP);
     }
     if(s_local_mouse_wheel_pending < 0)
     {
         s_local_mouse_wheel_pending++;
-        return -1;
+        return ch585_half_report_mouse_wheel_step(
+            AIK_HP_SIGNAL_WHEEL_DOWN);
     }
     return 0;
 }
@@ -416,14 +420,38 @@ static void half_scan_apply_left_five_way(void)
 
     if(center == 0U)
     {
+        if((s_local_switch_gesture ==
+                CH585_LOCAL_SWITCH_GESTURE_PENDING) &&
+           (dirs == 0U))
+        {
+            /* Preserve a fast center-only tap that released during the
+             * direction-classification window. */
+            s_local_switch_enter_frames =
+                CH585_LOCAL_SWITCH_ENTER_PULSE_FRAMES;
+        }
+        else if(s_local_switch_gesture !=
+                CH585_LOCAL_SWITCH_GESTURE_NONE)
+        {
+            s_local_switch_enter_frames = 0U;
+        }
         s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_NONE;
         s_local_switch_guard_frames = 0U;
-        s_local_switch_enter_frames = 0U;
+        if(s_local_switch_enter_frames != 0U)
+        {
+            aik_spi_half_set_bit(
+                &s_tx_frame,
+                AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED);
+            aik_spi_half_set_bit(
+                &s_tx_frame,
+                AIK_LEFT_LOCAL_BIT_SCR_CENTER);
+            s_local_switch_enter_frames--;
+        }
         return;
     }
 
     if(s_local_switch_gesture == CH585_LOCAL_SWITCH_GESTURE_NONE)
     {
+        s_local_switch_enter_frames = 0U;
         s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_PENDING;
         s_local_switch_guard_frames = CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES;
     }
@@ -448,6 +476,9 @@ static void half_scan_apply_left_five_way(void)
 
     if(s_local_switch_gesture == CH585_LOCAL_SWITCH_GESTURE_ENTER)
     {
+        aik_spi_half_set_bit(
+            &s_tx_frame,
+            AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED);
         if(s_local_switch_enter_frames != 0U)
         {
             aik_spi_half_set_bit(&s_tx_frame, AIK_LEFT_LOCAL_BIT_SCR_CENTER);
@@ -628,14 +659,52 @@ static void half_scan_prepare_profile_xfer(void)
 }
 
 #if CH585_BLE_HID_ENABLE
+static uint8_t half_scan_nkro_usage_down(
+    const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
+    uint8_t usage)
+{
+    uint8_t bit_index;
+    uint8_t byte_index;
+
+    if((usage < 0x04U) || (usage > 0x73U))
+    {
+        return 0U;
+    }
+    bit_index = (uint8_t)(usage - 0x04U);
+    byte_index = (uint8_t)(2U + (bit_index >> 3));
+    if(byte_index >= AIK_NKRO_REPORT_BYTES)
+    {
+        return 0U;
+    }
+    return (uint8_t)(
+        (nkro16[byte_index] >> (bit_index & 7U)) & 1U);
+}
+
 static void half_scan_nkro16_to_boot8(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
                                       uint8_t boot8[BLE_HID_KBD_REPORT_LEN])
 {
+    static const uint8_t priority_usages[3] = {
+        AIK_APPROVAL_CONTROL_HID_USAGE_YES,
+        AIK_APPROVAL_CONTROL_HID_USAGE_NO,
+        AIK_HOST_SHORTCUT_HID_USAGE_F24
+    };
     uint8_t byte_index;
     uint8_t out_index = 2U;
+    uint8_t priority_index;
 
     memset(boot8, 0, BLE_HID_KBD_REPORT_LEN);
     boot8[0] = nkro16[0];
+    for(priority_index = 0U;
+        (priority_index < 3U) &&
+        (out_index < BLE_HID_KBD_REPORT_LEN);
+        priority_index++)
+    {
+        if(half_scan_nkro_usage_down(
+               nkro16, priority_usages[priority_index]) != 0U)
+        {
+            boot8[out_index++] = priority_usages[priority_index];
+        }
+    }
 
     for(byte_index = 2U;
         (byte_index < AIK_NKRO_REPORT_BYTES) && (out_index < BLE_HID_KBD_REPORT_LEN);
@@ -648,8 +717,15 @@ static void half_scan_nkro16_to_boot8(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES
         {
             if((bits & (uint8_t)(1U << bit)) != 0U)
             {
-                boot8[out_index++] =
+                uint8_t usage =
                     (uint8_t)(0x04U + ((byte_index - 2U) * 8U) + bit);
+
+                if((usage != AIK_APPROVAL_CONTROL_HID_USAGE_YES) &&
+                   (usage != AIK_APPROVAL_CONTROL_HID_USAGE_NO) &&
+                   (usage != AIK_HOST_SHORTCUT_HID_USAGE_F24))
+                {
+                    boot8[out_index++] = usage;
+                }
             }
         }
     }
@@ -857,15 +933,29 @@ static void half_scan_apply_host_cmd(void)
     if((s_rx_cmd.cmd >= AIK_SPI_CMD_PROFILE_BEGIN) &&
        (s_rx_cmd.cmd <= AIK_SPI_CMD_PROFILE_GET_XFER))
     {
-        ch585_profile_handle_transfer_cmd(&s_rx_cmd, &s_engine);
-        if((s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_COMMIT) ||
-           (s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_SET_ACTIVE))
+        uint8_t activates = (uint8_t)(
+            s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_SET_ACTIVE);
+
+        if(s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_COMMIT)
         {
+            aik_spi_profile_commit_v1_t commit;
+
+            aik_spi_host_cmd_get_payload(&s_rx_cmd, &commit,
+                                         sizeof(commit));
+            activates = (uint8_t)(
+                (commit.patch_flags &
+                 AIK_SPI_PROFILE_FLAG_ACTIVATE) != 0U);
+        }
+        ch585_profile_handle_transfer_cmd(&s_rx_cmd, &s_engine);
+        half_scan_prepare_profile_xfer();
+        if((activates != 0U) &&
+           (s_profile_xfer.state == AIK_SPI_XFER_STATE_DONE))
+        {
+            s_local_mouse_wheel_pending = 0;
             ch585_half_report_arm_release_gate(
                 &s_tx_frame,
                 s_right_frame_valid ? &s_right_frame : 0);
         }
-        half_scan_prepare_profile_xfer();
         return;
     }
 
@@ -892,17 +982,45 @@ static void half_scan_apply_host_cmd(void)
     else if(s_rx_cmd.cmd == AIK_SPI_CMD_PUSH_RIGHT_STATE)
     {
         aik_spi_half_state_v1_t next_right;
+        uint8_t right_state_valid;
         uint8_t output_mode = half_scan_host_output_mode(s_rx_cmd.cmd,
                                                          s_rx_cmd.flags);
 
         memcpy(&next_right, s_rx_cmd.nkro16, sizeof(next_right));
         if(aik_spi_half_state_valid(&next_right) == 0U)
         {
+            ch585_half_report_set_approval_context(
+                (uint8_t)(
+                    (s_rx_cmd.flags &
+                     AIK_SPI_FLAG_APPROVAL_ACTIVE) != 0U),
+                (uint8_t)(
+                    (s_rx_cmd.flags &
+                     AIK_SPI_FLAG_APPROVAL_SELECTED_YES) != 0U),
+                0U);
+            s_right_frame_valid = 0U;
+            ch585_half_report_build_nkro16(
+                &s_tx_frame, 0, s_rf_nkro16);
+            half_scan_output_nkro16(
+                s_rf_nkro16,
+                AIK_CONSUMER_USAGE_NONE,
+                0,
+                0,
+                s_rx_cmd.host_seq,
+                output_mode);
             return;
         }
 
+        right_state_valid = (uint8_t)(
+            (s_rx_cmd.flags & AIK_SPI_FLAG_RIGHT_STATE_VALID) != 0U);
+        ch585_half_report_set_approval_context(
+            (uint8_t)(
+                (s_rx_cmd.flags & AIK_SPI_FLAG_APPROVAL_ACTIVE) != 0U),
+            (uint8_t)(
+                (s_rx_cmd.flags &
+                 AIK_SPI_FLAG_APPROVAL_SELECTED_YES) != 0U),
+            right_state_valid);
         s_right_frame = next_right;
-        s_right_frame_valid = 1U;
+        s_right_frame_valid = right_state_valid;
         ch585_half_report_build_nkro16(&s_tx_frame,
                                        s_right_frame_valid ? &s_right_frame : 0,
                                        s_rf_nkro16);

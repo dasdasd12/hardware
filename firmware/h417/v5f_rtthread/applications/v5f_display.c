@@ -5,6 +5,7 @@
 #include <rtthread.h>
 
 #include "ch32h417_ltdc_rgb.h"
+#include "v5f_default_ui.h"
 
 #define V5F_DISPLAY_LCD_FB_REGION_BYTES (384u * 1024u)
 #define V5F_DISPLAY_POWER_SETTLE_MS      550u
@@ -12,17 +13,7 @@
 #define V5F_DISPLAY_SCAN_TIMEOUT_MS      100u
 #define V5F_DISPLAY_SCAN_MIN_CHANGES     3u
 
-#define V5F_DISPLAY_COLOR_BLACK          0u
-#define V5F_DISPLAY_COLOR_RED            1u
-#define V5F_DISPLAY_COLOR_GREEN          2u
-#define V5F_DISPLAY_COLOR_BLUE           3u
-#define V5F_DISPLAY_COLOR_WHITE          4u
-#define V5F_DISPLAY_COLOR_CYAN           5u
-#define V5F_DISPLAY_COLOR_YELLOW         6u
-#define V5F_DISPLAY_COLOR_MAGENTA        7u
-#define V5F_DISPLAY_COLOR_ORANGE         8u
-#define V5F_DISPLAY_COLOR_PURPLE         9u
-#define V5F_DISPLAY_COLOR_DARK_GRAY      10u
+#define V5F_DISPLAY_COLOR_BACKGROUND     0u
 
 #if V5F_DISPLAY_FRAMEBUFFER_BYTES > V5F_DISPLAY_LCD_FB_REGION_BYTES
 #error V5F L8 framebuffer exceeds the linker-reserved LCD_FB region.
@@ -30,41 +21,8 @@
 
 static uint8_t s_framebuffer[V5F_DISPLAY_FRAMEBUFFER_BYTES]
     __attribute__((section(".lcd_fb"), aligned(64)));
-static uint8_t s_palette[CH32H417_LTDC_RGB_CLUT_ENTRIES * 3u];
 
 volatile v5f_display_diag_t g_v5f_display_diag;
-
-static void palette_set(uint8_t index, uint8_t red, uint8_t green, uint8_t blue)
-{
-    uint32_t offset = (uint32_t)index * 3u;
-
-    s_palette[offset + 0u] = red;
-    s_palette[offset + 1u] = green;
-    s_palette[offset + 2u] = blue;
-}
-
-static void build_palette(void)
-{
-    uint16_t index;
-
-    for(index = 0u; index < CH32H417_LTDC_RGB_CLUT_ENTRIES; index++)
-    {
-        uint8_t level = (uint8_t)index;
-        palette_set((uint8_t)index, level, level, level);
-    }
-
-    palette_set(V5F_DISPLAY_COLOR_BLACK, 0u, 0u, 0u);
-    palette_set(V5F_DISPLAY_COLOR_RED, 255u, 0u, 0u);
-    palette_set(V5F_DISPLAY_COLOR_GREEN, 0u, 255u, 0u);
-    palette_set(V5F_DISPLAY_COLOR_BLUE, 0u, 0u, 255u);
-    palette_set(V5F_DISPLAY_COLOR_WHITE, 255u, 255u, 255u);
-    palette_set(V5F_DISPLAY_COLOR_CYAN, 0u, 255u, 255u);
-    palette_set(V5F_DISPLAY_COLOR_YELLOW, 255u, 255u, 0u);
-    palette_set(V5F_DISPLAY_COLOR_MAGENTA, 255u, 0u, 255u);
-    palette_set(V5F_DISPLAY_COLOR_ORANGE, 255u, 128u, 0u);
-    palette_set(V5F_DISPLAY_COLOR_PURPLE, 128u, 64u, 255u);
-    palette_set(V5F_DISPLAY_COLOR_DARK_GRAY, 24u, 24u, 28u);
-}
 
 uint8_t *v5f_display_framebuffer(void)
 {
@@ -119,8 +77,8 @@ void v5f_display_fill_rect(uint16_t x,
 
 static void prepare_initial_frame(void)
 {
-    /* Product firmware starts from a deterministic blank frame; UI owns it next. */
-    v5f_display_fill(V5F_DISPLAY_COLOR_BLACK);
+    /* Backlight stays off until the product UI has replaced this blank frame. */
+    v5f_display_fill(V5F_DISPLAY_COLOR_BACKGROUND);
     v5f_display_present();
 }
 
@@ -197,7 +155,6 @@ int v5f_display_init(void)
     }
 
     memset((void *)&g_v5f_display_diag, 0, sizeof(g_v5f_display_diag));
-    build_palette();
     prepare_initial_frame();
 
     ch32h417_lcd_rgb_control_init();
@@ -235,7 +192,7 @@ int v5f_display_init(void)
     /* Hardware validation showed that L8 CLUT writes must follow layer start. */
     rt_thread_mdelay(V5F_DISPLAY_CLUT_SETTLE_MS);
     result = ch32h417_ltdc_rgb_layer1_load_clut_rgb888(
-        s_palette,
+        v5f_default_ui_clut_rgb888(),
         CH32H417_LTDC_RGB_CLUT_ENTRIES);
     if(result != CH32H417_LTDC_RGB_OK)
     {
@@ -251,6 +208,8 @@ int v5f_display_init(void)
         g_v5f_display_diag.last_error = V5F_DISPLAY_ERR_CLUT;
         return V5F_DISPLAY_ERR_CLUT;
     }
+
+    v5f_default_ui_draw();
     result = wait_for_scanout();
     if(result != V5F_DISPLAY_OK)
     {

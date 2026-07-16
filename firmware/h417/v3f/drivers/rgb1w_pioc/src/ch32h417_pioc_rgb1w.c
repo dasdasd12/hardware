@@ -207,10 +207,9 @@ uint8_t ch32h417_pioc_rgb1w_send_sfr(const ch32h417_pioc_rgb1w_pin_t *pin,
     return ch32h417_pioc_rgb1w_wait(timeout_loops);
 }
 
-uint8_t ch32h417_pioc_rgb1w_send_ram(const ch32h417_pioc_rgb1w_pin_t *pin,
-                                     const uint8_t *data,
-                                     uint16_t bytes,
-                                     uint32_t timeout_loops)
+uint8_t ch32h417_pioc_rgb1w_start_ram(const ch32h417_pioc_rgb1w_pin_t *pin,
+                                      const uint8_t *data,
+                                      uint16_t bytes)
 {
     uint8_t io_enable;
 
@@ -241,6 +240,37 @@ uint8_t ch32h417_pioc_rgb1w_send_ram(const ch32h417_pioc_rgb1w_pin_t *pin,
         PIOC_RGB1W_COMMAND = PIOC_RGB1W_CYC_RAM_IO0_100MHZ | PIOC_RGB1W_CMD_RAM;
     }
 
+    return CH32H417_PIOC_RGB1W_OK;
+}
+
+uint8_t ch32h417_pioc_rgb1w_poll(uint8_t *result)
+{
+    uint8_t status;
+
+    if((PIOC->D8_SYS_CFG & RB_INT_REQ) == 0u)
+    {
+        return 0u;
+    }
+
+    status = PIOC->D8_CTRL_RD;
+    if(result != 0)
+    {
+        *result = status;
+    }
+    return 1u;
+}
+
+uint8_t ch32h417_pioc_rgb1w_send_ram(const ch32h417_pioc_rgb1w_pin_t *pin,
+                                     const uint8_t *data,
+                                     uint16_t bytes,
+                                     uint32_t timeout_loops)
+{
+    uint8_t status = ch32h417_pioc_rgb1w_start_ram(pin, data, bytes);
+
+    if(status != CH32H417_PIOC_RGB1W_OK)
+    {
+        return status;
+    }
     return ch32h417_pioc_rgb1w_wait(timeout_loops);
 }
 

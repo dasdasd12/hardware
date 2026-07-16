@@ -447,7 +447,8 @@ typedef char aik_rt_resource_limits_entry_size_check[
 
 #define AIK_HP_VERSION 1U
 
-#define AIK_HP_FLAG_HAS_DISPATCH77 0x0001U
+#define AIK_HP_FLAG_HAS_DISPATCH77    0x0001U
+#define AIK_HP_FLAG_HAS_FN_DISPATCH77 0x0002U
 
 typedef struct AIK_PROFILE_PACKED
 {
@@ -463,8 +464,9 @@ typedef struct AIK_PROFILE_PACKED
     uint16_t dispatch_offset;       /* 0 when absent */
     uint16_t local_offset;          /* 0 when absent */
     uint16_t total_len;
-    uint16_t reserved;
-    uint16_t reserved2;
+    uint16_t fn_dispatch_offset;     /* 0 when absent */
+    uint8_t fn_hold_key;             /* global key id, valid with FN flag */
+    uint8_t reserved;
     uint16_t crc16;
 } aik_hp_header_t;
 
@@ -520,8 +522,8 @@ typedef char aik_hp_trigger_entry_size_check[
 typedef char aik_hp_local_entry_size_check[
     (sizeof(aik_hp_local_entry_t) == 4U) ? 1 : -1];
 
-/* Upper bound for one half patch: header + 41 triggers + 77-key dispatch
- * + local entries, with headroom for future growth. */
+/* Upper bound for one half patch: header + 41 triggers + base/Fn 77-key
+ * dispatch tables + local entries, with headroom for future growth. */
 #define AIK_HP_MAX_SIZE 1024U
 
 static inline uint16_t aik_hp_crc(const uint8_t *patch, uint16_t total_len)

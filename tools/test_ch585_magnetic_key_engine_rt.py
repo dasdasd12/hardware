@@ -101,6 +101,19 @@ class Ch585MagneticKeyEngineRtTest(unittest.TestCase):
                 if (update_one(&engine, 427U, 0U, "second less-than-delta move must not press") != 0) return 1;
                 if (update_one(&engine, 426U, 1U, "RT re-press must not require static press_pm") != 0) return 1;
 
+                cfg = engine.cfg[0];
+                cfg.mode = MAG_KEY_MODE_DISABLED;
+                if (require_true(mag_key_engine_set_key_config(&engine, 0U, &cfg) ==
+                                     MAG_KEY_STATUS_OK,
+                                 "disabled config must be accepted") != 0)
+                {
+                    return 1;
+                }
+                if (update_one(&engine, 330U, 0U,
+                               "disabled mode must release a held key") != 0) return 1;
+                if (update_one(&engine, 330U, 0U,
+                               "disabled mode must ignore full travel") != 0) return 1;
+
                 return 0;
             }
             """

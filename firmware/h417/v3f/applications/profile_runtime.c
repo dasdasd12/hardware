@@ -6,6 +6,9 @@
 #include "profile_store.h"
 
 static v3f_profile_runtime_t s_runtime;
+/* Boot/immediate installs also avoid placing the full runtime on V3F's
+ * 2KB stack. Interactive activation uses its own foreground scratch. */
+static v3f_profile_runtime_t s_install_candidate;
 static uint8_t s_rearm_pending;
 static uint8_t s_rearm_mask[V3F_GLOBAL_DOWN_BYTES];
 
@@ -264,20 +267,28 @@ static void runtime_add_local(v3f_profile_runtime_t *rt, uint8_t signal_id,
     rt->local_count++;
 }
 
-int v3f_profile_runtime_install_package(const uint8_t *pkg,
-                                        uint32_t buf_limit,
-                                        uint8_t slot_id)
+int v3f_profile_runtime_prepare_package(
+    const uint8_t *pkg,
+    uint32_t buf_limit,
+    uint8_t slot_id,
+    v3f_profile_runtime_t *out_candidate)
 {
     const aik_pkg_header_t *pkg_hdr = (const aik_pkg_header_t *)pkg;
     const aik_rt_header_t *rt_hdr;
     const uint8_t *table;
     uint32_t table_len = 0U;
     rt_section_t scopes, dispatch, behaviors, triggers, params;
-    v3f_profile_runtime_t next;
+    v3f_profile_runtime_t *next = out_candidate;
     uint16_t base_scope = AIK_RT_INVALID_INDEX;
     uint16_t overlay_scope = AIK_RT_INVALID_INDEX;
     uint32_t i;
     int status;
+
+    if((out_candidate == 0) ||
+       (slot_id >= AIK_PROFILE_SLOT_COUNT_TOTAL))
+    {
+        return V3F_PROFILE_ERR_PARAM;
+    }
 
     status = v3f_profile_package_validate(pkg, buf_limit, 0);
     if(status != V3F_PROFILE_OK)
@@ -343,21 +354,21 @@ int v3f_profile_runtime_install_package(const uint8_t *pkg,
         return V3F_PROFILE_ERR_TABLE;
     }
 
-    memset(&next, 0, sizeof(next));
-    next.fn_hold_key = 0xFFU;
-    next.active_slot = slot_id;
-    next.revision = pkg_hdr->revision;
-    next.generation16 = (uint16_t)(pkg_hdr->revision & 0xFFFFU);
-    next.profile_id16 = (uint16_t)(pkg_hdr->profile_id_hash & 0xFFFFU);
+    memset(next, 0, sizeof(*next));
+    next->fn_hold_key = 0xFFU;
+    next->active_slot = slot_id;
+    next->revision = pkg_hdr->revision;
+    next->generation16 = (uint16_t)(pkg_hdr->revision & 0xFFFFU);
+    next->profile_id16 = (uint16_t)(pkg_hdr->profile_id_hash & 0xFFFFU);
 
     for(i = 0U; i < AIK_KEY_COUNT_TOTAL; i++)
     {
-        next.triggers[i].press_pm = 450U;
-        next.triggers[i].release_pm = 350U;
-        next.triggers[i].rt_press_delta_pm = 300U;
-        next.triggers[i].rt_release_delta_pm = 300U;
-        next.triggers[i].mode = AIK_RT_MODE_RAPID_TRIGGER;
-        next.triggers[i].filter_shift = 0U;
+        next->triggers[i].press_pm = 450U;
+        next->triggers[i].release_pm = 350U;
+        next->triggers[i].rt_press_delta_pm = 300U;
+        next->triggers[i].rt_release_delta_pm = 300U;
+        next->triggers[i].mode = AIK_RT_MODE_RAPID_TRIGGER;
+        next->triggers[i].filter_shift = 0U;
     }
 
     for(i = 0U; i < scopes.entry_count; i++)
@@ -388,7 +399,7 @@ int v3f_profile_runtime_install_package(const uint8_t *pkg,
 
         if(trig->control_index < AIK_KEY_COUNT_TOTAL)
         {
-            next.triggers[trig->control_index].mode = trig->mode;
+            next->triggers[trig->control_index].mode = trig->mode;
         }
     }
 
@@ -414,7 +425,7 @@ int v3f_profile_runtime_install_package(const uint8_t *pkg,
         {
             continue;
         }
-        dst = &next.triggers[trig->control_index];
+        dst = &next->triggers[trig->control_index];
         value = (param->initial_value < 0) ? 0U :
                 ((param->initial_value > 0xFFFF) ? 0xFFFFU :
                  (uint16_t)param->initial_value);
@@ -484,12 +495,12 @@ int v3f_profile_runtime_install_package(const uint8_t *pkg,
 
             if(entry->scope_index == base_scope)
             {
-                dst = &next.base_keys[entry->source_index];
+                dst = &next->base_keys[entry->source_index];
             }
             else if((overlay_scope != AIK_RT_INVALID_INDEX) &&
                     (entry->scope_index == overlay_scope))
             {
-                dst = &next.fn_keys[entry->source_index];
+                dst = &next->fn_keys[entry->source_index];
             }
             else
             {
@@ -507,8 +518,8 @@ int v3f_profile_runtime_install_package(const uint8_t *pkg,
                     (overlay_scope != AIK_RT_INVALID_INDEX) &&
                     (bh->data0 == overlay_scope))
             {
-                next.has_fn_overlay = 1U;
-                next.fn_hold_key = (uint8_t)entry->source_index;
+                next->has_fn_overlay = 1U;
+                next->fn_hold_key = (uint8_t)entry->source_index;
             }
         }
         else if(entry->scope_index == base_scope)
@@ -524,13 +535,99 @@ int v3f_profile_runtime_install_package(const uint8_t *pkg,
             {
                 continue;
             }
-            runtime_add_local(&next, signal_id, target_kind, target_value);
+            runtime_add_local(next, signal_id, target_kind, target_value);
         }
     }
 
-    next.valid = 1U;
-    s_runtime = next;
+    next->valid = 1U;
+    return V3F_PROFILE_OK;
+}
+
+static uint8_t user_slot_is_erased(const uint8_t *pkg)
+{
+    uint32_t i;
+
+    if(pkg == 0)
+    {
+        return 0U;
+    }
+    for(i = 0U; i < AIK_PKG_HEADER_SIZE; i++)
+    {
+        if(pkg[i] != 0xFFU)
+        {
+            return 0U;
+        }
+    }
+    return 1U;
+}
+
+int v3f_profile_runtime_prepare_slot(
+    uint8_t slot_id,
+    v3f_profile_runtime_t *out_candidate)
+{
+    const uint8_t *pkg;
+    uint32_t pkg_limit;
+
+    if((out_candidate == 0) ||
+       (slot_id >= AIK_PROFILE_SLOT_COUNT_TOTAL))
+    {
+        return V3F_PROFILE_ERR_PARAM;
+    }
+
+    if(slot_id == AIK_PROFILE_SLOT_FACTORY)
+    {
+        pkg = g_v3f_factory_profile_image;
+        pkg_limit = g_v3f_factory_profile_image_size;
+    }
+    else
+    {
+        pkg = v3f_profile_store_slot_ptr(slot_id);
+        if(pkg == 0)
+        {
+            return V3F_PROFILE_ERR_PACKAGE;
+        }
+
+        if(user_slot_is_erased(pkg) != 0U)
+        {
+            pkg = g_v3f_factory_profile_image;
+            pkg_limit = g_v3f_factory_profile_image_size;
+        }
+        else
+        {
+            pkg_limit = V3F_PROFILE_SLOT_SIZE;
+        }
+    }
+
+    return v3f_profile_runtime_prepare_package(pkg, pkg_limit, slot_id,
+                                               out_candidate);
+}
+
+void v3f_profile_runtime_commit_candidate(
+    const v3f_profile_runtime_t *candidate)
+{
+    if(candidate == 0)
+    {
+        return;
+    }
+
+    s_runtime = *candidate;
     s_rearm_pending = 1U;
+}
+
+int v3f_profile_runtime_install_package(const uint8_t *pkg,
+                                        uint32_t buf_limit,
+                                        uint8_t slot_id)
+{
+    int status;
+
+    status = v3f_profile_runtime_prepare_package(pkg, buf_limit, slot_id,
+                                                 &s_install_candidate);
+    if(status != V3F_PROFILE_OK)
+    {
+        return status;
+    }
+
+    v3f_profile_runtime_commit_candidate(&s_install_candidate);
     return V3F_PROFILE_OK;
 }
 
@@ -558,25 +655,19 @@ uint8_t v3f_profile_runtime_init(void)
 {
     uint8_t active = v3f_profile_store_get_active_slot();
 
-    if((active >= AIK_PROFILE_USER_SLOT_FIRST) &&
-       (active < AIK_PROFILE_SLOT_COUNT_TOTAL))
+    if((active < AIK_PROFILE_SLOT_COUNT_TOTAL) &&
+       (v3f_profile_runtime_prepare_slot(active, &s_install_candidate) ==
+        V3F_PROFILE_OK))
     {
-        const uint8_t *slot = v3f_profile_store_slot_ptr(active);
-
-        if((slot != 0) &&
-           (v3f_profile_runtime_install_package(slot,
-                                                V3F_PROFILE_SLOT_SIZE,
-                                                active) == V3F_PROFILE_OK))
-        {
-            return active;
-        }
+        v3f_profile_runtime_commit_candidate(&s_install_candidate);
+        return active;
     }
 
-    if(v3f_profile_runtime_install_package(g_v3f_factory_profile_image,
-                                           g_v3f_factory_profile_image_size,
-                                           AIK_PROFILE_SLOT_FACTORY) ==
+    if(v3f_profile_runtime_prepare_slot(AIK_PROFILE_SLOT_FACTORY,
+                                        &s_install_candidate) ==
        V3F_PROFILE_OK)
     {
+        v3f_profile_runtime_commit_candidate(&s_install_candidate);
         return AIK_PROFILE_SLOT_FACTORY;
     }
 
@@ -842,6 +933,7 @@ uint16_t v3f_profile_runtime_build_half_patch(uint8_t half_id,
     hdr.key_count = key_count;
     hdr.profile_id16 = s_runtime.profile_id16;
     hdr.generation16 = s_runtime.generation16;
+    hdr.fn_hold_key = 0xFFU;
 
     offset = (uint16_t)sizeof(aik_hp_header_t);
     hdr.trigger_offset = offset;
@@ -854,6 +946,18 @@ uint16_t v3f_profile_runtime_build_half_patch(uint8_t half_id,
         hdr.dispatch_offset = offset;
         offset = (uint16_t)(offset + AIK_KEY_COUNT_TOTAL *
                             (uint16_t)sizeof(aik_hp_key_output_t));
+        if(s_runtime.has_fn_overlay != 0U)
+        {
+            if(s_runtime.fn_hold_key >= AIK_KEY_COUNT_TOTAL)
+            {
+                return 0U;
+            }
+            hdr.flags |= AIK_HP_FLAG_HAS_FN_DISPATCH77;
+            hdr.fn_dispatch_offset = offset;
+            hdr.fn_hold_key = s_runtime.fn_hold_key;
+            offset = (uint16_t)(offset + AIK_KEY_COUNT_TOTAL *
+                                (uint16_t)sizeof(aik_hp_key_output_t));
+        }
     }
 
     /* The left half composes full wireless reports, so it receives every
@@ -893,6 +997,11 @@ uint16_t v3f_profile_runtime_build_half_patch(uint8_t half_id,
     {
         memcpy(out + hdr.dispatch_offset, s_runtime.base_keys,
                AIK_KEY_COUNT_TOTAL * sizeof(aik_hp_key_output_t));
+        if((hdr.flags & AIK_HP_FLAG_HAS_FN_DISPATCH77) != 0U)
+        {
+            memcpy(out + hdr.fn_dispatch_offset, s_runtime.fn_keys,
+                   AIK_KEY_COUNT_TOTAL * sizeof(aik_hp_key_output_t));
+        }
     }
 
     if(local_count != 0U)

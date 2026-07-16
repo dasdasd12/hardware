@@ -25,6 +25,7 @@
 
 #if APP_ENABLE_V5F_DISPLAY
 #include "v5f_display.h"
+#include "v5f_approval_ui.h"
 #endif
 
 #ifndef APP_ENABLE_V5F_HW_TEST
@@ -162,6 +163,8 @@
 #ifndef APP_MAIN_LOOP_DELAY_MS
 #if APP_ENABLE_CH585_BLE_BRIDGE
 #define APP_MAIN_LOOP_DELAY_MS 5
+#elif APP_ENABLE_V5F_DISPLAY
+#define APP_MAIN_LOOP_DELAY_MS 20
 #else
 #define APP_MAIN_LOOP_DELAY_MS 500
 #endif
@@ -647,6 +650,7 @@ int main(void)
     }
     else
     {
+        v5f_approval_ui_init();
         rt_kprintf("V5F 800x480 L8 display is running.\n");
     }
 #endif
@@ -702,6 +706,9 @@ int main(void)
 
     while (1)
     {
+#if APP_ENABLE_V5F_DISPLAY
+        v5f_approval_ui_poll();
+#endif
 #if APP_ENABLE_BOARD_HEARTBEAT_PIN
         rt_pin_write(heartbeat_pin, (heartbeat & 1U) ? PIN_HIGH : PIN_LOW);
 #endif

@@ -36,6 +36,7 @@ V3F_ENABLE_USBHS_8K ?= 1
 V3F_USB_REPORT_INTERVAL_US ?= 125
 V3F_ENABLE_RGB_STATUS ?= 1
 V3F_RGB_LED_COUNT ?= 77
+V3F_RGB_MAX_BRIGHTNESS ?= 255
 V3F_ENABLE_RF_BRIDGE ?= 1
 V3F_ENABLE_SPI_HOST_CMD ?= 1
 V3F_ENABLE_USBFS_CDC_DEBUG ?= 0
@@ -55,6 +56,7 @@ DEFS += -DV3F_ENABLE_USBHS_8K=$(V3F_ENABLE_USBHS_8K)
 DEFS += -DV3F_USB_REPORT_INTERVAL_US=$(V3F_USB_REPORT_INTERVAL_US)
 DEFS += -DV3F_ENABLE_RGB_STATUS=$(V3F_ENABLE_RGB_STATUS)
 DEFS += -DV3F_RGB_LED_COUNT=$(V3F_RGB_LED_COUNT)
+DEFS += -DV3F_RGB_MAX_BRIGHTNESS=$(V3F_RGB_MAX_BRIGHTNESS)
 DEFS += -DV3F_ENABLE_RF_BRIDGE=$(V3F_ENABLE_RF_BRIDGE)
 DEFS += -DV3F_ENABLE_SPI_HOST_CMD=$(V3F_ENABLE_SPI_HOST_CMD)
 DEFS += -DV3F_ENABLE_USBFS_CDC_DEBUG=$(V3F_ENABLE_USBFS_CDC_DEBUG)
@@ -90,12 +92,14 @@ endif
 # Source files
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_SRC += $(PROJECT_ROOT)/applications/board_init.c
+APP_SRC += $(PROJECT_ROOT)/applications/approval_mailbox.c
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_link.c
 APP_SRC += $(PROJECT_ROOT)/applications/half_state.c
 APP_SRC += $(PROJECT_ROOT)/applications/default_profile.c
 APP_SRC += $(PROJECT_ROOT)/applications/factory_profile_image.c
 APP_SRC += $(PROJECT_ROOT)/applications/profile_store.c
 APP_SRC += $(PROJECT_ROOT)/applications/profile_runtime.c
+APP_SRC += $(PROJECT_ROOT)/applications/profile_activate.c
 APP_SRC += $(PROJECT_ROOT)/applications/profile_sync.c
 APP_SRC += $(PROJECT_ROOT)/applications/pc_link.c
 APP_SRC += $(PROJECT_ROOT)/applications/rf_report_bridge.c

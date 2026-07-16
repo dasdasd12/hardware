@@ -248,6 +248,7 @@ TEST_SRC += $(WCH_USBFS_COMPAT_HID_SRC)/usbfs_desc.c
 TEST_SRC += $(USBFS_HID_NKRO_SRC)/ch32h417_usbfs_hid_nkro.c
 TEST_SRC += $(USBHS_HID_NKRO_SRC)/ch32h417_usbhs_hid_nkro.c
 TEST_SRC += $(H417_FIRMWARE_ROOT)/v3f/applications/board_init.c
+TEST_SRC += $(H417_FIRMWARE_ROOT)/v3f/applications/approval_mailbox.c
 TEST_SRC += $(V3F_STANDALONE_SRC_ROOT)/h417_product_usbhs_baseline.c
 TEST_SRC += $(V3F_STANDALONE_SRC_ROOT)/h417_usbfs_cdc_diag.c
 TEST_SRC += $(V3F_STANDALONE_SRC_ROOT)/h417_usbss_fs_diag.c

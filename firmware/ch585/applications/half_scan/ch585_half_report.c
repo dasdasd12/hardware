@@ -2,7 +2,10 @@
 
 #include <string.h>
 
+#include "aik_approval_control.h"
+#include "aik_host_shortcut.h"
 #include "aik_profile_format.h"
+#include "aik_profile_shortcut.h"
 
 #define HID_USAGE_A             0x04U
 #define HID_USAGE_B             0x05U
@@ -84,6 +87,10 @@
 #define HID_MOD_RIGHT_GUI   0x80U
 
 #define CH585_FN_LAYER_KEY       38U
+#define CH585_PROFILE_SLOT0_KEY  10U
+#define CH585_PROFILE_SLOT1_KEY  52U
+#define CH585_PROFILE_SLOT2_KEY  51U
+#define CH585_PROFILE_SLOT3_KEY  50U
 #define CH585_GLOBAL_DOWN_BYTES  ((AIK_KEY_COUNT_TOTAL + 7U) / 8U)
 
 typedef struct
@@ -198,8 +205,19 @@ s_factory_locals[CH585_LOCAL_SIGNAL_COUNT] =
 };
 
 static ch585_key_output_t s_key_outputs[AIK_KEY_COUNT_TOTAL];
+static ch585_key_output_t s_fn_outputs[AIK_KEY_COUNT_TOTAL];
 static ch585_local_binding_t s_locals[CH585_LOCAL_SIGNAL_COUNT];
 static uint8_t s_tables_ready;
+static uint8_t s_has_fn_overlay;
+static uint8_t s_fn_hold_key = 0xFFU;
+static uint8_t s_legacy_fn_enabled;
+static uint8_t s_fn_consumed[CH585_GLOBAL_DOWN_BYTES];
+static aik_host_shortcut_state_t s_host_shortcut;
+static aik_profile_shortcut_state_t s_profile_shortcut;
+static aik_approval_control_state_t s_approval_control;
+static uint8_t s_approval_active;
+static uint8_t s_approval_selected_yes;
+static uint8_t s_approval_right_state_valid;
 
 static void half_report_ensure_tables(void)
 {
@@ -211,9 +229,29 @@ static void half_report_ensure_tables(void)
 
 void ch585_half_report_reset_factory(void)
 {
+    if(s_tables_ready == 0U)
+    {
+        aik_profile_shortcut_reset(&s_profile_shortcut);
+        aik_approval_control_reset(&s_approval_control);
+    }
     memcpy(s_key_outputs, s_factory_key_outputs, sizeof(s_key_outputs));
+    memset(s_fn_outputs, 0, sizeof(s_fn_outputs));
     memcpy(s_locals, s_factory_locals, sizeof(s_locals));
+    memset(s_fn_consumed, 0, sizeof(s_fn_consumed));
+    s_has_fn_overlay = 0U;
+    s_fn_hold_key = 0xFFU;
+    s_legacy_fn_enabled = 1U;
     s_tables_ready = 1U;
+}
+
+void ch585_half_report_set_approval_context(uint8_t active,
+                                            uint8_t selected_yes,
+                                            uint8_t right_state_valid)
+{
+    s_approval_active = (active != 0U) ? 1U : 0U;
+    s_approval_selected_yes = (selected_yes != 0U) ? 1U : 0U;
+    s_approval_right_state_valid =
+        (right_state_valid != 0U) ? 1U : 0U;
 }
 
 void ch585_half_report_set_key_outputs(
@@ -228,6 +266,44 @@ void ch585_half_report_set_key_outputs(
         s_key_outputs[key_id].modifier_mask =
             pairs[((uint16_t)key_id * 2U) + 1U];
     }
+    s_legacy_fn_enabled =
+        (uint8_t)((s_key_outputs[CH585_FN_LAYER_KEY].usage == 0U) &&
+                  (s_key_outputs[CH585_FN_LAYER_KEY].modifier_mask == 0U));
+}
+
+void ch585_half_report_clear_fn_overlay(void)
+{
+    half_report_ensure_tables();
+    memset(s_fn_outputs, 0, sizeof(s_fn_outputs));
+    memset(s_fn_consumed, 0, sizeof(s_fn_consumed));
+    s_has_fn_overlay = 0U;
+    s_fn_hold_key = 0xFFU;
+    s_legacy_fn_enabled =
+        (uint8_t)((s_key_outputs[CH585_FN_LAYER_KEY].usage == 0U) &&
+                  (s_key_outputs[CH585_FN_LAYER_KEY].modifier_mask == 0U));
+}
+
+void ch585_half_report_set_fn_overlay(
+    uint8_t hold_key,
+    const uint8_t pairs[AIK_KEY_COUNT_TOTAL * 2U])
+{
+    uint8_t key_id;
+
+    half_report_ensure_tables();
+    if((hold_key >= AIK_KEY_COUNT_TOTAL) || (pairs == 0))
+    {
+        return;
+    }
+    for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
+    {
+        s_fn_outputs[key_id].usage = pairs[(uint16_t)key_id * 2U];
+        s_fn_outputs[key_id].modifier_mask =
+            pairs[((uint16_t)key_id * 2U) + 1U];
+    }
+    memset(s_fn_consumed, 0, sizeof(s_fn_consumed));
+    s_has_fn_overlay = 1U;
+    s_fn_hold_key = hold_key;
+    s_legacy_fn_enabled = 0U;
 }
 
 void ch585_half_report_clear_locals(void)
@@ -326,6 +402,48 @@ static uint8_t global_key_down(const aik_spi_half_state_v1_t *left,
     return half_key_down(left, (uint8_t)(key_id - AIK_KEY_COUNT_RIGHT));
 }
 
+static uint8_t profile_shortcut_slot_bit(uint8_t key_id)
+{
+    switch(key_id)
+    {
+        case CH585_PROFILE_SLOT0_KEY:
+            return (uint8_t)(1U << AIK_PROFILE_SLOT_FACTORY);
+        case CH585_PROFILE_SLOT1_KEY:
+            return (uint8_t)(1U << AIK_PROFILE_USER_SLOT_FIRST);
+        case CH585_PROFILE_SLOT2_KEY:
+            return (uint8_t)(1U << (AIK_PROFILE_USER_SLOT_FIRST + 1U));
+        case CH585_PROFILE_SLOT3_KEY:
+            return (uint8_t)(1U << (AIK_PROFILE_USER_SLOT_FIRST + 2U));
+        default:
+            return 0U;
+    }
+}
+
+static uint8_t profile_shortcut_slot_mask(
+    const aik_spi_half_state_v1_t *left,
+    const aik_spi_half_state_v1_t *right)
+{
+    uint8_t mask = 0U;
+
+    if(global_key_down(left, right, CH585_PROFILE_SLOT0_KEY) != 0U)
+    {
+        mask |= (uint8_t)(1U << AIK_PROFILE_SLOT_FACTORY);
+    }
+    if(global_key_down(left, right, CH585_PROFILE_SLOT1_KEY) != 0U)
+    {
+        mask |= (uint8_t)(1U << AIK_PROFILE_USER_SLOT_FIRST);
+    }
+    if(global_key_down(left, right, CH585_PROFILE_SLOT2_KEY) != 0U)
+    {
+        mask |= (uint8_t)(1U << (AIK_PROFILE_USER_SLOT_FIRST + 1U));
+    }
+    if(global_key_down(left, right, CH585_PROFILE_SLOT3_KEY) != 0U)
+    {
+        mask |= (uint8_t)(1U << (AIK_PROFILE_USER_SLOT_FIRST + 2U));
+    }
+    return mask;
+}
+
 static uint8_t s_release_gate[CH585_GLOBAL_DOWN_BYTES];
 
 void ch585_half_report_arm_release_gate(const aik_spi_half_state_v1_t *left,
@@ -390,6 +508,9 @@ static void update_fn_consumed(const aik_spi_half_state_v1_t *left,
 
 static void apply_local_keyboard_controls(const aik_spi_half_state_v1_t *left,
                                           const aik_spi_half_state_v1_t *right,
+                                          uint8_t suppress_center,
+                                          uint8_t suppress_approval_directions,
+                                          uint8_t suppress_approval_confirm,
                                           uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
     uint8_t signal_id;
@@ -399,6 +520,22 @@ static void apply_local_keyboard_controls(const aik_spi_half_state_v1_t *left,
         const ch585_local_binding_t *binding = &s_locals[signal_id];
 
         if(binding->target_kind != AIK_HP_TARGET_KEYBOARD)
+        {
+            continue;
+        }
+        if((suppress_center != 0U) &&
+           (signal_id == AIK_HP_SIGNAL_FIVEWAY_PRESS))
+        {
+            continue;
+        }
+        if((suppress_approval_directions != 0U) &&
+           ((signal_id == AIK_HP_SIGNAL_FIVEWAY_UP) ||
+            (signal_id == AIK_HP_SIGNAL_FIVEWAY_DOWN)))
+        {
+            continue;
+        }
+        if((suppress_approval_confirm != 0U) &&
+           (signal_id == AIK_HP_SIGNAL_EC11_PRESS))
         {
             continue;
         }
@@ -415,8 +552,17 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
                                     const aik_spi_half_state_v1_t *right,
                                     uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
-    static uint8_t fn_consumed[CH585_GLOBAL_DOWN_BYTES];
     uint8_t key_id;
+    uint8_t fn_active = 0U;
+    uint8_t host_shortcut_action;
+    uint8_t profile_slot_mask;
+    uint8_t profile_consumed_mask;
+    uint8_t approval_nav_action;
+    uint8_t approval_nav_consumed;
+    uint8_t approval_confirm_action;
+    uint8_t approval_confirm_consumed;
+    uint8_t approval_any_consumed;
+    uint8_t fn_down;
 
     if(nkro16 == 0)
     {
@@ -425,7 +571,67 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
 
     memset(nkro16, 0, AIK_NKRO_REPORT_BYTES);
     half_report_ensure_tables();
-    update_fn_consumed(left, right, fn_consumed);
+    fn_down = global_key_down(left, right, CH585_FN_LAYER_KEY);
+    approval_nav_action = aik_approval_control_update_nav_valid(
+        &s_approval_control,
+        s_approval_active,
+        fn_down,
+        (left != 0) ?
+            aik_spi_half_bit_down(
+                left, AIK_LEFT_LOCAL_BIT_SCR_UP) :
+            0U,
+        (left != 0) ?
+            aik_spi_half_bit_down(
+                left, AIK_LEFT_LOCAL_BIT_SCR_DOWN) :
+            0U,
+        (left != 0) ? 1U : 0U);
+    (void)approval_nav_action;
+    approval_confirm_action =
+        aik_approval_control_update_confirm_valid(
+            &s_approval_control,
+            s_approval_active,
+            s_approval_selected_yes,
+            fn_down,
+            (right != 0) ?
+                aik_spi_half_bit_down(
+                    right, AIK_RIGHT_LOCAL_BIT_EC11_MUTE) :
+                0U,
+            s_approval_right_state_valid);
+    approval_nav_consumed =
+        aik_approval_control_nav_consumed(&s_approval_control);
+    approval_confirm_consumed =
+        aik_approval_control_confirm_consumed(&s_approval_control);
+    approval_any_consumed =
+        aik_approval_control_any_consumed(&s_approval_control);
+    profile_slot_mask = profile_shortcut_slot_mask(left, right);
+    (void)aik_profile_shortcut_update_valid(
+        &s_profile_shortcut,
+        (approval_any_consumed == 0U) ? fn_down : 0U,
+        profile_slot_mask,
+        (right != 0) ? 1U : 0U);
+    profile_consumed_mask = aik_profile_shortcut_consumed_slot_mask(
+        &s_profile_shortcut, profile_slot_mask);
+    host_shortcut_action = aik_host_shortcut_update(
+        &s_host_shortcut,
+        ((aik_profile_shortcut_consuming(&s_profile_shortcut) != 0U) ||
+         (approval_any_consumed != 0U)) ?
+            0U :
+            fn_down,
+        (left != 0) ?
+            aik_spi_half_bit_down(
+                left,
+                AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED) :
+            0U);
+    if((s_has_fn_overlay != 0U) &&
+       (s_fn_hold_key < AIK_KEY_COUNT_TOTAL) &&
+       (global_key_down(left, right, s_fn_hold_key) != 0U))
+    {
+        fn_active = 1U;
+    }
+    if(s_legacy_fn_enabled != 0U)
+    {
+        update_fn_consumed(left, right, s_fn_consumed);
+    }
     for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
     {
         const ch585_key_output_t *output = &s_key_outputs[key_id];
@@ -441,10 +647,40 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
         {
             continue;
         }
-
-        if(fn_consumed_get(fn_consumed, key_id) != 0U)
+        if(((host_shortcut_action != AIK_HOST_SHORTCUT_NONE) ||
+            (approval_any_consumed != 0U)) &&
+           (key_id == CH585_FN_LAYER_KEY))
         {
             continue;
+        }
+        if((aik_profile_shortcut_consuming(&s_profile_shortcut) != 0U) &&
+           (key_id == CH585_FN_LAYER_KEY))
+        {
+            continue;
+        }
+        if((profile_consumed_mask & profile_shortcut_slot_bit(key_id)) != 0U)
+        {
+            continue;
+        }
+
+        if((s_legacy_fn_enabled != 0U) &&
+           (fn_consumed_get(s_fn_consumed, key_id) != 0U))
+        {
+            continue;
+        }
+        if((fn_active != 0U) && (key_id == s_fn_hold_key))
+        {
+            continue;
+        }
+        if(fn_active != 0U)
+        {
+            const ch585_key_output_t *fn_output = &s_fn_outputs[key_id];
+
+            if((fn_output->usage != 0U) ||
+               (fn_output->modifier_mask != 0U))
+            {
+                output = fn_output;
+            }
         }
 
         if(output->modifier_mask != 0U)
@@ -455,7 +691,16 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
         nkro16_set_usage(nkro16, output->usage);
     }
 
-    apply_local_keyboard_controls(left, right, nkro16);
+    apply_local_keyboard_controls(
+        left,
+        right,
+        (uint8_t)(host_shortcut_action != AIK_HOST_SHORTCUT_NONE),
+        approval_nav_consumed,
+        approval_confirm_consumed,
+        nkro16);
+    aik_host_shortcut_apply(host_shortcut_action, nkro16);
+    aik_approval_control_apply_confirm(
+        approval_confirm_action, nkro16);
 }
 
 uint16_t ch585_half_report_consumer_usage(const aik_spi_half_state_v1_t *left,
@@ -473,6 +718,12 @@ uint16_t ch585_half_report_consumer_usage(const aik_spi_half_state_v1_t *left,
     {
         const ch585_local_binding_t *binding = &s_locals[priority[i]];
 
+        if((priority[i] == AIK_HP_SIGNAL_EC11_PRESS) &&
+           (aik_approval_control_confirm_consumed(
+                &s_approval_control) != 0U))
+        {
+            continue;
+        }
         if((binding->target_kind == AIK_HP_TARGET_CONSUMER) &&
            (local_signal_down(priority[i], left, right) != 0U))
         {
@@ -503,4 +754,22 @@ int8_t ch585_half_report_mouse_wheel(const aik_spi_half_state_v1_t *left,
         }
     }
     return 0;
+}
+
+int8_t ch585_half_report_mouse_wheel_step(uint8_t signal_id)
+{
+    const ch585_local_binding_t *binding;
+
+    half_report_ensure_tables();
+    if((signal_id != AIK_HP_SIGNAL_WHEEL_UP) &&
+       (signal_id != AIK_HP_SIGNAL_WHEEL_DOWN))
+    {
+        return 0;
+    }
+    binding = &s_locals[signal_id];
+    if(binding->target_kind != AIK_HP_TARGET_MOUSE_WHEEL)
+    {
+        return 0;
+    }
+    return (int8_t)(binding->value & 0xFFU);
 }

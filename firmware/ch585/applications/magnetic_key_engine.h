@@ -29,7 +29,8 @@ typedef enum
 typedef enum
 {
     MAG_KEY_MODE_STATIC = 0,
-    MAG_KEY_MODE_RAPID_TRIGGER = 1
+    MAG_KEY_MODE_RAPID_TRIGGER = 1,
+    MAG_KEY_MODE_DISABLED = 2
 } mag_key_mode_t;
 
 typedef struct

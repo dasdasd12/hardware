@@ -1,12 +1,17 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "aik_approval_control.h"
+#include "aik_host_shortcut.h"
+#include "aik_profile_shortcut.h"
 #include "aik_spi_protocol.h"
+#include "approval_mailbox.h"
 #include "board_init.h"
 #include "ch585_link.h"
 #include "default_profile.h"
 #include "half_state.h"
 #include "pc_link.h"
+#include "profile_activate.h"
 #include "profile_runtime.h"
 #include "profile_sync.h"
 #include "rf_report_bridge.h"
@@ -109,6 +114,10 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_SWITCH_KEY_F3  43U
 #define V3F_SWITCH_KEY_F5  41U
 #define V3F_SWITCH_KEY_F6  6U
+#define V3F_PROFILE_KEY_0   10U
+#define V3F_PROFILE_KEY_1   52U
+#define V3F_PROFILE_KEY_2   51U
+#define V3F_PROFILE_KEY_3   50U
 
 #ifndef V3F_LIGHTING_COMBO_PRESS_FRAMES
 #define V3F_LIGHTING_COMBO_PRESS_FRAMES 4U
@@ -308,6 +317,63 @@ static void v3f_apply_local_keyboard_controls(
     {
         v3f_nkro_set_usage(nkro16, V3F_HID_USAGE_ENTER);
     }
+}
+
+static const aik_spi_half_state_v1_t *v3f_local_keyboard_frame(
+    const aik_spi_half_state_v1_t *left,
+    uint8_t suppress_center,
+    uint8_t suppress_approval_directions,
+    aik_spi_half_state_v1_t *filtered)
+{
+    uint8_t byte_index;
+    uint8_t bit_mask;
+
+    if((left == 0) ||
+       ((suppress_center == 0U) &&
+        (suppress_approval_directions == 0U)) ||
+       (filtered == 0))
+    {
+        return left;
+    }
+
+    *filtered = *left;
+    if(suppress_center != 0U)
+    {
+        byte_index = (uint8_t)(AIK_LEFT_LOCAL_BIT_SCR_CENTER >> 3);
+        bit_mask =
+            (uint8_t)(1U << (AIK_LEFT_LOCAL_BIT_SCR_CENTER & 7U));
+        filtered->down_bits[byte_index] &= (uint8_t)~bit_mask;
+    }
+    if(suppress_approval_directions != 0U)
+    {
+        byte_index = (uint8_t)(AIK_LEFT_LOCAL_BIT_SCR_UP >> 3);
+        bit_mask =
+            (uint8_t)((1U << (AIK_LEFT_LOCAL_BIT_SCR_UP & 7U)) |
+                      (1U << (AIK_LEFT_LOCAL_BIT_SCR_DOWN & 7U)));
+        filtered->down_bits[byte_index] &= (uint8_t)~bit_mask;
+    }
+    return filtered;
+}
+
+static const aik_spi_half_state_v1_t *v3f_consumer_frame(
+    const aik_spi_half_state_v1_t *right,
+    uint8_t suppress_ec11_press,
+    aik_spi_half_state_v1_t *filtered)
+{
+    uint8_t byte_index;
+    uint8_t bit_mask;
+
+    if((right == 0) || (suppress_ec11_press == 0U) || (filtered == 0))
+    {
+        return right;
+    }
+
+    *filtered = *right;
+    byte_index = (uint8_t)(AIK_RIGHT_LOCAL_BIT_EC11_MUTE >> 3);
+    bit_mask =
+        (uint8_t)(1U << (AIK_RIGHT_LOCAL_BIT_EC11_MUTE & 7U));
+    filtered->down_bits[byte_index] &= (uint8_t)~bit_mask;
+    return filtered;
 }
 
 static uint16_t v3f_consumer_usage_from_local_controls(
@@ -539,6 +605,40 @@ static void v3f_global_key_clear_one(v3f_global_key_state_t *keys,
     }
 }
 
+static uint8_t v3f_profile_shortcut_slot_mask(
+    const v3f_global_key_state_t *keys)
+{
+    uint8_t mask = 0U;
+
+    if(v3f_global_key_is_down(keys, V3F_PROFILE_KEY_0) != 0U)
+    {
+        mask |= (uint8_t)(1U << AIK_PROFILE_SLOT_FACTORY);
+    }
+    if(v3f_global_key_is_down(keys, V3F_PROFILE_KEY_1) != 0U)
+    {
+        mask |= (uint8_t)(1U << 1U);
+    }
+    if(v3f_global_key_is_down(keys, V3F_PROFILE_KEY_2) != 0U)
+    {
+        mask |= (uint8_t)(1U << 2U);
+    }
+    if(v3f_global_key_is_down(keys, V3F_PROFILE_KEY_3) != 0U)
+    {
+        mask |= (uint8_t)(1U << 3U);
+    }
+    return mask;
+}
+
+static void v3f_profile_shortcut_consume_keys(
+    v3f_global_key_state_t *keys)
+{
+    v3f_global_key_clear_one(keys, V3F_FN_LAYER_KEY);
+    v3f_global_key_clear_one(keys, V3F_PROFILE_KEY_0);
+    v3f_global_key_clear_one(keys, V3F_PROFILE_KEY_1);
+    v3f_global_key_clear_one(keys, V3F_PROFILE_KEY_2);
+    v3f_global_key_clear_one(keys, V3F_PROFILE_KEY_3);
+}
+
 static uint8_t v3f_fn_consumed_get(const uint8_t consumed[V3F_GLOBAL_DOWN_BYTES],
                                    uint8_t key_id)
 {
@@ -704,6 +804,8 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
                                          uint16_t host_seq,
                                          const aik_spi_half_state_v1_t *right,
                                          uint8_t output_mode,
+                                         uint8_t approval_active,
+                                         uint8_t approval_selected_yes,
                                          uint16_t consumer_usage,
                                          int8_t consumer_delta)
 {
@@ -715,7 +817,10 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
         v3f_rf_report_bridge_prepare_right_state_cmd(cmd,
                                                      host_seq,
                                                      right,
-                                                     output_mode);
+                                                     output_mode,
+                                                     approval_active,
+                                                     approval_selected_yes,
+                                                     1U);
         aik_spi_host_cmd_set_consumer_usage(cmd, consumer_usage);
         aik_spi_host_cmd_set_consumer_delta(cmd, consumer_delta);
         aik_spi_host_cmd_finish(cmd);
@@ -729,13 +834,18 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
     v3f_rf_report_bridge_prepare_right_state_cmd(cmd,
                                                  host_seq,
                                                  &empty_right,
-                                                 output_mode);
+                                                 output_mode,
+                                                 approval_active,
+                                                 approval_selected_yes,
+                                                 0U);
     aik_spi_host_cmd_set_consumer_usage(cmd, consumer_usage);
     aik_spi_host_cmd_set_consumer_delta(cmd, consumer_delta);
     aik_spi_host_cmd_finish(cmd);
 #else
     v3f_prepare_spi_poll_tx(cmd, host_seq, 0, output_mode);
     (void)right;
+    (void)approval_active;
+    (void)approval_selected_yes;
     (void)consumer_usage;
     (void)consumer_delta;
 #endif
@@ -921,11 +1031,17 @@ int main(void)
     uint16_t last_wireless_right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
     uint8_t usb_nkro_release_pending = 0U;
     uint8_t usb_consumer_release_pending = 0U;
+    aik_host_shortcut_state_t host_shortcut;
+    aik_profile_shortcut_state_t profile_shortcut;
+    aik_approval_control_state_t approval_control;
 
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
     memset(nkro16, 0, sizeof(nkro16));
     memset(zero_nkro16, 0, sizeof(zero_nkro16));
+    aik_host_shortcut_reset(&host_shortcut);
+    aik_profile_shortcut_reset(&profile_shortcut);
+    aik_approval_control_reset(&approval_control);
 
     v3f_board_init();
     /* Bring USB up before profile parsing so enumeration can isolate early boot faults. */
@@ -950,12 +1066,37 @@ int main(void)
         uint8_t got_right;
         uint8_t sync_mask = v3f_profile_sync_poll(host_seq);
         uint8_t previous_output_mode = output_mode;
+        uint8_t approval_active = v3f_approval_mailbox_active();
+        uint8_t approval_selected_yes =
+            v3f_approval_mailbox_selected_yes();
         uint16_t consumer_usage;
         uint16_t right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
         uint16_t left_push_consumer_usage = AIK_CONSUMER_USAGE_NONE;
         int8_t consumer_delta = 0;
         int8_t left_push_consumer_delta = 0;
         int8_t mouse_wheel;
+        uint8_t profile_rearm = v3f_profile_runtime_rearm_take();
+        uint8_t profile_shortcut_slot;
+        uint8_t profile_shortcut_consumed;
+        uint8_t profile_slot_mask;
+        uint8_t host_shortcut_action;
+        uint8_t host_shortcut_consumed;
+        uint8_t approval_nav_action;
+        uint8_t approval_nav_consumed;
+        uint8_t approval_confirm_action;
+        uint8_t approval_confirm_consumed;
+        uint8_t approval_any_consumed;
+        aik_spi_half_state_v1_t filtered_left;
+        aik_spi_half_state_v1_t filtered_right;
+        const aik_spi_half_state_v1_t *left_keyboard_frame;
+        const aik_spi_half_state_v1_t *right_consumer_frame;
+
+        if(profile_rearm != 0U)
+        {
+            wireless_consumer_delta_pending = 0;
+            wireless_consumer_usage_pending = AIK_CONSUMER_USAGE_NONE;
+            last_wireless_right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
+        }
 
 #if V3F_ENABLE_RF_BRIDGE
         v3f_prepare_spi_poll_tx(&right_cmd,
@@ -967,11 +1108,36 @@ int main(void)
                     0U;
         update_half_cache(&right, got_right, &rx);
         age_half_cache_on_usb_report(&right, got_right);
+        approval_confirm_action =
+            aik_approval_control_update_confirm_valid(
+                &approval_control,
+                approval_active,
+                approval_selected_yes,
+                (right.valid != 0U) ?
+                    aik_spi_half_bit_down(
+                        &right.frame, V3F_FN_LAYER_KEY) :
+                    0U,
+                (right.valid != 0U) ?
+                    aik_spi_half_bit_down(
+                        &right.frame,
+                        AIK_RIGHT_LOCAL_BIT_EC11_MUTE) :
+                    0U,
+                right.valid);
+        approval_confirm_consumed =
+            aik_approval_control_confirm_consumed(&approval_control);
+        right_consumer_frame = v3f_consumer_frame(
+            right.valid ? &right.frame : 0,
+            approval_confirm_consumed,
+            &filtered_right);
         (void)v3f_rotary_count_delta_from_right(
             right.valid ? &right.frame : 0);
         consumer_delta = 0;
-        right_consumer_usage = v3f_consumer_usage_from_local_controls(
-            right.valid ? &right.frame : 0);
+        right_consumer_usage =
+            (v3f_profile_runtime_valid() != 0U) ?
+            v3f_profile_runtime_consumer_usage(
+                right_consumer_frame) :
+            v3f_consumer_usage_from_local_controls(
+                right_consumer_frame);
 
         if(v3f_output_mode_is_wireless(output_mode) != 0U)
         {
@@ -991,6 +1157,8 @@ int main(void)
                                          host_seq,
                                          right.valid ? &right.frame : 0,
                                          output_mode,
+                                         approval_active,
+                                         approval_selected_yes,
                                          left_push_consumer_usage,
                                          left_push_consumer_delta);
             last_wireless_right_consumer_usage = right_consumer_usage;
@@ -1037,6 +1205,27 @@ int main(void)
                     v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx) :
                     0U;
         update_half_cache(&right, got_right, &rx);
+        approval_confirm_action =
+            aik_approval_control_update_confirm_valid(
+                &approval_control,
+                approval_active,
+                approval_selected_yes,
+                (right.valid != 0U) ?
+                    aik_spi_half_bit_down(
+                        &right.frame, V3F_FN_LAYER_KEY) :
+                    0U,
+                (right.valid != 0U) ?
+                    aik_spi_half_bit_down(
+                        &right.frame,
+                        AIK_RIGHT_LOCAL_BIT_EC11_MUTE) :
+                    0U,
+                right.valid);
+        approval_confirm_consumed =
+            aik_approval_control_confirm_consumed(&approval_control);
+        right_consumer_frame = v3f_consumer_frame(
+            right.valid ? &right.frame : 0,
+            approval_confirm_consumed,
+            &filtered_right);
         (void)v3f_rotary_count_delta_from_right(
             right.valid ? &right.frame : 0);
         consumer_delta = 0;
@@ -1048,13 +1237,71 @@ int main(void)
         v3f_half_state_merge(left.valid ? &left.frame : 0,
                              right.valid ? &right.frame : 0,
                              &keys);
-        if(v3f_profile_runtime_rearm_take() != 0U)
+        approval_nav_action = aik_approval_control_update_nav_valid(
+            &approval_control,
+            approval_active,
+            v3f_global_key_is_down(&keys, V3F_FN_LAYER_KEY),
+            (left.valid != 0U) ?
+                aik_spi_half_bit_down(
+                    &left.frame, AIK_LEFT_LOCAL_BIT_SCR_UP) :
+                0U,
+            (left.valid != 0U) ?
+                aik_spi_half_bit_down(
+                    &left.frame, AIK_LEFT_LOCAL_BIT_SCR_DOWN) :
+                0U,
+            left.valid);
+        if(approval_nav_action == AIK_APPROVAL_CONTROL_SELECT_YES)
+        {
+            v3f_approval_mailbox_set_selected_yes(1U);
+        }
+        else if(approval_nav_action == AIK_APPROVAL_CONTROL_SELECT_NO)
+        {
+            v3f_approval_mailbox_set_selected_yes(0U);
+        }
+        approval_nav_consumed =
+            aik_approval_control_nav_consumed(&approval_control);
+        approval_any_consumed =
+            aik_approval_control_any_consumed(&approval_control);
+        profile_slot_mask = v3f_profile_shortcut_slot_mask(&keys);
+        profile_shortcut_slot = aik_profile_shortcut_update_valid(
+            &profile_shortcut,
+            (approval_any_consumed == 0U) ?
+                v3f_global_key_is_down(&keys, V3F_FN_LAYER_KEY) :
+                0U,
+            profile_slot_mask,
+            (uint8_t)((left.valid != 0U) && (right.valid != 0U)));
+        profile_shortcut_consumed =
+            aik_profile_shortcut_consuming(&profile_shortcut);
+        host_shortcut_action = aik_host_shortcut_update_valid(
+            &host_shortcut,
+            ((profile_shortcut_consumed == 0U) &&
+             (approval_any_consumed == 0U)) ?
+                v3f_global_key_is_down(&keys, V3F_FN_LAYER_KEY) :
+                0U,
+            (left.valid != 0U) ?
+                aik_spi_half_bit_down(
+                    &left.frame,
+                    AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED) :
+                0U,
+            left.valid);
+        host_shortcut_consumed =
+            aik_host_shortcut_center_consumed(&host_shortcut);
+        left_keyboard_frame = v3f_local_keyboard_frame(
+            left.valid ? &left.frame : 0,
+            host_shortcut_consumed,
+            approval_nav_consumed,
+            &filtered_left);
+        if(profile_rearm != 0U)
         {
             /* Table swap: neutralise held keys until re-pressed and
              * force one empty report so nothing sticks. */
             v3f_profile_runtime_rearm_latch(&keys);
             usb_nkro_release_pending = 1U;
             usb_consumer_release_pending = 1U;
+        }
+        if(profile_shortcut_consumed != 0U)
+        {
+            v3f_profile_shortcut_consume_keys(&keys);
         }
         output_mode = v3f_output_mode_update_from_keys(&keys, output_mode);
         if(v3f_output_mode_is_wireless(output_mode) == 0U)
@@ -1064,17 +1311,26 @@ int main(void)
             last_wireless_right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
         }
         v3f_lighting_update_from_keys(&keys);
+        if((host_shortcut_consumed != 0U) ||
+           (approval_any_consumed != 0U))
+        {
+            v3f_global_key_clear_one(&keys, V3F_FN_LAYER_KEY);
+        }
         if(v3f_profile_runtime_valid() != 0U)
         {
-            if(v3f_profile_runtime_get()->has_fn_overlay == 0U)
+            const v3f_profile_runtime_t *rt = v3f_profile_runtime_get();
+
+            if((rt->has_fn_overlay == 0U) &&
+               (rt->base_keys[V3F_FN_LAYER_KEY].usage == 0U) &&
+               (rt->base_keys[V3F_FN_LAYER_KEY].modifier_mask == 0U))
             {
                 v3f_fn_layer_consume_keys(&keys);
             }
             v3f_profile_runtime_build_nkro16(&keys, nkro16);
             v3f_profile_runtime_apply_local_keyboard(
-                left.valid ? &left.frame : 0, nkro16);
+                left_keyboard_frame, nkro16);
             consumer_usage = v3f_profile_runtime_consumer_usage(
-                right.valid ? &right.frame : 0);
+                right_consumer_frame);
             mouse_wheel = v3f_profile_runtime_mouse_wheel(
                 left.valid ? &left.frame : 0);
         }
@@ -1082,13 +1338,16 @@ int main(void)
         {
             v3f_fn_layer_consume_keys(&keys);
             v3f_default_profile_build_nkro16(&keys, nkro16);
-            v3f_apply_local_keyboard_controls(left.valid ? &left.frame : 0,
+            v3f_apply_local_keyboard_controls(left_keyboard_frame,
                                               nkro16);
             consumer_usage = v3f_consumer_usage_from_local_controls(
-                right.valid ? &right.frame : 0);
+                right_consumer_frame);
             mouse_wheel = v3f_mouse_wheel_from_local_controls(
                 left.valid ? &left.frame : 0);
         }
+        aik_host_shortcut_apply(host_shortcut_action, nkro16);
+        aik_approval_control_apply_confirm(
+            approval_confirm_action, nkro16);
         if(output_mode == AIK_OUTPUT_MODE_USBHS)
         {
             v3f_consumer_delta_accumulate(&usb_consumer_delta_pending,
@@ -1214,6 +1473,10 @@ int main(void)
         v3f_report_diag_trace(&keys, nkro16);
         v3f_usb_diag_trace();
         v3f_profile_status_poll(host_seq);
+        if(profile_shortcut_slot != AIK_PROFILE_SHORTCUT_NONE)
+        {
+            (void)v3f_profile_activate_slot(profile_shortcut_slot);
+        }
         v3f_pc_link_poll();
         v3f_cdc_debug_poll(host_seq, &left, &right, &keys, nkro16);
         v3f_rgb_status_task(host_seq);

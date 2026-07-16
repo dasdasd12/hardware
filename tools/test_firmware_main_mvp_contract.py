@@ -40,6 +40,9 @@ class FirmwareMainMvpContract(unittest.TestCase):
             "AIK_KEY_COUNT_LEFT 36U",
             "AIK_KEY_COUNT_RIGHT 41U",
             "AIK_KEY_COUNT_TOTAL 77U",
+            "AIK_SPI_FLAG_APPROVAL_ACTIVE       0x04U",
+            "AIK_SPI_FLAG_APPROVAL_SELECTED_YES 0x08U",
+            "AIK_SPI_FLAG_RIGHT_STATE_VALID     0x10U",
             "aik_spi_crc16_ccitt",
             "aik_spi_host_cmd_v1_t",
             "aik_spi_half_state_v1_t",
@@ -68,7 +71,14 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("half_scan_right", makefile)
         self.assertIn("CH585_HALF_ID=0", makefile)
         self.assertIn("CH585_HALF_ID=1", makefile)
-        assert_re(self, makefile, r"half_scan_left:\n\t@.*CH585_RF_TX_ENABLE=0")
+        assert_re(self, makefile, r"^all:\s*half_scan_left half_scan_right$")
+        assert_re(self, makefile, r"half_scan_left:\n\t@.*CH585_RF_TX_ENABLE=1")
+        assert_re(self, makefile, r"half_scan_left:\n\t@.*CH585_BLE_HID_ENABLE=1")
+        assert_re(
+            self,
+            makefile,
+            r"half_scan_left:\n\t@.*CH585_BLE_PAIRING_EXT_EEPROM=1",
+        )
         assert_re(self, makefile, r"half_scan_right:\n\t@.*CH585_RF_TX_ENABLE=0")
         self.assertIn("rf_keyboard_tx is disabled", makefile)
         self.assertNotIn("APP=rf_keyboard_tx", makefile)
@@ -79,13 +89,37 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("ch585_ads7948_mux_acq_poll", main_c)
         self.assertIn("mag_key_engine_update", main_c)
         self.assertIn("aik_spi_half_state_v1_t", main_c)
-        self.assertIn("ch585_spi0_slave_link_serve_frame", main_c)
+        self.assertIn("ch585_spi0_slave_link_receive_frame", main_c)
+        self.assertIn("ch585_spi0_slave_link_serve_tx_frame", main_c)
         self.assertIn("CH585_RF_TX_ENABLE", main_c)
         self.assertIn("CH585_SPI_ACCEPT_HOST_CMD", main_c)
         self.assertIn("#if CH585_RF_TX_ENABLE", main_c)
         self.assertIn("CH58x_BLEInit", main_c)
         self.assertIn("ch585_rf_nkro_tx_init", main_c)
         self.assertIn("ch585_rf_nkro_tx_set_report", main_c)
+        self.assertIn("AIK_HOST_SHORTCUT_HID_USAGE_F24", main_c)
+        self.assertIn(
+            "AIK_APPROVAL_CONTROL_HID_USAGE_YES",
+            main_c,
+        )
+        self.assertIn("AIK_APPROVAL_CONTROL_HID_USAGE_NO", main_c)
+        self.assertIn("priority_usages[3]", main_c)
+        self.assertIn("ch585_half_report_set_approval_context", main_c)
+        self.assertIn(
+            "CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES 50U",
+            main_c,
+        )
+        self.assertIn(
+            "AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED",
+            main_c,
+        )
+        self.assertNotIn(
+            "if(center != 0U)\n    {\n"
+            "        aik_spi_half_set_bit(\n"
+            "            &s_tx_frame,\n"
+            "            AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED",
+            main_c,
+        )
         self.assertIn("cfg.mode = MAG_KEY_MODE_RAPID_TRIGGER", main_c)
         self.assertIn("MAG_KEY_DEFAULT_RT_PRESS_DELTA_PM  300U", engine_c)
         self.assertIn("MAG_KEY_DEFAULT_RT_RELEASE_DELTA_PM 300U", engine_c)
@@ -129,6 +163,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("APP_ENABLE_USB_TEST ?= 0", v5f_makefile)
         self.assertIn("APP_ENABLE_CH585_SPI_SCAN ?= 0", v5f_makefile)
         self.assertIn("APP_ENABLE_SERIAL_HEARTBEAT ?= 0", v5f_makefile)
+        self.assertIn("applications/v5f_default_ui.c", v5f_makefile)
         self.assertNotIn("APP_ENABLE_V5F_WAKE_PROBE", v5f_makefile)
 
         main_c = read_text("firmware", "h417", "v3f", "applications", "main.c")
@@ -143,6 +178,81 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("v3f_rf_report_bridge_prepare_cmd", main_c)
         self.assertIn("V3F_ENABLE_SPI_HOST_CMD", main_c)
         self.assertIn("v3f_prepare_spi_poll_tx", main_c)
+        self.assertIn("aik_host_shortcut_update", main_c)
+        self.assertIn("v3f_local_keyboard_frame", main_c)
+        self.assertIn("aik_approval_control_update_nav_valid", main_c)
+        self.assertIn("aik_approval_control_update_confirm_valid", main_c)
+        self.assertIn("v3f_approval_mailbox_set_selected_yes", main_c)
+        self.assertIn("approval_confirm_consumed", main_c)
+        self.assertIn("right_consumer_frame", main_c)
+        self.assertIn(
+            "aik_host_shortcut_apply(host_shortcut_action, nkro16)",
+            main_c,
+        )
+        self.assertIn("aik_approval_control_apply_confirm", main_c)
+        host_shortcut_h = read_text(
+            "firmware", "common", "aik_host_shortcut.h"
+        )
+        self.assertIn("AIK_HOST_SHORTCUT_HID_USAGE_F24 0x73U", host_shortcut_h)
+        approval_control_h = read_text(
+            "firmware", "common", "aik_approval_control.h"
+        )
+        self.assertIn(
+            "AIK_APPROVAL_CONTROL_HID_USAGE_YES 0x71U",
+            approval_control_h,
+        )
+        self.assertIn(
+            "AIK_APPROVAL_CONTROL_HID_USAGE_NO  0x72U",
+            approval_control_h,
+        )
+        self.assertIn(
+            "aik_approval_control_update_nav_valid",
+            approval_control_h,
+        )
+        self.assertIn(
+            "aik_approval_control_update_confirm_valid",
+            approval_control_h,
+        )
+        spi_protocol_h = read_text(
+            "firmware", "common", "aik_spi_protocol.h"
+        )
+        self.assertIn(
+            "AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED 43U",
+            spi_protocol_h,
+        )
+        self.assertIn("AIK_HALF_FRAME_BITS_LEFT      44U", spi_protocol_h)
+        ch585_half_report = read_text(
+            "firmware",
+            "ch585",
+            "applications",
+            "half_scan",
+            "ch585_half_report.c",
+        )
+        self.assertIn("aik_host_shortcut_update", ch585_half_report)
+        self.assertIn(
+            "aik_approval_control_update_nav_valid",
+            ch585_half_report,
+        )
+        self.assertIn(
+            "aik_approval_control_update_confirm_valid",
+            ch585_half_report,
+        )
+        self.assertIn(
+            "signal_id == AIK_HP_SIGNAL_EC11_PRESS",
+            ch585_half_report,
+        )
+        self.assertIn(
+            "signal_id == AIK_HP_SIGNAL_FIVEWAY_PRESS",
+            ch585_half_report,
+        )
+        self.assertIn(
+            "aik_host_shortcut_apply(host_shortcut_action, nkro16)",
+            ch585_half_report,
+        )
+        self.assertIn(
+            "AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED",
+            ch585_half_report,
+        )
         self.assertIn("V3F_LINK_STALE_US 5000U", main_c)
         self.assertIn("V3F_LINK_STALE_TICKS", main_c)
         self.assertIn("age_half_cache_on_usb_report", main_c)
@@ -172,6 +282,36 @@ class FirmwareMainMvpContract(unittest.TestCase):
         )
         self.assertIn("v5f_display_init()", v5f_main)
         self.assertNotIn("APP_ENABLE_V5F_WAKE_PROBE", v5f_main)
+
+        v5f_display = read_text(
+            "firmware", "h417", "v5f_rtthread", "applications", "v5f_display.c"
+        )
+        v5f_default_ui = read_text(
+            "firmware",
+            "h417",
+            "v5f_rtthread",
+            "applications",
+            "v5f_default_ui.c",
+        )
+        self.assertIn("v5f_default_ui_clut_rgb888()", v5f_display)
+        self.assertIn("v5f_default_ui_draw();", v5f_display)
+        self.assertLess(
+            v5f_display.index("v5f_default_ui_clut_rgb888()"),
+            v5f_display.index("v5f_default_ui_draw();"),
+        )
+        self.assertLess(
+            v5f_display.index("v5f_default_ui_draw();"),
+            v5f_display.index("ch32h417_lcd_rgb_backlight_enable(1u);"),
+        )
+        self.assertIn('"Welcome back!"', v5f_default_ui)
+        self.assertIn("0xD7u, 0x77u, 0x57u", v5f_default_ui)
+        for mascot_row in (
+            "0x3FFCu",
+            "0x37ECu",
+            "0xFFFFu",
+            "0x1428u",
+        ):
+            self.assertIn(mascot_row, v5f_default_ui)
 
     def test_h417_default_profile_uses_latex_default_keymap(self):
         source = read_text("firmware", "h417", "v3f", "applications", "default_profile.c")

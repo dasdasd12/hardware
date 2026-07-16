@@ -157,6 +157,7 @@ DEFS += $(DEFS_EXTRA)
 # Include paths
 INC := -I"$(PROJECT_ROOT)" -I"$(PROJECT_ROOT)/bsp" -I"$(PROJECT_ROOT)/drivers" -I"$(PROJECT_ROOT)/libcpu"
 INC += -I"$(PROJECT_ROOT)/applications"
+INC += -I"../../common"
 INC += -I"$(RTT_ROOT)/include" -I"$(RTT_ROOT)/components/drivers/include"
 INC += -I"$(RTT_ROOT)/components/libc/compilers/common/include"
 INC += -I"$(RTT_ROOT)/components/libc/compilers/newlib"
@@ -257,6 +258,8 @@ APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_ASM :=
 ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
 APP_SRC += $(PROJECT_ROOT)/applications/v5f_display.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_default_ui.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_approval_ui.c
 endif
 ifeq ($(APP_ENABLE_CH585_SPI_SCAN),1)
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_spi_scan.c

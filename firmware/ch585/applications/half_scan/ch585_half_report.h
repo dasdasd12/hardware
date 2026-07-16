@@ -12,15 +12,23 @@ uint16_t ch585_half_report_consumer_usage(const aik_spi_half_state_v1_t *left,
                                           const aik_spi_half_state_v1_t *right);
 int8_t ch585_half_report_mouse_wheel(const aik_spi_half_state_v1_t *left,
                                      const aik_spi_half_state_v1_t *right);
+void ch585_half_report_set_approval_context(uint8_t active,
+                                            uint8_t selected_yes,
+                                            uint8_t right_state_valid);
 
 /* Runtime table management. The factory table stays compiled in; the
  * active copies are replaced when an AKHR patch is applied. */
 void ch585_half_report_reset_factory(void);
 void ch585_half_report_set_key_outputs(
     const uint8_t pairs[AIK_KEY_COUNT_TOTAL * 2U]);
+void ch585_half_report_clear_fn_overlay(void);
+void ch585_half_report_set_fn_overlay(
+    uint8_t hold_key,
+    const uint8_t pairs[AIK_KEY_COUNT_TOTAL * 2U]);
 void ch585_half_report_clear_locals(void);
 void ch585_half_report_set_local(uint8_t signal_id, uint8_t target_kind,
                                  uint16_t value);
+int8_t ch585_half_report_mouse_wheel_step(uint8_t signal_id);
 
 /* Release-to-rearm after a table swap in wireless composition: keys
  * held right now stay suppressed until physically released. */

@@ -5,8 +5,10 @@
  * H417-side profile slot storage in internal flash.
  *
  * The region lives outside both linker-declared images (V3F 0..64K,
- * V5F 0x10000..+500K) inside the 960KB code flash, so it is never part
- * of a firmware download and survives reflashes:
+ * V5F 0x10000..+500K) inside the 960KB code flash. Normal profile
+ * updates, resets, and power cycles preserve it. A full-chip/Erase-All
+ * firmware download still erases this region, so firmware upgrades must
+ * back up and restore user profiles if preservation is required.
  *
  *   +0x00000  user slot 1   (32KB, AKPK package)
  *   +0x08000  user slot 2
@@ -38,7 +40,9 @@ extern "C" {
 #define V3F_PROFILE_STORE_ERR_STATE -3
 #define V3F_PROFILE_STORE_ERR_VERIFY -4
 
-/* Memory-mapped read pointer to a user slot (1..3); 0 for other ids. */
+/* Memory-mapped read pointer to a user slot (1..3); 0 for other ids.
+ * Runtime code treats a fully erased package header as the embedded
+ * factory Profile until the PC commits a package to that slot. */
 const uint8_t *v3f_profile_store_slot_ptr(uint8_t slot_id);
 
 const uint8_t *v3f_profile_store_staging_ptr(void);
