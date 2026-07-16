@@ -31,3 +31,16 @@ make -C hw_tests/ch585 TEST=ch585_ads7948_mux_probe DEFS_EXTRA="-DCH585_ADC_MUX_
 
 Serial output includes the active half profile, ADS7948 lane mapping, raw ADC
 codes, travel percentage, and a compact text bar for each active MUX slot.
+
+## 32K fixed-pipeline acquisition
+
+The 32K budget target scans every active key on every frame and reports timing
+statistics over UART1. Build both halves separately:
+
+```powershell
+make -B -C hw_tests/ch585 TEST=ch585_ads7948_32k_pipeline HALF=left
+make -B -C hw_tests/ch585 TEST=ch585_ads7948_32k_pipeline HALF=right
+```
+
+See [the combined 32K feasibility test guide](../README.md) for the monitor
+command and pass criteria.

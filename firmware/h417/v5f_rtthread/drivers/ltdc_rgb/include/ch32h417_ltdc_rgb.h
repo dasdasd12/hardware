@@ -6,7 +6,7 @@
 #include "ch32h417_rcc.h"
 
 /*
- * CH32H417 RGB LCD/LTDC helper for the KD024WVFLD101A class 800x480 panel.
+ * CH32H417 RGB LCD/LTDC helper for the KD024WVFPD102A 800x480 panel.
  *
  * Dependencies are limited to the WCH peripheral library headers. The driver
  * configures the board-level LCD GPIO/LTDC signals and PA9 DISP / PA10 CTRL

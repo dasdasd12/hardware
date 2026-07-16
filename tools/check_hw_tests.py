@@ -122,7 +122,8 @@ def main():
     assert_contains(h417_makefile, r"V3F_STANDALONE_ROOT\s*:=\s*passed/v3f_standalone", "H417 passed V3F standalone test root")
     assert_contains(h417_makefile, r"H417_DUAL_CORE_TESTS\s*:=", "H417 dual-core test wrapper list")
     assert_contains(h417_makefile, r"H417_HW_TEST_BUILD_NAME\s*:=\s*\$\(HW_TEST\)", "H417 default build name")
-    assert_contains(h417_makefile, r"DUAL_CORE_BUILD_ROOT\s*:=\s*\.\./\.\./hw_tests/h417/\$\(BUILD_ROOT\)/\$\(H417_HW_TEST_BUILD_NAME\)", "dual-core test build root")
+    assert_contains(h417_makefile, r"DIRECT_V5F_BUILD_ROOT\s*:=\s*\.\./\.\./\.\./hw_tests/h417/\$\(BUILD_ROOT\)/\$\(H417_HW_TEST_BUILD_NAME\)", "direct V5F test build root")
+    assert_contains(h417_makefile, r"HW_TEST=\$\(H417_V3F_WAKE_STUB_TEST\)", "V3F test wake-stub build")
     assert_contains(h417_makefile, r"APP_V5F_HW_TEST=\$\(APP_V5F_HW_TEST_MODE\)", "V5F test mode forwarding")
     assert_not_contains(h417_makefile, r"third_party|EVT_ROOT", "external third_party EVT dependency")
     assert_contains(ch585_makefile, r"\bTEST\s*\?=", "TEST selection")
@@ -556,6 +557,16 @@ def main():
     pioc_driver_text = scan_tree(H417_RGB1W_ROOT, (".c", ".h"), include_paths=False)
     ltdc_rgb_driver_text = scan_tree(H417_LTDC_RGB_ROOT, (".c", ".h"), include_paths=False)
     combined_h417_text = h417_standalone_text + pioc_driver_text + ltdc_rgb_driver_text
+    usbfs_cdc_diag_path = os.path.join(
+        H417_V3F_TEST_SRC_ROOT, "h417_usbfs_cdc_diag.c"
+    )
+    usbfs_cdc_diag_text = read_text(usbfs_cdc_diag_path)
+    h417_physical_uart_text = combined_h417_text.replace(usbfs_cdc_diag_text, "")
+    assert_not_contains(
+        usbfs_cdc_diag_path,
+        r"\bDEF_UART\b|UART_Init\s*\(|UART_CfgInit\s*\(|UART_DMAInit\s*\(|USART_",
+        "physical UART bridge in USBFS-only diagnostic adapter",
+    )
     ch585_text = scan_tree(CH585_ROOT, (".c", ".h", ".S", ".ld", ".mk", ""))
 
     forbidden_h417 = {
@@ -566,7 +577,12 @@ def main():
     }
     for pattern, description in forbidden_h417.items():
         flags = 0 if description == "RT-Thread dependency" else re.IGNORECASE
-        if re.search(pattern, combined_h417_text, flags=flags):
+        source_text = (
+            h417_physical_uart_text
+            if description == "H417 UART/USART use"
+            else combined_h417_text
+        )
+        if re.search(pattern, source_text, flags=flags):
             fail("h417 sources contain forbidden {0}".format(description))
 
     for pattern, description in {
@@ -598,6 +614,8 @@ def main():
         "h417_v5f_sdram_dq_probe",
         "h417_v5f_sdram_official_16bit",
         "h417_v5f_ch585_spi_speed",
+        "h417_v3f_usbss_ch372",
+        "h417_v3f_usbss_fs_diag",
     )
     for name in required_h417_tests:
         if name not in h417_text:
@@ -619,6 +637,7 @@ def main():
         "ch585_right_ec11_gpio",
         "ch585_adc_mux_scan",
         "ch585_spi0_speed_slave",
+        "ch585_ads7948_32k_pipeline",
     )
     for name in required_ch585_tests:
         if name not in ch585_text:

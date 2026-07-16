@@ -942,6 +942,7 @@ int main(void)
     v3f_ch585_link_init();
     v3f_rgb_status_init();
     v3f_rgb_status_set_enabled(0U);
+    v3f_board_start_v5f();
 
     while(1)
     {

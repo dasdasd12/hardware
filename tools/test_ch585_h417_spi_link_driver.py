@@ -96,15 +96,15 @@ class Ch585H417SpiLinkDriverPolicy(unittest.TestCase):
         self.assertNotIn("CH585_SPI0_SPEED_LOG_INTERVAL", hw_test)
         self.assertNotIn("ch585_spi0_speed_log_stat", hw_test)
 
-    def test_h417_hw_test_uses_stable_driver_for_div8_path(self):
+    def test_h417_speed_test_uses_one_dma_path_for_all_rates(self):
         source = read_text(H417_HW_TEST)
 
-        self.assertIn("#include \"ch32h417_ch585_spi_link.h\"", source)
-        self.assertIn("ch585_spi_speed_is_stable_12m5", source)
-        self.assertIn("ch32h417_ch585_spi_link_config_for_side", source)
-        self.assertIn("ch32h417_ch585_spi_link_init", source)
-        self.assertIn("ch32h417_ch585_spi_link_transfer", source)
-        self.assertIn("CH32H417_CH585_SPI_LINK_SPI_KHZ", source)
+        self.assertIn("ch585_spi_speed_dma_init", source)
+        self.assertIn("ch585_spi_speed_transfer_frame", source)
+        self.assertIn("CH585_SPI_SPEED_TX_DMA_REQ 63U", source)
+        self.assertIn("CH585_SPI_SPEED_RX_DMA_REQ 64U", source)
+        self.assertNotIn("ch585_spi_speed_is_stable_12m5", source)
+        self.assertNotIn("s_ch585_spi_speed_stable_link", source)
 
 
 if __name__ == "__main__":

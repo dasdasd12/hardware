@@ -107,15 +107,21 @@ else
 $(error Unknown APP_V5F_HW_TEST '$(APP_V5F_HW_TEST)')
 endif
 
+ifeq ($(APP_V5F_HW_TEST),none)
+APP_ENABLE_V5F_DISPLAY ?= 1
+else
+APP_ENABLE_V5F_DISPLAY ?= 0
+endif
+
+ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
 ifneq ($(APP_V5F_HW_TEST),none)
+$(error APP_ENABLE_V5F_DISPLAY cannot be combined with APP_V5F_HW_TEST)
+endif
+endif
+
 APP_ENABLE_USB_TEST ?= 0
 APP_ENABLE_CH585_SPI_SCAN ?= 0
 APP_ENABLE_SERIAL_HEARTBEAT ?= 0
-else
-APP_ENABLE_USB_TEST ?= 1
-APP_ENABLE_CH585_SPI_SCAN ?= 1
-APP_ENABLE_SERIAL_HEARTBEAT ?= 1
-endif
 
 # Defines (only board-specific ones; RT-Thread config macros are in rtconfig.h)
 DEFS := -DCore_V5F -D__RT_KERNEL_SOURCE__ -D__RT_IPC_SOURCE__
@@ -134,6 +140,7 @@ DEFS += -DAPP_ENABLE_USB_TEST=$(APP_ENABLE_USB_TEST)
 DEFS += -DAPP_ENABLE_CH585_SPI_SCAN=$(APP_ENABLE_CH585_SPI_SCAN)
 DEFS += -DAPP_ENABLE_SERIAL_HEARTBEAT=$(APP_ENABLE_SERIAL_HEARTBEAT)
 DEFS += -DAPP_ENABLE_V5F_HW_TEST=$(APP_ENABLE_V5F_HW_TEST)
+DEFS += -DAPP_ENABLE_V5F_DISPLAY=$(APP_ENABLE_V5F_DISPLAY)
 DEFS += -DAPP_V5F_HW_TEST=$(APP_V5F_HW_TEST_ID)
 DEFS += -DAPP_V5F_HW_TEST_NAME=\"$(APP_V5F_HW_TEST)\"
 DEFS += -DAPP_ENABLE_USBSS_CDC=$(APP_ENABLE_USBSS_CDC)
@@ -227,6 +234,9 @@ DRV_SRC := $(PROJECT_ROOT)/drivers/drv_gpio.c
 ifneq ($(APP_V5F_HW_TEST),none)
 DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_lcd_rgb_control.c
 DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_ltdc_rgb.c
+else ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
+DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_lcd_rgb_control.c
+DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_ltdc_rgb.c
 endif
 
 ifneq ($(filter $(APP_V5F_HW_TEST),gpha_r2m_fill gpha_pfc_l8_rgb565 gpha_blend_rgb565 gpha_l8_ltdc_fullscreen),)
@@ -245,6 +255,9 @@ endif
 # Application
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_ASM :=
+ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_display.c
+endif
 ifeq ($(APP_ENABLE_CH585_SPI_SCAN),1)
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_spi_scan.c
 APP_SRC += $(PROJECT_ROOT)/applications/keyboard_engine.c

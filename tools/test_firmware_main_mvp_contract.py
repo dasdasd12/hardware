@@ -91,9 +91,14 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("MAG_KEY_DEFAULT_RT_RELEASE_DELTA_PM 300U", engine_c)
         self.assertIn("MAG_KEY_DEFAULT_FILTER_SHIFT       0U", engine_c)
 
-    def test_h417_v3f_default_build_owns_product_main_without_v5f_default(self):
+    def test_h417_default_build_is_complete_dual_core_product(self):
         h417_makefile = read_text("firmware", "h417", "Makefile")
-        assert_re(self, h417_makefile, r"^all:\s*v3f\s*$")
+        assert_re(self, h417_makefile, r"^all:\s*v3f\s+v5f\s*$")
+        assert_re(
+            self,
+            h417_makefile,
+            r"^\.PHONY:\s+all\s+v3f\s+V3F\s+v5f\s+V5F\s+clean\s+flash\s*$",
+        )
         self.assertNotIn("v3f_usbfs_enum_probe", h417_makefile)
         self.assertNotIn("V3F_USBFS_ENUM_ONLY", h417_makefile)
 
@@ -110,10 +115,21 @@ class FirmwareMainMvpContract(unittest.TestCase):
             self.assertIn(source, v3f_makefile)
         self.assertIn("V3F_ENABLE_USBHS_8K ?= 1", v3f_makefile)
         self.assertIn("V3F_USB_REPORT_INTERVAL_US ?= 125", v3f_makefile)
-        self.assertIn("V3F_ENABLE_RGB_STATUS ?= 0", v3f_makefile)
-        self.assertIn("V3F_ENABLE_RF_BRIDGE ?= 0", v3f_makefile)
-        self.assertIn("V3F_ENABLE_SPI_HOST_CMD ?= 0", v3f_makefile)
+        self.assertIn("V3F_WAKE_V5F ?= 1", v3f_makefile)
+        self.assertIn("V3F_ENABLE_USBFS_CDC ?= 1", v3f_makefile)
+        self.assertIn("V3F_ENABLE_RGB_STATUS ?= 1", v3f_makefile)
+        self.assertIn("V3F_RGB_LED_COUNT ?= 77", v3f_makefile)
+        self.assertIn("V3F_ENABLE_RF_BRIDGE ?= 1", v3f_makefile)
+        self.assertIn("V3F_ENABLE_SPI_HOST_CMD ?= 1", v3f_makefile)
+        self.assertIn("V3F_OUTPUT_MODE_DEFAULT ?= 1", v3f_makefile)
         self.assertNotIn("V3F_USBFS_ENUM_ONLY", v3f_makefile)
+
+        v5f_makefile = read_text("firmware", "h417", "v5f_rtthread", "Makefile")
+        self.assertIn("APP_ENABLE_V5F_DISPLAY ?= 1", v5f_makefile)
+        self.assertIn("APP_ENABLE_USB_TEST ?= 0", v5f_makefile)
+        self.assertIn("APP_ENABLE_CH585_SPI_SCAN ?= 0", v5f_makefile)
+        self.assertIn("APP_ENABLE_SERIAL_HEARTBEAT ?= 0", v5f_makefile)
+        self.assertNotIn("APP_ENABLE_V5F_WAKE_PROBE", v5f_makefile)
 
         main_c = read_text("firmware", "h417", "v3f", "applications", "main.c")
         self.assertIn("V3F_ENABLE_USBHS_8K", main_c)
@@ -130,16 +146,32 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("V3F_LINK_STALE_US 5000U", main_c)
         self.assertIn("V3F_LINK_STALE_TICKS", main_c)
         self.assertIn("age_half_cache_on_usb_report", main_c)
-        self.assertIn("if(v3f_usb_hid_nkro_pending_empty() == 0U)", main_c)
+        self.assertIn("if(v3f_usb_hid_nkro_pending_empty() != 0U)", main_c)
         self.assertNotIn("V3F_USBFS_ENUM_ONLY", main_c)
         self.assertIn("v3f_usb_diag_trace", main_c)
-        self.assertNotIn("v3f_board_delay_us(V3F_USB_REPORT_INTERVAL_US)", main_c)
+        self.assertIn("v3f_board_delay_us(V3F_USB_REPORT_INTERVAL_US)", main_c)
         self.assertNotIn("v3f_board_delay_1ms();", main_c)
         self.assertNotIn("v3f_usb_hid_nkro_send(nkro16)", main_c)
         self.assertLess(
             main_c.index("\n    v3f_usb_hid_nkro_init();"),
             main_c.index("\n    v3f_ch585_link_init();"),
         )
+        self.assertLess(
+            main_c.index("\n    v3f_rgb_status_init();"),
+            main_c.index("\n    v3f_board_start_v5f();"),
+        )
+        self.assertLess(
+            main_c.index("\n    v3f_board_start_v5f();"),
+            main_c.index(
+                "\n    while(1)", main_c.index("\n    v3f_board_start_v5f();")
+            ),
+        )
+
+        v5f_main = read_text(
+            "firmware", "h417", "v5f_rtthread", "applications", "main.c"
+        )
+        self.assertIn("v5f_display_init()", v5f_main)
+        self.assertNotIn("APP_ENABLE_V5F_WAKE_PROBE", v5f_main)
 
     def test_h417_default_profile_uses_latex_default_keymap(self):
         source = read_text("firmware", "h417", "v3f", "applications", "default_profile.c")

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 void v3f_board_init(void);
+void v3f_board_start_v5f(void);
 void v3f_board_delay_1ms(void);
 void v3f_board_delay_us(uint32_t us);
 void v3f_trace_set(uint32_t index, uint32_t value);

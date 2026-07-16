@@ -19,6 +19,14 @@
 #include "keyboard_engine.h"
 #include "usb_hs_hid_keyboard.h"
 
+#ifndef APP_ENABLE_V5F_DISPLAY
+#define APP_ENABLE_V5F_DISPLAY 1
+#endif
+
+#if APP_ENABLE_V5F_DISPLAY
+#include "v5f_display.h"
+#endif
+
 #ifndef APP_ENABLE_V5F_HW_TEST
 #define APP_ENABLE_V5F_HW_TEST 0
 #endif
@@ -28,7 +36,7 @@
 #endif
 
 #ifndef APP_ENABLE_USB_TEST
-#define APP_ENABLE_USB_TEST 1
+#define APP_ENABLE_USB_TEST 0
 #endif
 
 #ifndef APP_ENABLE_USB2_HS_CDC
@@ -36,7 +44,7 @@
 #endif
 
 #ifndef APP_ENABLE_USB2_FS_CDC
-#define APP_ENABLE_USB2_FS_CDC 1
+#define APP_ENABLE_USB2_FS_CDC 0
 #endif
 
 #ifndef APP_ENABLE_USB2_HS_HID
@@ -148,7 +156,7 @@
 #endif
 
 #ifndef APP_ENABLE_SERIAL_HEARTBEAT
-#define APP_ENABLE_SERIAL_HEARTBEAT 1
+#define APP_ENABLE_SERIAL_HEARTBEAT 0
 #endif
 
 #ifndef APP_MAIN_LOOP_DELAY_MS
@@ -631,6 +639,17 @@ int main(void)
 #endif
 
     rt_kprintf("Hello, RT-Thread on CH32H417 V5F!\n");
+#if APP_ENABLE_V5F_DISPLAY
+    if(v5f_display_init() != V5F_DISPLAY_OK)
+    {
+        rt_kprintf("V5F display initialization failed: %d\n",
+                   (int)g_v5f_display_diag.last_error);
+    }
+    else
+    {
+        rt_kprintf("V5F 800x480 L8 display is running.\n");
+    }
+#endif
 #if APP_ENABLE_BOARD_HEARTBEAT_PIN
     rt_pin_mode(heartbeat_pin, PIN_MODE_OUTPUT);
 #endif
@@ -678,7 +697,7 @@ int main(void)
     }
 #endif
 #else
-    rt_kprintf("USB test disabled; RT-Thread heartbeat is running.\n");
+    rt_kprintf("V5F display core running; keyboard and USB are owned by V3F.\n");
 #endif
 
     while (1)

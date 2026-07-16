@@ -4,6 +4,8 @@
 #define CH585_TEST_FUNC ch585_u2_eeprom_i2c_run
 #endif
 
+void CH585_TEST_FUNC(void);
+
 int main(void)
 {
     ch585_board_init();

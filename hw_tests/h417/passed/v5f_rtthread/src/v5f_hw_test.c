@@ -11,6 +11,7 @@
 #if (APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_SPI_SPEED) || \
     (APP_V5F_HW_TEST == APP_V5F_HW_TEST_CH585_ADC_KEY_CAL)
 #include "ch32h417_ch585_spi_link.h"
+#include "ch32h417_dma.h"
 #include "ch32h417_gpio.h"
 #include "ch32h417_rcc.h"
 #include "ch32h417_spi.h"
@@ -184,14 +185,12 @@ volatile v5f_hw_test_diag_t g_v5f_hw_test_diag;
 #define CH585_SPI_SPEED_CS_PIN GPIO_Pin_9
 #define CH585_SPI_SPEED_OTHER_CS_PORT GPIOF
 #define CH585_SPI_SPEED_OTHER_CS_PIN GPIO_Pin_2
-#define CH585_SPI_SPEED_LINK_SIDE CH32H417_CH585_SPI_LINK_SIDE_RIGHT
 #else
 #define CH585_SPI_SPEED_SOURCE_DESC "left/U2 CS=PF2 other=PD9"
 #define CH585_SPI_SPEED_CS_PORT GPIOF
 #define CH585_SPI_SPEED_CS_PIN GPIO_Pin_2
 #define CH585_SPI_SPEED_OTHER_CS_PORT GPIOD
 #define CH585_SPI_SPEED_OTHER_CS_PIN GPIO_Pin_9
-#define CH585_SPI_SPEED_LINK_SIDE CH32H417_CH585_SPI_LINK_SIDE_LEFT
 #endif
 
 #ifndef CH585_SPI_SPEED_FRAMES_PER_RATE
@@ -222,6 +221,8 @@ volatile v5f_hw_test_diag_t g_v5f_hw_test_diag;
 #define CH585_SPI_SPEED_CMD_BYTES 64U
 #define CH585_SPI_SPEED_DIV2_DIAG_SAMPLES 4U
 #define CH585_SPI_SPEED_DIV2_DIAG_BYTES 8U
+#define CH585_SPI_SPEED_TX_DMA_REQ 63U
+#define CH585_SPI_SPEED_RX_DMA_REQ 64U
 
 typedef enum
 {
@@ -234,7 +235,6 @@ typedef enum
 typedef struct
 {
     uint16_t prescaler;
-    uint16_t cpha;
     uint16_t div;
     uint8_t hsrx;
     const char *name;
@@ -268,24 +268,18 @@ typedef struct
 
 static uint8_t s_ch585_spi_speed_tx[CH585_H417_SPI_SPEED_TRANSFER_BYTES] __attribute__((aligned(4)));
 static uint8_t s_ch585_spi_speed_rx[CH585_H417_SPI_SPEED_TRANSFER_BYTES] __attribute__((aligned(4)));
-static ch32h417_ch585_spi_link_config_t s_ch585_spi_speed_stable_link;
 
 static const ch585_spi_speed_rate_t s_ch585_spi_speed_rates[] =
 {
-    { SPI_BaudRatePrescaler_Mode2, SPI_CPHA_1Edge, 8U, 0U, "div8" },
-    { SPI_BaudRatePrescaler_Mode2, SPI_CPHA_1Edge, 8U, 1U, "div8-hsrx1" },
-    { SPI_BaudRatePrescaler_Mode2, SPI_CPHA_2Edge, 8U, 1U, "div8-hsrx1-cpha2" },
-    { SPI_BaudRatePrescaler_Mode2, SPI_CPHA_1Edge, 8U, 2U, "div8-hsrx2" },
-    { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_1Edge, 4U, 0U, "div4" },
-    { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_2Edge, 4U, 0U, "div4-cpha2" },
-    { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_1Edge, 4U, 1U, "div4-hsrx1" },
-    { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_2Edge, 4U, 1U, "div4-hsrx1-cpha2" },
-    { SPI_BaudRatePrescaler_Mode1, SPI_CPHA_1Edge, 4U, 2U, "div4-hsrx2" },
-    { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_1Edge, 2U, 0U, "div2" },
-    { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_2Edge, 2U, 0U, "div2-cpha2" },
-    { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_1Edge, 2U, 1U, "div2-hsrx1" },
-    { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_1Edge, 2U, 2U, "div2-hsrx2" },
-    { SPI_BaudRatePrescaler_Mode0, SPI_CPHA_2Edge, 2U, 2U, "div2-hsrx2-cpha2" },
+    { SPI_BaudRatePrescaler_Mode2, 8U, 0U, "div8-br2" },
+    { SPI_BaudRatePrescaler_Mode1, 4U, 0U, "div4-br1" },
+    { SPI_BaudRatePrescaler_Mode2, 4U, 1U, "div4-br2-hsrx1" },
+    { SPI_BaudRatePrescaler_Mode2, 4U, 2U, "div4-br2-hsrx2" },
+    { SPI_BaudRatePrescaler_Mode1, 3U, 1U, "div3-br1-hsrx1" },
+    { SPI_BaudRatePrescaler_Mode1, 3U, 2U, "div3-br1-hsrx2" },
+    { SPI_BaudRatePrescaler_Mode0, 2U, 0U, "div2-br0" },
+    { SPI_BaudRatePrescaler_Mode0, 2U, 1U, "div2-br0-hsrx1" },
+    { SPI_BaudRatePrescaler_Mode0, 2U, 2U, "div2-br0-hsrx2" },
 };
 
 static uint32_t ch585_spi_speed_rate_count(void)
@@ -354,33 +348,11 @@ static void ch585_spi_speed_log_line(const char *line)
     (void)ch585_spi_speed_cdc_write_full("\r\n", 2u);
 }
 
-static uint8_t ch585_spi_speed_is_stable_12m5(const ch585_spi_speed_rate_t *rate)
-{
-    if(rate == RT_NULL)
-    {
-        return 0U;
-    }
-
-    if((rate->div == 8U) &&
-       (rate->hsrx == 0U) &&
-       (rate->cpha == SPI_CPHA_1Edge))
-    {
-        return 1U;
-    }
-
-    return 0U;
-}
-
 static uint32_t ch585_spi_speed_rate_khz(const ch585_spi_speed_rate_t *rate)
 {
     uint32_t hclk = (HCLKClock != 0U) ? HCLKClock : SystemCoreClock;
 
-    if(ch585_spi_speed_is_stable_12m5(rate) != 0U)
-    {
-        return CH32H417_CH585_SPI_LINK_SPI_KHZ;
-    }
-
-    if(rate->div == 0U)
+    if((rate == RT_NULL) || (rate->div == 0U))
     {
         return 0U;
     }
@@ -400,7 +372,7 @@ static uint8_t ch585_spi_speed_is_high_frequency(const ch585_spi_speed_rate_t *r
         return 0U;
     }
 
-    if((rate->div == 4U) || (rate->div == 2U))
+    if(rate->div < 8U)
     {
         return 1U;
     }
@@ -468,7 +440,7 @@ static const ch585_spi_speed_rate_t *ch585_spi_speed_find_rate(const char *name)
 static void ch585_spi_speed_log_help(void)
 {
     ch585_spi_speed_log_line("SPI_CMD help commands: auto | hf | oncehf | stop | rate <name> | once <name> | go <name> | help");
-    ch585_spi_speed_log_line("SPI_CMD rates: div8 div8-hsrx1 div8-hsrx1-cpha2 div8-hsrx2 div4 div4-cpha2 div4-hsrx1 div4-hsrx1-cpha2 div4-hsrx2 div2 div2-cpha2 div2-hsrx1 div2-hsrx2 div2-hsrx2-cpha2");
+    ch585_spi_speed_log_line("SPI_CMD rates: div8-br2 div4-br1 div4-br2-hsrx1 div4-br2-hsrx2 div3-br1-hsrx1 div3-br1-hsrx2 div2-br0 div2-br0-hsrx1 div2-br0-hsrx2");
 }
 
 static void ch585_spi_speed_log_command(const char *status,
@@ -647,6 +619,7 @@ static void ch585_spi_speed_gpio_init(void)
                           RCC_HB2Periph_GPIOD |
                           RCC_HB2Periph_GPIOF |
                           RCC_HB2Periph_SPI1, ENABLE);
+    RCC_HBPeriphClockCmd(RCC_HBPeriph_DMA1, ENABLE);
 
     GPIO_PinRemapConfig(GPIO_Remap_VIO3V3_IO_HSLV, ENABLE);
     GPIO_PinRemapConfig(GPIO_Remap_VDD3V3_IO_HSLV, ENABLE);
@@ -679,6 +652,39 @@ static void ch585_spi_speed_gpio_init(void)
     GPIO_Init(GPIOB, &gpio);
 }
 
+static void ch585_spi_speed_dma_init(void)
+{
+    DMA_InitTypeDef dma = {0};
+
+    DMA_Cmd(DMA1_Channel2, DISABLE);
+    DMA_Cmd(DMA1_Channel3, DISABLE);
+    SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Rx, DISABLE);
+    SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Tx, DISABLE);
+
+    dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI1->DATAR;
+    dma.DMA_Memory0BaseAddr = (uint32_t)s_ch585_spi_speed_rx;
+    dma.DMA_DIR = DMA_DIR_PeripheralSRC;
+    dma.DMA_BufferSize = CH585_H417_SPI_SPEED_TRANSFER_BYTES;
+    dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+    dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
+    dma.DMA_Mode = DMA_Mode_Normal;
+    dma.DMA_Priority = DMA_Priority_VeryHigh;
+    dma.DMA_M2M = DMA_M2M_Disable;
+    DMA_DeInit(DMA1_Channel2);
+    DMA_Init(DMA1_Channel2, &dma);
+
+    dma.DMA_Memory0BaseAddr = (uint32_t)s_ch585_spi_speed_tx;
+    dma.DMA_DIR = DMA_DIR_PeripheralDST;
+    DMA_DeInit(DMA1_Channel3);
+    DMA_Init(DMA1_Channel3, &dma);
+
+    DMA_MuxChannelConfig(DMA_MuxChannel2, CH585_SPI_SPEED_RX_DMA_REQ);
+    DMA_MuxChannelConfig(DMA_MuxChannel3, CH585_SPI_SPEED_TX_DMA_REQ);
+    DMA_ClearFlag(DMA1, DMA1_FLAG_GL2 | DMA1_FLAG_GL3);
+}
+
 static void ch585_spi_speed_spi_apply(const ch585_spi_speed_rate_t *rate)
 {
     SPI_InitTypeDef spi = {0};
@@ -690,7 +696,7 @@ static void ch585_spi_speed_spi_apply(const ch585_spi_speed_rate_t *rate)
     spi.SPI_Mode = SPI_Mode_Master;
     spi.SPI_DataSize = SPI_DataSize_8b;
     spi.SPI_CPOL = SPI_CPOL_Low;
-    spi.SPI_CPHA = rate->cpha;
+    spi.SPI_CPHA = SPI_CPHA_1Edge;
     spi.SPI_NSS = SPI_NSS_Soft;
     spi.SPI_BaudRatePrescaler = rate->prescaler;
     spi.SPI_FirstBit = SPI_FirstBit_MSB;
@@ -724,49 +730,58 @@ static void ch585_spi_speed_spi_drain_rx(void)
     (void)SPI1->STATR;
 }
 
-static int ch585_spi_speed_wait_flag(uint16_t flag)
+static void ch585_spi_speed_dma_stop(void)
 {
-    uint32_t polls = CH585_SPI_SPEED_BYTE_TIMEOUT_POLLS;
+    DMA_Cmd(DMA1_Channel3, DISABLE);
+    DMA_Cmd(DMA1_Channel2, DISABLE);
+    SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Tx, DISABLE);
+    SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Rx, DISABLE);
+}
 
-    while(SPI_I2S_GetFlagStatus(SPI1, flag) == RESET)
+static int ch585_spi_speed_transfer_frame(uint8_t *rx, const uint8_t *tx)
+{
+    uint32_t polls;
+
+    ch585_spi_speed_dma_stop();
+    ch585_spi_speed_spi_drain_rx();
+    DMA1_Channel2->MADDR = (uint32_t)rx;
+    DMA1_Channel2->CNTR = CH585_H417_SPI_SPEED_TRANSFER_BYTES;
+    DMA1_Channel3->MADDR = (uint32_t)tx;
+    DMA1_Channel3->CNTR = CH585_H417_SPI_SPEED_TRANSFER_BYTES;
+    DMA_ClearFlag(DMA1, DMA1_FLAG_GL2 | DMA1_FLAG_GL3);
+    SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Rx, ENABLE);
+    SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Tx, ENABLE);
+
+    GPIO_ResetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
+    ch585_spi_speed_delay_cycles(CH585_SPI_SPEED_CS_SETUP_CYCLES);
+    DMA_Cmd(DMA1_Channel2, ENABLE);
+    DMA_Cmd(DMA1_Channel3, ENABLE);
+
+    polls = CH585_SPI_SPEED_BYTE_TIMEOUT_POLLS;
+    while((DMA_GetFlagStatus(DMA1, DMA1_FLAG_TC2) == RESET) ||
+          (DMA_GetFlagStatus(DMA1, DMA1_FLAG_TC3) == RESET))
     {
+        if((DMA_GetFlagStatus(DMA1, DMA1_FLAG_TE2) != RESET) ||
+           (DMA_GetFlagStatus(DMA1, DMA1_FLAG_TE3) != RESET))
+        {
+            ch585_spi_speed_dma_stop();
+            GPIO_SetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
+            return -2;
+        }
         if(polls-- == 0U)
         {
+            ch585_spi_speed_dma_stop();
+            GPIO_SetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
             return -1;
         }
     }
 
-    return 0;
-}
-
-static int ch585_spi_speed_transfer_bytes(uint8_t *rx,
-                                          const uint8_t *tx,
-                                          uint16_t len)
-{
-    uint16_t i;
-    uint32_t polls;
-
-    ch585_spi_speed_spi_drain_rx();
-    GPIO_ResetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
-    ch585_spi_speed_delay_cycles(CH585_SPI_SPEED_CS_SETUP_CYCLES);
-
-    for(i = 0U; i < len; i++)
+    if((DMA_GetFlagStatus(DMA1, DMA1_FLAG_TE2) != RESET) ||
+       (DMA_GetFlagStatus(DMA1, DMA1_FLAG_TE3) != RESET))
     {
-        if(ch585_spi_speed_wait_flag(SPI_I2S_FLAG_TXE) != 0)
-        {
-            GPIO_SetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
-            return -1;
-        }
-
-        SPI_I2S_SendData(SPI1, tx[i]);
-
-        if(ch585_spi_speed_wait_flag(SPI_I2S_FLAG_RXNE) != 0)
-        {
-            GPIO_SetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
-            return -2;
-        }
-
-        rx[i] = (uint8_t)SPI_I2S_ReceiveData(SPI1);
+        ch585_spi_speed_dma_stop();
+        GPIO_SetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
+        return -2;
     }
 
     polls = CH585_SPI_SPEED_BYTE_TIMEOUT_POLLS;
@@ -774,21 +789,16 @@ static int ch585_spi_speed_transfer_bytes(uint8_t *rx,
     {
         if(polls-- == 0U)
         {
+            ch585_spi_speed_dma_stop();
             GPIO_SetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
             return -3;
         }
     }
 
+    ch585_spi_speed_dma_stop();
     GPIO_SetBits(CH585_SPI_SPEED_CS_PORT, CH585_SPI_SPEED_CS_PIN);
     ch585_spi_speed_delay_cycles(CH585_SPI_SPEED_CS_GAP_CYCLES);
     return 0;
-}
-
-static int ch585_spi_speed_transfer_frame(uint8_t *rx, const uint8_t *tx)
-{
-    return ch585_spi_speed_transfer_bytes(rx,
-                                          tx,
-                                          (uint16_t)CH585_H417_SPI_SPEED_TRANSFER_BYTES);
 }
 
 static void ch585_spi_speed_div2_diag_reset(ch585_spi_speed_stats_t *stats)
@@ -967,14 +977,7 @@ static void ch585_spi_speed_run_rate(const ch585_spi_speed_rate_t *rate,
     memset(&stats, 0, sizeof(stats));
     ch585_spi_speed_div2_diag_reset(&stats);
     memset(s_ch585_spi_speed_rx, 0, sizeof(s_ch585_spi_speed_rx));
-    if(ch585_spi_speed_is_stable_12m5(rate) != 0U)
-    {
-        ch32h417_ch585_spi_link_init(&s_ch585_spi_speed_stable_link);
-    }
-    else
-    {
-        ch585_spi_speed_spi_apply(rate);
-    }
+    ch585_spi_speed_spi_apply(rate);
     rt_thread_mdelay(2);
 
     start_cycle = ch585_spi_speed_mcycle();
@@ -984,18 +987,8 @@ static void ch585_spi_speed_run_rate(const ch585_spi_speed_rate_t *rate,
     {
         int ret;
 
-        if(ch585_spi_speed_is_stable_12m5(rate) != 0U)
-        {
-            ret = ch32h417_ch585_spi_link_transfer(
-                s_ch585_spi_speed_tx,
-                s_ch585_spi_speed_rx,
-                (uint16_t)CH585_H417_SPI_SPEED_TRANSFER_BYTES);
-        }
-        else
-        {
-            ret = ch585_spi_speed_transfer_frame(s_ch585_spi_speed_rx,
-                                                 s_ch585_spi_speed_tx);
-        }
+        ret = ch585_spi_speed_transfer_frame(s_ch585_spi_speed_rx,
+                                             s_ch585_spi_speed_tx);
         attempts++;
         if(ret != 0)
         {
@@ -1042,7 +1035,7 @@ static void ch585_spi_speed_run_rate(const ch585_spi_speed_rate_t *rate,
                        rate->name,
                        (unsigned int)rate->div,
                        (unsigned int)rate->hsrx,
-                       (unsigned int)((rate->cpha == SPI_CPHA_2Edge) ? 2U : 1U),
+                       1U,
                        (unsigned int)khz,
                        (unsigned int)CH585_H417_SPI_SPEED_TRANSFER_BYTES,
                        (unsigned int)CH585_SPI_SPEED_FRAMES_PER_RATE,
@@ -1119,19 +1112,18 @@ static void run_ch585_spi_speed_test(void)
 
     (void)ch32h417_dual_cdc_init();
     rt_thread_mdelay(300);
-    ch32h417_ch585_spi_link_config_for_side(CH585_SPI_SPEED_LINK_SIDE,
-                                            &s_ch585_spi_speed_stable_link);
     ch585_spi_speed_gpio_init();
+    ch585_spi_speed_dma_init();
     g_v5f_hw_test_diag.phase = V5F_HW_PHASE_RUNNING;
 
     (void)rt_snprintf(line,
                       sizeof(line),
-                      "CH585_SPI_SPEED START source=%s pins=PB3_SCK_PB5_MOSI_PB4_MISO mode=fixed-sync stable_khz=%u transfer_bytes=%u frame_bytes=%u hclk=%u sys=%u ready_byte=0x%02x frame_off=%u cs_gap_cycles=%u sync_retry_cycles=%u max_attempts=%u",
+                      "CH585_SPI_SPEED START source=%s pins=PB3_SCK_PB5_MOSI_PB4_MISO mode=mode0-dma transfer_bytes=%u frame_bytes=%u hclk=%u core=%u sys=%u ready_byte=0x%02x frame_off=%u cs_gap_cycles=%u sync_retry_cycles=%u max_attempts=%u",
                       CH585_SPI_SPEED_SOURCE_DESC,
-                      (unsigned int)CH32H417_CH585_SPI_LINK_SPI_KHZ,
                       (unsigned int)CH585_H417_SPI_SPEED_TRANSFER_BYTES,
                       (unsigned int)CH585_H417_SPI_SPEED_FRAME_BYTES,
                       (unsigned int)HCLKClock,
+                      (unsigned int)SystemCoreClock,
                       (unsigned int)SystemClock,
                       (unsigned int)CH585_H417_SPI_SPEED_READY_BYTE,
                       (unsigned int)CH585_H417_SPI_SPEED_FRAME_OFF,

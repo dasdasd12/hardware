@@ -41,14 +41,19 @@ void v3f_board_init(void)
     v3f_board_delay_cycles(10000U);
     V3F_TRACE_BASE[V3F_TRACE_VIO18_CTLR] = PWR->CTLR;
 
-#if V3F_WAKE_V5F
-    NVIC_WakeUp_V5F(V5F_START_ADDR);
-#endif
-
     V3F_TRACE_BASE[0] = V3F_TRACE_MAGIC;
     V3F_TRACE_BASE[1] = RCC->CFGR2;
     V3F_TRACE_BASE[2] = RCC->CTLR;
     V3F_TRACE_BASE[3] = RCC->HBPCENR;
+}
+
+void v3f_board_start_v5f(void)
+{
+#if V3F_WAKE_V5F
+    /* Publish all V3F peripheral setup before V5F starts touching RCC/GPIO. */
+    __asm volatile("fence iorw, iorw" ::: "memory");
+    NVIC_WakeUp_V5F(V5F_START_ADDR);
+#endif
 }
 
 void v3f_board_delay_1ms(void)
