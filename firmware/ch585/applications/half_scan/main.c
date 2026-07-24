@@ -839,7 +839,12 @@ static void half_scan_set_output_mode(uint8_t mode)
     else
     {
 #if CH585_RF_TX_ENABLE
-        ch585_rf_nkro_tx_set_enabled(0U);
+        /*
+         * Do not spend the RF release burst between the SPI command and
+         * its response. TMR0 sends those zero reports in the background
+         * after this command has returned to the link loop.
+         */
+        ch585_rf_nkro_tx_disable_async();
 #endif
 #if CH585_BLE_HID_ENABLE
         BLE_HID_SetEnabled(0U);

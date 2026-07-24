@@ -42,6 +42,11 @@ static volatile int16_t s_mouse_wheel_pending;
 static volatile int8_t s_last_mouse_wheel;
 static volatile uint8_t s_last_flags;
 static volatile uint8_t s_last_switch_status;
+static volatile uint8_t s_release_async_active;
+static volatile uint8_t s_release_frames_remaining;
+static volatile uint8_t s_release_gap_ticks;
+static volatile uint8_t s_release_tx_in_flight;
+static volatile uint8_t s_release_done;
 
 static uint8_t frame_xor(const uint8_t *buf, uint8_t len)
 {
@@ -159,6 +164,26 @@ static void rf_process_callback(rfRole_States_t state, uint8_t id)
     if((state & RF_STATE_TX_FINISH) != 0U)
     {
         s_tx_done_count++;
+        if((s_release_async_active != 0U) &&
+           (s_release_tx_in_flight != 0U))
+        {
+            s_release_tx_in_flight = 0U;
+            if(s_release_frames_remaining == 0U)
+            {
+                s_release_done = 1U;
+            }
+            else
+            {
+                /*
+                 * TMR0 runs at 1 kHz. Skipping one following tick keeps
+                 * consecutive release-frame starts roughly 2 ms apart.
+                 */
+                s_release_gap_ticks =
+                    (RF_RELEASE_FRAME_GAP_MS > 0U) ?
+                    (RF_RELEASE_FRAME_GAP_MS - 1U) :
+                    0U;
+            }
+        }
     }
 }
 
@@ -218,6 +243,11 @@ void ch585_rf_nkro_tx_init(void)
     s_mouse_wheel_pending = 0;
     s_last_mouse_wheel = 0;
     s_last_switch_status = 0U;
+    s_release_async_active = 0U;
+    s_release_frames_remaining = 0U;
+    s_release_gap_ticks = 0U;
+    s_release_tx_in_flight = 0U;
+    s_release_done = 0U;
 
     s_rf_task_id = TMOS_ProcessEventRegister(rf_process_event);
 
@@ -257,6 +287,20 @@ void ch585_rf_nkro_tx_poll(void)
     {
         TMOS_SystemProcess();
     }
+
+    if(s_release_done != 0U)
+    {
+        TMR0_ITCfg(DISABLE, TMR0_3_IT_CYC_END);
+        PFIC_DisableIRQ(TMR0_IRQn);
+        s_release_done = 0U;
+        s_release_async_active = 0U;
+        /*
+         * Keep RF idle here. Calling RFRole_Stop() would add another
+         * synchronous radio operation to the USB SPI service path; both
+         * later enable paths stop and reconfigure the role before use.
+         */
+        PRINT("half_scan rf async release done\r\n");
+    }
 }
 
 void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
@@ -271,6 +315,11 @@ void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
     {
         TMR0_ITCfg(DISABLE, TMR0_3_IT_CYC_END);
         PFIC_DisableIRQ(TMR0_IRQn);
+        s_release_async_active = 0U;
+        s_release_frames_remaining = 0U;
+        s_release_gap_ticks = 0U;
+        s_release_tx_in_flight = 0U;
+        s_release_done = 0U;
         (void)RFRole_Stop();
         s_last_switch_status = RFRole_SwitchMode(1U);
         rf_role_apply_config();
@@ -285,6 +334,11 @@ void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
     {
         TMR0_ITCfg(DISABLE, TMR0_3_IT_CYC_END);
         PFIC_DisableIRQ(TMR0_IRQn);
+        s_release_async_active = 0U;
+        s_release_frames_remaining = 0U;
+        s_release_gap_ticks = 0U;
+        s_release_tx_in_flight = 0U;
+        s_release_done = 0U;
         if(s_enabled != 0U)
         {
             rf_send_release_burst();
@@ -294,6 +348,40 @@ void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
         rf_clear_report_state();
         PRINT("half_scan rf disable\r\n");
     }
+}
+
+void ch585_rf_nkro_tx_disable_async(void)
+{
+    if(s_started == 0U)
+    {
+        s_enabled = 0U;
+        return;
+    }
+
+    TMR0_ITCfg(DISABLE, TMR0_3_IT_CYC_END);
+    PFIC_DisableIRQ(TMR0_IRQn);
+    if(s_release_async_active != 0U)
+    {
+        TMR0_ITCfg(ENABLE, TMR0_3_IT_CYC_END);
+        PFIC_EnableIRQ(TMR0_IRQn);
+        return;
+    }
+    if(s_enabled == 0U)
+    {
+        return;
+    }
+
+    rf_clear_report_state();
+    s_enabled = 0U;
+    s_release_async_active = 1U;
+    s_release_frames_remaining = RF_RELEASE_BURST_FRAMES;
+    s_release_gap_ticks = 0U;
+    s_release_tx_in_flight = 0U;
+    s_release_done = 0U;
+    TMR0_ClearITFlag(TMR0_3_IT_CYC_END);
+    TMR0_ITCfg(ENABLE, TMR0_3_IT_CYC_END);
+    PFIC_EnableIRQ(TMR0_IRQn);
+    PRINT("half_scan rf async release queued\r\n");
 }
 
 uint8_t ch585_rf_nkro_tx_is_enabled(void)
@@ -309,6 +397,10 @@ void ch585_rf_nkro_tx_set_report(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
                                  uint8_t flags)
 {
     if(nkro16 == 0)
+    {
+        return;
+    }
+    if(s_release_async_active != 0U)
     {
         return;
     }
@@ -392,6 +484,26 @@ void TMR0_IRQHandler(void)
         TMR0_ClearITFlag(TMR0_3_IT_CYC_END);
         if((s_started == 0U) || (s_enabled == 0U))
         {
+            if((s_started == 0U) ||
+               (s_release_async_active == 0U) ||
+               (s_release_tx_in_flight != 0U))
+            {
+                return;
+            }
+            if(s_release_gap_ticks != 0U)
+            {
+                s_release_gap_ticks--;
+                return;
+            }
+            if(s_release_frames_remaining == 0U)
+            {
+                return;
+            }
+
+            fill_nkro_frame(RF_TX_TARGET_ID);
+            s_release_frames_remaining--;
+            s_release_tx_in_flight = 1U;
+            rf_tx_start(s_tx_buf);
             return;
         }
         s_tx_ticks++;
