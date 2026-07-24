@@ -12,6 +12,7 @@ void v3f_approval_mailbox_init(void);
 uint8_t v3f_approval_mailbox_active(void);
 uint8_t v3f_approval_mailbox_selected_yes(void);
 void v3f_approval_mailbox_set_selected_yes(uint8_t selected_yes);
+int v3f_approval_mailbox_set_claude_state(uint8_t claude_state);
 
 int v3f_approval_mailbox_show(uint32_t request_tag,
                               uint8_t risk,

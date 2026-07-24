@@ -5,7 +5,8 @@
 #include <rtthread.h>
 
 #include "ch32h417_ltdc_rgb.h"
-#include "v5f_default_ui.h"
+#include "v5f_competition_ui.h"
+#include "v5f_ui_theme.h"
 
 #define V5F_DISPLAY_LCD_FB_REGION_BYTES (384u * 1024u)
 #define V5F_DISPLAY_POWER_SETTLE_MS      550u
@@ -192,7 +193,7 @@ int v5f_display_init(void)
     /* Hardware validation showed that L8 CLUT writes must follow layer start. */
     rt_thread_mdelay(V5F_DISPLAY_CLUT_SETTLE_MS);
     result = ch32h417_ltdc_rgb_layer1_load_clut_rgb888(
-        v5f_default_ui_clut_rgb888(),
+        v5f_ui_clut_rgb888(),
         CH32H417_LTDC_RGB_CLUT_ENTRIES);
     if(result != CH32H417_LTDC_RGB_OK)
     {
@@ -209,7 +210,7 @@ int v5f_display_init(void)
         return V5F_DISPLAY_ERR_CLUT;
     }
 
-    v5f_default_ui_draw();
+    v5f_competition_ui_draw();
     result = wait_for_scanout();
     if(result != V5F_DISPLAY_OK)
     {

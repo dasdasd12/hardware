@@ -622,6 +622,72 @@ static void pc_cmd_approval(const char *args)
     }
 }
 
+static void pc_cmd_claude_state(const char *args)
+{
+    pc_token_t state_token;
+    uint8_t state;
+    const char *state_name;
+    char reply[40];
+
+    if((pc_take_token(&args, &state_token) != 0) ||
+       (pc_tokens_finished(args) == 0u))
+    {
+        pc_reply_err(PC_ERR_ARGS, "claude-state");
+        return;
+    }
+
+    if(pc_token_equals(&state_token, "OFF") != 0u)
+    {
+        state = AIK_CLAUDE_STATE_OFF;
+        state_name = "OFF";
+    }
+    else if(pc_token_equals(&state_token, "RUNNING") != 0u)
+    {
+        state = AIK_CLAUDE_STATE_RUNNING;
+        state_name = "RUNNING";
+    }
+    else if(pc_token_equals(&state_token, "DONE") != 0u)
+    {
+        state = AIK_CLAUDE_STATE_DONE;
+        state_name = "DONE";
+    }
+    else
+    {
+        pc_reply_err(PC_ERR_RANGE, "claude-state");
+        return;
+    }
+
+    if(v3f_approval_mailbox_set_claude_state(state) !=
+       V3F_APPROVAL_MAILBOX_OK)
+    {
+        pc_reply_err(PC_ERR_RANGE, "claude-state");
+        return;
+    }
+
+    (void)snprintf(reply, sizeof(reply),
+                   "OK CLAUDE STATE %s\r\n", state_name);
+    pc_reply(reply);
+}
+
+static void pc_cmd_claude(const char *args)
+{
+    pc_token_t action;
+
+    if(pc_take_token(&args, &action) != 0)
+    {
+        pc_reply_err(PC_ERR_ARGS, "claude");
+        return;
+    }
+    if(pc_token_equals(&action, "STATE") != 0u)
+    {
+        pc_cmd_claude_state(args);
+    }
+    else
+    {
+        pc_reply_err(PC_ERR_UNKNOWN, "claude");
+    }
+}
+
 void v3f_pc_link_handle_line(const char *line)
 {
     const char *args;
@@ -674,6 +740,12 @@ void v3f_pc_link_handle_line(const char *line)
     {
         args = next_token(line);
         pc_cmd_approval(args);
+    }
+    else if((strncmp(line, "CLAUDE", 6U) == 0) &&
+            ((line[6] == '\0') || (line[6] == ' ')))
+    {
+        args = next_token(line);
+        pc_cmd_claude(args);
     }
     else
     {

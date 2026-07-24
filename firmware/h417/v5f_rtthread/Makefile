@@ -258,7 +258,9 @@ APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_ASM :=
 ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
 APP_SRC += $(PROJECT_ROOT)/applications/v5f_display.c
-APP_SRC += $(PROJECT_ROOT)/applications/v5f_default_ui.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_ui_theme.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_competition_ui.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_claude_ui.c
 APP_SRC += $(PROJECT_ROOT)/applications/v5f_approval_ui.c
 endif
 ifeq ($(APP_ENABLE_CH585_SPI_SCAN),1)

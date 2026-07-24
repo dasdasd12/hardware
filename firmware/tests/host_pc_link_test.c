@@ -57,6 +57,7 @@ static uint32_t s_set_active_calls;
 static uint8_t s_approval_active;
 static uint8_t s_approval_selected_yes;
 static uint8_t s_approval_risk;
+static uint8_t s_claude_state;
 static uint32_t s_approval_tag;
 static uint16_t s_approval_tool_len;
 static uint16_t s_approval_summary_len;
@@ -67,6 +68,7 @@ void v3f_approval_mailbox_init(void)
 {
     s_approval_active = 0u;
     s_approval_selected_yes = 0u;
+    s_claude_state = AIK_CLAUDE_STATE_OFF;
 }
 
 uint8_t v3f_approval_mailbox_active(void)
@@ -82,6 +84,22 @@ uint8_t v3f_approval_mailbox_selected_yes(void)
 void v3f_approval_mailbox_set_selected_yes(uint8_t selected_yes)
 {
     s_approval_selected_yes = (uint8_t)(selected_yes != 0u);
+}
+
+int v3f_approval_mailbox_set_claude_state(uint8_t claude_state)
+{
+    if(claude_state > AIK_CLAUDE_STATE_DONE)
+    {
+        return V3F_APPROVAL_MAILBOX_ERR_PARAM;
+    }
+
+    s_claude_state = claude_state;
+    if(claude_state == AIK_CLAUDE_STATE_OFF)
+    {
+        s_approval_active = 0u;
+        s_approval_selected_yes = 0u;
+    }
+    return V3F_APPROVAL_MAILBOX_OK;
 }
 
 int v3f_approval_mailbox_show(uint32_t request_tag,
@@ -337,8 +355,12 @@ int main(void)
     CHECK(strstr(s_reply, "slots=101") != 0);
     memset(s_slots[1], 0xFF, sizeof(s_slots[1]));
 
+    send("AK CLAUDE STATE RUNNING");
+    CHECK(reply_starts("OK CLAUDE STATE RUNNING"));
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_RUNNING);
+
     /* Strict approval SHOW parser: fixed tag/risk, printable ASCII hex,
-     * bounded tool/summary, and No selected by default. */
+     * bounded tool/summary, No selected by default, and Claude state kept. */
     send("AK APPROVAL SHOW 1234abcd 2 42617368 "
          "52756e206d616b65202d42");
     CHECK(reply_starts("OK APPROVAL SHOW 1234abcd"));
@@ -350,6 +372,12 @@ int main(void)
     CHECK(memcmp(s_approval_tool, "Bash", 4u) == 0);
     CHECK(s_approval_summary_len == 11u);
     CHECK(memcmp(s_approval_summary, "Run make -B", 11u) == 0);
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_RUNNING);
+
+    send("AK CLAUDE STATE DONE");
+    CHECK(reply_starts("OK CLAUDE STATE DONE"));
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_DONE);
+    CHECK(s_approval_active == 1u);
 
     send("AK APPROVAL SHOW 00000001 0 - -");
     CHECK(reply_starts("OK APPROVAL SHOW 00000001"));
@@ -357,6 +385,7 @@ int main(void)
     CHECK(s_approval_selected_yes == 0u);
     CHECK(s_approval_tool_len == 0u);
     CHECK(s_approval_summary_len == 0u);
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_DONE);
 
     send("AK APPROVAL SHOW 1234abc 2 - -");
     CHECK(reply_starts("ERR 2 approval-show"));
@@ -410,10 +439,31 @@ int main(void)
     send("AK APPROVAL CLEAR 00000001");
     CHECK(reply_starts("OK APPROVAL CLEAR 00000001"));
     CHECK(s_approval_active == 0u);
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_DONE);
     send("AK APPROVAL CLEAR 00000001");
     CHECK(reply_starts("ERR 3 approval-inactive"));
     send("AK APPROVAL CLEAR 00000001 extra");
     CHECK(reply_starts("ERR 2 approval-clear"));
+
+    send("AK APPROVAL SHOW 00000003 0 - -");
+    CHECK(reply_starts("OK APPROVAL SHOW 00000003"));
+    CHECK(s_approval_active == 1u);
+    send("AK CLAUDE STATE OFF");
+    CHECK(reply_starts("OK CLAUDE STATE OFF"));
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_OFF);
+    CHECK(s_approval_active == 0u);
+
+    send("AK CLAUDE STATE");
+    CHECK(reply_starts("ERR 2 claude-state"));
+    send("AK CLAUDE STATE RUNNING extra");
+    CHECK(reply_starts("ERR 2 claude-state"));
+    send("AK CLAUDE STATE running");
+    CHECK(reply_starts("ERR 4 claude-state"));
+    send("AK CLAUDE RUNNING");
+    CHECK(reply_starts("ERR 1 claude"));
+    send("AK CLAUDEX STATE RUNNING");
+    CHECK(reply_starts("ERR 1 cmd"));
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_OFF);
 
     /* Bad requests. */
     send("AK BEGIN 0 100 0");

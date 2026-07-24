@@ -9,8 +9,11 @@ Run `make` in this directory to build both production cores:
   USBFS CDC, both CH585 links, profile synchronization, RF output, and RGB.
 - `build/V5F/rtthread_ch32h417_V5F.hex`: RT-Thread display controller. V5F owns
   the 800x480 RGB panel and does not initialize the keyboard or USB paths.
-  Its default image is the validated Claude Code-style welcome frame from the
-  LTDC hardware test: `Welcome back!` above the centered orange mascot.
+  Its power-on image is the 2026 embedded-design competition logo and official
+  `AI for Design & Design for AI!` artwork. A keyboard-launched Claude Code
+  session switches to `Welcome back!` with `RUNNING`/`DONE` below the orange
+  mascot; approvals temporarily cover that frame, and process exit returns to
+  the competition image.
 
 V3F configures all of its peripherals before waking V5F at flash offset
 `0x00010000`. This avoids concurrent read-modify-write initialization of shared

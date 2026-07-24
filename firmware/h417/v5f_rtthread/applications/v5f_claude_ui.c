@@ -1,25 +1,18 @@
 /*
- * Default 800x480 L8 product image.
+ * Claude Code status frame for the 800x480 L8 product display.
  *
- * This is the static welcome frame validated by the V5F LTDC UI hardware
- * test: near-black background, "Welcome back!" title, and the centered
- * Claude Code-style orange mascot. Drawing uses the product display service,
- * which applies the panel's physical 180-degree mounting rotation.
+ * Approval requests temporarily cover this frame.  The shared mailbox keeps
+ * RUNNING/DONE current so clearing an approval restores the right status.
  */
 
-#include "v5f_default_ui.h"
+#include "v5f_claude_ui.h"
 
 #include <stddef.h>
 
-#include "ch32h417_ltdc_rgb.h"
+#include "aik_approval_mailbox.h"
 #include "v5f_display.h"
 
-#define UI_COLOR_BG      0u
-#define UI_COLOR_WHITE   1u
-#define UI_COLOR_BLUE    2u
-#define UI_COLOR_ORANGE  3u
-#define UI_COLOR_GRAY    4u
-#define UI_COLOR_BORDER  5u
+#include "v5f_ui_theme.h"
 
 #define UI_GLYPH_SIZE    8u
 #define UI_MASCOT_COLS   16u
@@ -31,16 +24,6 @@ typedef struct
     uint8_t rows[UI_GLYPH_SIZE];
 } ui_glyph_t;
 
-/* Same six-color palette as the validated hardware-test UI. */
-static const uint8_t s_ui_clut_rgb888[
-    CH32H417_LTDC_RGB_CLUT_ENTRIES * 3u] = {
-    0x0Cu, 0x0Cu, 0x0Cu, /* 0 background, near black */
-    0xF2u, 0xF2u, 0xF2u, /* 1 primary text, white */
-    0x46u, 0x96u, 0xFFu, /* 2 hovered option, blue */
-    0xD7u, 0x77u, 0x57u, /* 3 mascot and bullet, Claude orange */
-    0x9Au, 0x9Au, 0x9Au, /* 4 secondary text, gray */
-    0x5Au, 0x5Au, 0x5Au, /* 5 dialog border, dark gray */
-};
 
 /* 16x10 single-color mascot, bit 0 = leftmost cell. */
 static const uint16_t s_ui_mascot_rows[UI_MASCOT_ROWS] = {
@@ -57,7 +40,7 @@ static const uint16_t s_ui_mascot_rows[UI_MASCOT_ROWS] = {
 };
 
 /*
- * font8x8_basic glyphs used by "Welcome back!".
+ * font8x8_basic glyphs used by the title and RUNNING/DONE state.
  * Original font by Daniel Hepper / Marcel Sondaar, public domain.
  */
 static const ui_glyph_t s_ui_glyphs[] = {
@@ -65,6 +48,14 @@ static const ui_glyph_t s_ui_glyphs[] = {
     {'!', {0x18u, 0x3Cu, 0x3Cu, 0x18u, 0x18u, 0x00u, 0x18u, 0x00u}},
     {'W', {0x63u, 0x63u, 0x63u, 0x6Bu, 0x7Fu, 0x77u, 0x63u, 0x00u}},
     {'a', {0x00u, 0x00u, 0x1Eu, 0x30u, 0x3Eu, 0x33u, 0x6Eu, 0x00u}},
+    {'D', {0x1Fu, 0x36u, 0x66u, 0x66u, 0x66u, 0x36u, 0x1Fu, 0x00u}},
+    {'E', {0x7Fu, 0x46u, 0x16u, 0x1Eu, 0x16u, 0x46u, 0x7Fu, 0x00u}},
+    {'G', {0x3Cu, 0x66u, 0x03u, 0x03u, 0x73u, 0x66u, 0x7Cu, 0x00u}},
+    {'I', {0x1Eu, 0x0Cu, 0x0Cu, 0x0Cu, 0x0Cu, 0x0Cu, 0x1Eu, 0x00u}},
+    {'N', {0x63u, 0x67u, 0x6Fu, 0x7Bu, 0x73u, 0x63u, 0x63u, 0x00u}},
+    {'O', {0x1Cu, 0x36u, 0x63u, 0x63u, 0x63u, 0x36u, 0x1Cu, 0x00u}},
+    {'R', {0x3Fu, 0x66u, 0x66u, 0x3Eu, 0x36u, 0x66u, 0x67u, 0x00u}},
+    {'U', {0x33u, 0x33u, 0x33u, 0x33u, 0x33u, 0x33u, 0x3Fu, 0x00u}},
     {'b', {0x07u, 0x06u, 0x06u, 0x3Eu, 0x66u, 0x66u, 0x3Bu, 0x00u}},
     {'c', {0x00u, 0x00u, 0x1Eu, 0x33u, 0x03u, 0x33u, 0x1Eu, 0x00u}},
     {'e', {0x00u, 0x00u, 0x1Eu, 0x33u, 0x3Fu, 0x03u, 0x1Eu, 0x00u}},
@@ -165,26 +156,35 @@ static void ui_draw_mascot(uint16_t x, uint16_t y, uint16_t cell)
                     (uint16_t)(y + (row * cell)),
                     cell,
                     cell,
-                    UI_COLOR_ORANGE);
+                    V5F_UI_COLOR_ORANGE);
             }
         }
     }
 }
 
-const uint8_t *v5f_default_ui_clut_rgb888(void)
-{
-    return s_ui_clut_rgb888;
-}
+/* palette is provided by v5f_ui_theme.c */
 
-void v5f_default_ui_draw(void)
+
+
+
+void v5f_claude_ui_draw(uint8_t claude_state)
 {
-    const uint16_t mascot_cell = 20u;
+    const uint16_t mascot_cell = 18u;
     const uint16_t mascot_width = UI_MASCOT_COLS * mascot_cell;
+    const char *status = (claude_state == AIK_CLAUDE_STATE_DONE) ?
+        "DONE" : "RUNNING";
+    uint8_t status_color = (claude_state == AIK_CLAUDE_STATE_DONE) ?
+        V5F_UI_COLOR_GRAY : V5F_UI_COLOR_BLUE;
 
-    v5f_display_fill(UI_COLOR_BG);
-    ui_draw_text_centered(58u, "Welcome back!", 6u, UI_COLOR_WHITE);
+
+    v5f_display_fill(V5F_UI_COLOR_BG);
+    ui_draw_text_centered(52u,
+                          "Welcome back!",
+                          6u,
+                          V5F_UI_COLOR_WHITE);
     ui_draw_mascot((uint16_t)((V5F_DISPLAY_WIDTH - mascot_width) / 2u),
-                   195u,
+                   170u,
                    mascot_cell);
+    ui_draw_text_centered(404u, status, 4u, status_color);
     v5f_display_present();
 }

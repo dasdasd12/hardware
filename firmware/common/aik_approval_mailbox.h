@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /*
- * V3F -> V5F single-writer/single-reader approval snapshot.
+ * V3F -> V5F single-writer/single-reader approval and Claude state snapshot.
  *
  * 0x20178000..0x201780ff is occupied by the V3F trace block and the
  * experimental V5F USB paths use memory through 0x2017863f.  Keep this
@@ -21,6 +21,10 @@
 #define AIK_APPROVAL_SUMMARY_MAX           120u
 #define AIK_APPROVAL_RISK_MAX              0x0fu
 
+#define AIK_CLAUDE_STATE_OFF               0u
+#define AIK_CLAUDE_STATE_RUNNING           1u
+#define AIK_CLAUDE_STATE_DONE              2u
+
 typedef struct
 {
     uint32_t request_tag;
@@ -29,7 +33,9 @@ typedef struct
     uint8_t risk;
     uint8_t tool_len;
     uint8_t summary_len;
-    uint8_t reserved[3];
+    /* Reuses one formerly reserved byte; payload size and version stay fixed. */
+    uint8_t claude_state;
+    uint8_t reserved[2];
     char tool[AIK_APPROVAL_TOOL_MAX];
     char summary[AIK_APPROVAL_SUMMARY_MAX];
 } aik_approval_payload_t;
@@ -225,6 +231,7 @@ static inline uint8_t aik_approval_mailbox_read(
        (payload->active > 1u) ||
        (payload->selected_yes > 1u) ||
        (payload->risk > AIK_APPROVAL_RISK_MAX) ||
+       (payload->claude_state > AIK_CLAUDE_STATE_DONE) ||
        (payload->tool_len > AIK_APPROVAL_TOOL_MAX) ||
        (payload->summary_len > AIK_APPROVAL_SUMMARY_MAX) ||
        (aik_approval_text_is_ascii(payload->tool,

@@ -51,6 +51,7 @@ int v3f_approval_mailbox_show(uint32_t request_tag,
                               const char *summary,
                               uint16_t summary_len)
 {
+    uint8_t claude_state = s_payload.claude_state;
     uint16_t index;
 
     if((risk > AIK_APPROVAL_RISK_MAX) ||
@@ -65,6 +66,7 @@ int v3f_approval_mailbox_show(uint32_t request_tag,
     }
 
     aik_approval_payload_clear(&s_payload);
+    s_payload.claude_state = claude_state;
     s_payload.request_tag = request_tag;
     s_payload.active = 1u;
     s_payload.selected_yes = 0u; /* Every new request defaults to No. */
@@ -85,6 +87,8 @@ int v3f_approval_mailbox_show(uint32_t request_tag,
 
 int v3f_approval_mailbox_clear(uint32_t request_tag)
 {
+    uint8_t claude_state;
+
     if(s_payload.active == 0u)
     {
         return V3F_APPROVAL_MAILBOX_ERR_STATE;
@@ -94,7 +98,40 @@ int v3f_approval_mailbox_clear(uint32_t request_tag)
         return V3F_APPROVAL_MAILBOX_ERR_TAG;
     }
 
+    claude_state = s_payload.claude_state;
     aik_approval_payload_clear(&s_payload);
+    s_payload.claude_state = claude_state;
+    publish_payload();
+    return V3F_APPROVAL_MAILBOX_OK;
+}
+
+int v3f_approval_mailbox_set_claude_state(uint8_t claude_state)
+{
+    if(claude_state > AIK_CLAUDE_STATE_DONE)
+    {
+        return V3F_APPROVAL_MAILBOX_ERR_PARAM;
+    }
+
+    if(claude_state == AIK_CLAUDE_STATE_OFF)
+    {
+        if((s_payload.claude_state == AIK_CLAUDE_STATE_OFF) &&
+           (s_payload.active == 0u))
+        {
+            return V3F_APPROVAL_MAILBOX_OK;
+        }
+
+        /* Process exit invalidates any approval that belonged to it. */
+        aik_approval_payload_clear(&s_payload);
+        publish_payload();
+        return V3F_APPROVAL_MAILBOX_OK;
+    }
+
+    if(s_payload.claude_state == claude_state)
+    {
+        return V3F_APPROVAL_MAILBOX_OK;
+    }
+
+    s_payload.claude_state = claude_state;
     publish_payload();
     return V3F_APPROVAL_MAILBOX_OK;
 }

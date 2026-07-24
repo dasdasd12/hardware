@@ -163,7 +163,9 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("APP_ENABLE_USB_TEST ?= 0", v5f_makefile)
         self.assertIn("APP_ENABLE_CH585_SPI_SCAN ?= 0", v5f_makefile)
         self.assertIn("APP_ENABLE_SERIAL_HEARTBEAT ?= 0", v5f_makefile)
-        self.assertIn("applications/v5f_default_ui.c", v5f_makefile)
+        self.assertIn("applications/v5f_ui_theme.c", v5f_makefile)
+        self.assertIn("applications/v5f_competition_ui.c", v5f_makefile)
+        self.assertIn("applications/v5f_claude_ui.c", v5f_makefile)
         self.assertNotIn("APP_ENABLE_V5F_WAKE_PROBE", v5f_makefile)
 
         main_c = read_text("firmware", "h417", "v3f", "applications", "main.c")
@@ -286,32 +288,47 @@ class FirmwareMainMvpContract(unittest.TestCase):
         v5f_display = read_text(
             "firmware", "h417", "v5f_rtthread", "applications", "v5f_display.c"
         )
-        v5f_default_ui = read_text(
+        v5f_claude_ui = read_text(
             "firmware",
             "h417",
             "v5f_rtthread",
             "applications",
-            "v5f_default_ui.c",
+            "v5f_claude_ui.c",
         )
-        self.assertIn("v5f_default_ui_clut_rgb888()", v5f_display)
-        self.assertIn("v5f_default_ui_draw();", v5f_display)
+        v5f_competition_ui = read_text(
+            "firmware",
+            "h417",
+            "v5f_rtthread",
+            "applications",
+            "v5f_competition_ui.c",
+        )
+        v5f_theme = read_text(
+            "firmware", "h417", "v5f_rtthread", "applications", "v5f_ui_theme.c"
+        )
+        self.assertIn("v5f_ui_clut_rgb888()", v5f_display)
+        self.assertIn("v5f_competition_ui_draw();", v5f_display)
         self.assertLess(
-            v5f_display.index("v5f_default_ui_clut_rgb888()"),
-            v5f_display.index("v5f_default_ui_draw();"),
+            v5f_display.index("v5f_ui_clut_rgb888()"),
+            v5f_display.index("v5f_competition_ui_draw();"),
         )
         self.assertLess(
-            v5f_display.index("v5f_default_ui_draw();"),
+            v5f_display.index("v5f_competition_ui_draw();"),
             v5f_display.index("ch32h417_lcd_rgb_backlight_enable(1u);"),
         )
-        self.assertIn('"Welcome back!"', v5f_default_ui)
-        self.assertIn("0xD7u, 0x77u, 0x57u", v5f_default_ui)
+        self.assertIn('"Welcome back!"', v5f_claude_ui)
+        self.assertIn('"RUNNING"', v5f_claude_ui)
+        self.assertIn('"DONE"', v5f_claude_ui)
+        self.assertIn("0xD7u, 0x77u, 0x57u", v5f_theme)
+        self.assertIn("0x1Fu, 0x4Eu, 0x79u", v5f_theme)
+        self.assertIn("s_v5f_competition_logo_bits", v5f_competition_ui)
+        self.assertIn("s_v5f_competition_slogan_bits", v5f_competition_ui)
         for mascot_row in (
             "0x3FFCu",
             "0x37ECu",
             "0xFFFFu",
             "0x1428u",
         ):
-            self.assertIn(mascot_row, v5f_default_ui)
+            self.assertIn(mascot_row, v5f_claude_ui)
 
     def test_h417_default_profile_uses_latex_default_keymap(self):
         source = read_text("firmware", "h417", "v3f", "applications", "default_profile.c")

@@ -37,6 +37,7 @@ int main(void)
     payload.request_tag = 0x1234abcdu;
     payload.active = 1u;
     payload.selected_yes = 0u;
+    payload.claude_state = AIK_CLAUDE_STATE_RUNNING;
     payload.risk = 2u;
     payload.tool_len = 4u;
     payload.summary_len = 11u;
@@ -47,6 +48,7 @@ int main(void)
     CHECK((AIK_APPROVAL_MAILBOX_ADDRESS %
            AIK_APPROVAL_MAILBOX_ALIGNMENT) == 0u);
     CHECK(sizeof(mailbox) <= AIK_APPROVAL_MAILBOX_REGION_BYTES);
+    CHECK(sizeof(payload) == 148u);
 
     sequence = aik_approval_mailbox_publish(&mailbox, &payload, sequence);
     CHECK(sequence == 2u);
@@ -55,6 +57,7 @@ int main(void)
                                     &read_sequence) == 1u);
     CHECK(read_sequence == sequence);
     CHECK(memcmp(&snapshot, &payload, sizeof(payload)) == 0);
+    CHECK(snapshot.claude_state == AIK_CLAUDE_STATE_RUNNING);
 
     /* A V3F-only restart inherits the retained value and publishes a
      * different even sequence, so a still-running V5F cannot miss idle. */
@@ -71,6 +74,7 @@ int main(void)
                                         &snapshot,
                                         &read_sequence) == 1u);
         CHECK(snapshot.active == 0u);
+        CHECK(snapshot.claude_state == AIK_CLAUDE_STATE_OFF);
     }
 
     /* A partial writer snapshot is never accepted. */
@@ -99,6 +103,13 @@ int main(void)
                                     &read_sequence) == 1u);
 
     /* Bounds and printable-ASCII checks protect the V5F renderer. */
+    payload.claude_state = AIK_CLAUDE_STATE_DONE + 1u;
+    sequence = aik_approval_mailbox_publish(&mailbox, &payload, sequence);
+    CHECK(aik_approval_mailbox_read(&mailbox,
+                                    &snapshot,
+                                    &read_sequence) == 0u);
+    payload.claude_state = AIK_CLAUDE_STATE_DONE;
+
     payload.tool_len = AIK_APPROVAL_TOOL_MAX + 1u;
     sequence = aik_approval_mailbox_publish(&mailbox, &payload, sequence);
     CHECK(aik_approval_mailbox_read(&mailbox,

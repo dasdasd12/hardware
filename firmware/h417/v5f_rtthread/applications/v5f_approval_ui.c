@@ -12,7 +12,8 @@
 #include <string.h>
 
 #include "aik_approval_mailbox.h"
-#include "v5f_default_ui.h"
+#include "v5f_claude_ui.h"
+#include "v5f_competition_ui.h"
 #include "v5f_display.h"
 
 #define UI_COLOR_BG      0u
@@ -382,9 +383,14 @@ void v5f_approval_ui_poll(void)
     {
         ui_draw_approval(&payload);
     }
+    else if((payload.claude_state == AIK_CLAUDE_STATE_RUNNING) ||
+            (payload.claude_state == AIK_CLAUDE_STATE_DONE))
+    {
+        v5f_claude_ui_draw(payload.claude_state);
+    }
     else
     {
-        v5f_default_ui_draw();
+        v5f_competition_ui_draw();
     }
     s_last_sequence = sequence;
 }
