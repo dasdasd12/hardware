@@ -25,6 +25,8 @@
 #include "factory_profile_image.h"
 
 static int s_failures;
+static uint8_t s_user_slot[V3F_PROFILE_SLOT_SIZE];
+static uint8_t s_active_slot;
 
 #define CHECK(cond) \
     do { \
@@ -34,10 +36,15 @@ static int s_failures;
         } \
     } while(0)
 
-/* profile_store stubs: boot path sees no user slots. */
+/* profile_store stubs: one backing buffer is enough to exercise erased
+ * and corrupt user-slot boot semantics. */
 const uint8_t *v3f_profile_store_slot_ptr(uint8_t slot_id)
 {
-    (void)slot_id;
+    if((slot_id >= AIK_PROFILE_USER_SLOT_FIRST) &&
+       (slot_id < AIK_PROFILE_SLOT_COUNT_TOTAL))
+    {
+        return s_user_slot;
+    }
     return 0;
 }
 
@@ -60,7 +67,7 @@ int v3f_profile_store_commit_staging_to_slot(uint8_t slot_id, uint32_t len)
     (void)slot_id; (void)len;
     return V3F_PROFILE_STORE_ERR_FLASH;
 }
-uint8_t v3f_profile_store_get_active_slot(void) { return 0U; }
+uint8_t v3f_profile_store_get_active_slot(void) { return s_active_slot; }
 int v3f_profile_store_set_active_slot(uint8_t slot_id)
 {
     (void)slot_id;
@@ -192,6 +199,9 @@ static void test_half_patches(void)
     CHECK(hdr->half_id == AIK_HALF_ID_LEFT);
     CHECK(hdr->key_count == AIK_KEY_COUNT_LEFT);
     CHECK((hdr->flags & AIK_HP_FLAG_HAS_DISPATCH77) != 0U);
+    CHECK((hdr->flags & AIK_HP_FLAG_HAS_FN_DISPATCH77) == 0U);
+    CHECK(hdr->fn_dispatch_offset == 0U);
+    CHECK(hdr->fn_hold_key == 0xFFU);
     CHECK(hdr->profile_id16 == rt->profile_id16);
     CHECK(hdr->local_count == 10U); /* composer gets every local binding */
     CHECK(memcmp(patch + hdr->dispatch_offset, rt->base_keys,
@@ -213,6 +223,7 @@ static void test_half_patches(void)
     CHECK(hdr->half_id == AIK_HALF_ID_RIGHT);
     CHECK(hdr->key_count == AIK_KEY_COUNT_RIGHT);
     CHECK((hdr->flags & AIK_HP_FLAG_HAS_DISPATCH77) == 0U);
+    CHECK((hdr->flags & AIK_HP_FLAG_HAS_FN_DISPATCH77) == 0U);
     CHECK(hdr->local_count == 0U); /* right half publishes raw bits only */
 }
 
@@ -259,9 +270,47 @@ static void test_corrupt_package_rejected(void)
     CHECK(v3f_profile_package_validate(bad, size, 0) != V3F_PROFILE_OK);
 }
 
+static void test_erased_user_slot_defaults(void)
+{
+    v3f_profile_runtime_t factory;
+    v3f_profile_runtime_t user;
+    uint8_t active;
+
+    memset(s_user_slot, 0xFF, sizeof(s_user_slot));
+    CHECK(v3f_profile_runtime_prepare_slot(AIK_PROFILE_SLOT_FACTORY,
+                                           &factory) ==
+          V3F_PROFILE_OK);
+    CHECK(v3f_profile_runtime_prepare_slot(2U, &user) == V3F_PROFILE_OK);
+    CHECK(user.active_slot == 2U);
+
+    factory.active_slot = 2U;
+    CHECK(memcmp(&factory, &user, sizeof(factory)) == 0);
+
+    s_active_slot = 2U;
+    active = v3f_profile_runtime_init();
+    CHECK(active == 2U);
+    CHECK(v3f_profile_runtime_get()->active_slot == 2U);
+
+    /* Non-erased invalid content is corruption, not an empty default. */
+    memset(s_user_slot, 0xFF, sizeof(s_user_slot));
+    s_user_slot[0] = 0U;
+    CHECK(v3f_profile_runtime_prepare_slot(1U, &user) != V3F_PROFILE_OK);
+
+    s_active_slot = 1U;
+    active = v3f_profile_runtime_init();
+    CHECK(active == AIK_PROFILE_SLOT_FACTORY);
+    CHECK(v3f_profile_runtime_get()->active_slot ==
+          AIK_PROFILE_SLOT_FACTORY);
+
+    s_active_slot = AIK_PROFILE_SLOT_FACTORY;
+    memset(s_user_slot, 0xFF, sizeof(s_user_slot));
+}
+
 int main(void)
 {
     uint8_t active;
+
+    memset(s_user_slot, 0xFF, sizeof(s_user_slot));
 
     CHECK(v3f_profile_package_validate(g_v3f_factory_profile_image,
                                        g_v3f_factory_profile_image_size,
@@ -279,6 +328,7 @@ int main(void)
     test_half_patches();
     test_release_to_rearm();
     test_corrupt_package_rejected();
+    test_erased_user_slot_defaults();
 
     if(s_failures == 0)
     {

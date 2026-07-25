@@ -75,7 +75,8 @@ static void mag_key_sanitize_config(mag_key_config_t *cfg)
     }
 
     if ((cfg->mode != MAG_KEY_MODE_STATIC) &&
-        (cfg->mode != MAG_KEY_MODE_RAPID_TRIGGER))
+        (cfg->mode != MAG_KEY_MODE_RAPID_TRIGGER) &&
+        (cfg->mode != MAG_KEY_MODE_DISABLED))
     {
         cfg->mode = MAG_KEY_MODE_STATIC;
     }
@@ -318,7 +319,11 @@ int mag_key_engine_update(mag_key_engine_t *engine, const uint16_t *raw_adc)
         state->position_pm = mag_key_position_from_adc(state->filtered_adc,
                                                        cfg);
 
-        if (cfg->mode == MAG_KEY_MODE_RAPID_TRIGGER)
+        if (cfg->mode == MAG_KEY_MODE_DISABLED)
+        {
+            next_down = 0U;
+        }
+        else if (cfg->mode == MAG_KEY_MODE_RAPID_TRIGGER)
         {
             next_down = mag_key_rt_down_next(engine, key, state->position_pm);
         }

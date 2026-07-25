@@ -37,7 +37,7 @@ volatile uint8_t  USBFS_DevEnumStatus;
 volatile uint8_t USBFS_HidIdle;
 volatile uint8_t USBFS_HidProtocol;
 
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
 uint8_t USBFS_CDC_LineCoding[7] = {0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08};
 volatile uint16_t USBFS_CDC_ControlLineState;
 #endif
@@ -45,7 +45,7 @@ volatile uint16_t USBFS_CDC_ControlLineState;
 /* Endpoint Buffer */
 __attribute__ ((aligned(4))) uint8_t USBFS_EP0_Buf[DEF_USBD_UEP0_SIZE];   
 __attribute__ ((aligned(4))) uint8_t USBFS_EP2_Buf[DEF_USB_EP2_FS_SIZE]; 
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
 __attribute__ ((aligned(4))) uint8_t USBFS_EP3_Buf[DEF_USB_EP3_FS_SIZE];
 __attribute__ ((aligned(4))) uint8_t USBFS_EP4_Buf[DEF_USB_EP4_FS_SIZE];
 #endif
@@ -95,7 +95,7 @@ void USBFS_RCC_Init(void)
  */
 void USBFS_Device_Endp_Init( void )
 {
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
     USBFSD->UEP4_1_MOD = USBFS_UEP1_RX_EN | USBFS_UEP4_TX_EN;
     USBFSD->UEP2_3_MOD = USBFS_UEP2_TX_EN | USBFS_UEP3_TX_EN;
 #else
@@ -106,7 +106,7 @@ void USBFS_Device_Endp_Init( void )
     USBFSD->UEP0_DMA = (uint32_t)USBFS_EP0_Buf;
     USBFSD->UEP1_DMA = (uint32_t)USBFS_Data_Buffer;
     USBFSD->UEP2_DMA = (uint32_t)USBFS_EP2_Buf;
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
     USBFSD->UEP3_DMA = (uint32_t)USBFS_EP3_Buf;
     USBFSD->UEP4_DMA = (uint32_t)USBFS_EP4_Buf;
 #endif
@@ -115,7 +115,7 @@ void USBFS_Device_Endp_Init( void )
     USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;
     USBFSD->UEP1_RX_CTRL = USBFS_UEP_R_RES_ACK;
     USBFSD->UEP2_TX_CTRL = USBFS_UEP_T_RES_NAK;
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
     USBFSD->UEP3_TX_LEN = 0U;
     USBFSD->UEP4_TX_LEN = 0U;
     USBFSD->UEP3_TX_CTRL = USBFS_UEP_T_RES_NAK;
@@ -151,17 +151,17 @@ void USBFS_Device_Init( FunctionalState sta )
     }
 }
 
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
-uint8_t USBFS_CDC_IsOpen(void)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
+uint8_t USBFS_CDC_Debug_IsOpen(void)
 {
     return (uint8_t)((USBFS_DevEnumStatus != 0U) ? 1U : 0U);
 }
 
-uint8_t USBFS_CDC_Send(const uint8_t *data, uint16_t len)
+uint8_t USBFS_CDC_Debug_Send(const uint8_t *data, uint16_t len)
 {
     uint16_t n;
 
-    if((data == 0) || (len == 0U) || (USBFS_CDC_IsOpen() == 0U))
+    if((data == 0) || (len == 0U) || (USBFS_CDC_Debug_IsOpen() == 0U))
     {
         return 0U;
     }
@@ -246,7 +246,7 @@ void USBFS_IRQHandler( void )
 							USBFSD->UEP2_TX_CTRL ^= USBFS_UEP_T_TOG;
                             break;
 
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
                         case USBFS_UIS_TOKEN_IN | DEF_UEP3:
                             USBFSD->UEP3_TX_CTRL =
                                 (USBFSD->UEP3_TX_CTRL & (uint8_t)(~USBFS_UEP_T_RES_MASK)) |
@@ -278,7 +278,7 @@ void USBFS_IRQHandler( void )
                             {
                                 if ( ( USBFS_SetupReqType & USB_REQ_TYP_MASK ) != USB_REQ_TYP_STANDARD )
                                 {
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
                                     if(USBFS_SetupReqCode == CDC_SET_LINE_CODING)
                                     {
                                         uint16_t copy_len = USBFS_SetupReqLen;
@@ -365,7 +365,7 @@ void USBFS_IRQHandler( void )
                     {
                         switch( USBFS_SetupReqCode )
                         {
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
                             case CDC_GET_LINE_CODING:
                                 if(USBFS_SetupReqIndex == 0x00)
                                 {
@@ -619,7 +619,7 @@ void USBFS_IRQHandler( void )
                                             USBFSD->UEP2_TX_CTRL =  USBFS_UEP_T_RES_NAK;
                                             break;
 
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
                                         case ( DEF_UEP_IN | DEF_UEP3 ):
                                             USBFSD->UEP3_TX_CTRL = USBFS_UEP_T_RES_NAK;
                                             break;
@@ -682,7 +682,7 @@ void USBFS_IRQHandler( void )
                                             USBFSD->UEP2_TX_CTRL = ( USBFSD->UEP2_TX_CTRL & ~USBFS_UEP_T_RES_MASK ) | USBFS_UEP_T_RES_STALL;
                                             break;
 
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
 	                                    case ( DEF_UEP_IN | DEF_UEP3 ):
                                             USBFSD->UEP3_TX_CTRL = ( USBFSD->UEP3_TX_CTRL & ~USBFS_UEP_T_RES_MASK ) | USBFS_UEP_T_RES_STALL;
                                             break;
@@ -748,7 +748,7 @@ void USBFS_IRQHandler( void )
                                         USBFS_EP0_Buf[ 0 ] = 0x01;
                                     }
                                 }
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
                                 else if((uint8_t)(USBFS_SetupReqIndex&0xFF) == ( DEF_UEP_IN | DEF_UEP3 ))
                                 {
                                     if( ( USBFSD->UEP3_TX_CTRL & USBFS_UEP_T_RES_MASK ) == USBFS_UEP_T_RES_STALL )
@@ -831,7 +831,7 @@ void USBFS_IRQHandler( void )
         USBFS_DevAddr = 0;
         USBFS_DevSleepStatus = 0;
         USBFS_DevEnumStatus = 0;
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
         USBFS_CDC_ControlLineState = 0U;
 #endif
         USBFSD->DEV_ADDR = 0;

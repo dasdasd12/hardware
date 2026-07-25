@@ -31,20 +31,22 @@ OFFICIAL_USBSS_ROOT ?= C:/program1/hardware/WCH/CH32H417/CH32H417EVT/EVT/EXAM/US
 
 V3F_USBSS_OFFICIAL_OWNER ?= 0
 V3F_ENABLE_USBFS_CLOCK_INIT ?= 0
-V3F_WAKE_V5F ?= 0
+V3F_WAKE_V5F ?= 1
 V3F_ENABLE_USBHS_8K ?= 1
 V3F_USB_REPORT_INTERVAL_US ?= 125
-V3F_ENABLE_RGB_STATUS ?= 0
-V3F_RGB_LED_COUNT ?= 1
-V3F_ENABLE_RF_BRIDGE ?= 0
-V3F_ENABLE_SPI_HOST_CMD ?= 0
-V3F_OUTPUT_MODE_DEFAULT ?= 0
+V3F_ENABLE_RGB_STATUS ?= 1
+V3F_RGB_LED_COUNT ?= 77
+V3F_RGB_MAX_BRIGHTNESS ?= 255
+V3F_ENABLE_RF_BRIDGE ?= 1
+V3F_ENABLE_SPI_HOST_CMD ?= 1
+V3F_ENABLE_USBFS_CDC_DEBUG ?= 0
+V3F_OUTPUT_MODE_DEFAULT ?= 1
 # Second USB controller: USBFS runs the CDC config channel while USBHS
 # keeps the 8K HID path. Only meaningful with V3F_ENABLE_USBHS_8K=1.
-V3F_ENABLE_USBFS_CDC ?= 0
-# Optional CDC trace-only build for controller diagnostics. It stays off
-# in the keyboard build because the configuration protocol owns CDC IN.
-V3F_ENABLE_USBFS_CDC_TRACE ?= 0
+V3F_ENABLE_USBFS_CDC ?= 1
+ifeq ($(V3F_ENABLE_USBFS_CDC),1)
+V3F_ENABLE_USBFS_CDC_DEBUG := 1
+endif
 
 # Defines
 DEFS := -DCore_V3F
@@ -54,11 +56,12 @@ DEFS += -DV3F_ENABLE_USBHS_8K=$(V3F_ENABLE_USBHS_8K)
 DEFS += -DV3F_USB_REPORT_INTERVAL_US=$(V3F_USB_REPORT_INTERVAL_US)
 DEFS += -DV3F_ENABLE_RGB_STATUS=$(V3F_ENABLE_RGB_STATUS)
 DEFS += -DV3F_RGB_LED_COUNT=$(V3F_RGB_LED_COUNT)
+DEFS += -DV3F_RGB_MAX_BRIGHTNESS=$(V3F_RGB_MAX_BRIGHTNESS)
 DEFS += -DV3F_ENABLE_RF_BRIDGE=$(V3F_ENABLE_RF_BRIDGE)
 DEFS += -DV3F_ENABLE_SPI_HOST_CMD=$(V3F_ENABLE_SPI_HOST_CMD)
+DEFS += -DV3F_ENABLE_USBFS_CDC_DEBUG=$(V3F_ENABLE_USBFS_CDC_DEBUG)
 DEFS += -DV3F_OUTPUT_MODE_DEFAULT=$(V3F_OUTPUT_MODE_DEFAULT)
 DEFS += -DV3F_ENABLE_USBFS_CDC=$(V3F_ENABLE_USBFS_CDC)
-DEFS += -DV3F_ENABLE_USBFS_CDC_TRACE=$(V3F_ENABLE_USBFS_CDC_TRACE)
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 DEFS += -DV3F_USBSS_OFFICIAL_OWNER=1
 endif
@@ -73,7 +76,7 @@ INC += -I"$(PROJECT_ROOT)/drivers/rgb1w_pioc/include"
 ifeq ($(V3F_ENABLE_USBHS_8K),1)
 INC += -I"$(PROJECT_ROOT)/drivers/usbhs_hid_nkro/include"
 INC += -I"$(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/include"
-ifneq ($(filter 1,$(V3F_ENABLE_USBFS_CDC) $(V3F_ENABLE_USBFS_CDC_TRACE)),)
+ifeq ($(V3F_ENABLE_USBFS_CDC),1)
 INC += -I"$(PROJECT_ROOT)/drivers/usbfs_hid_nkro/include"
 INC += -I"$(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/include"
 endif
@@ -89,12 +92,14 @@ endif
 # Source files
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_SRC += $(PROJECT_ROOT)/applications/board_init.c
+APP_SRC += $(PROJECT_ROOT)/applications/approval_mailbox.c
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_link.c
 APP_SRC += $(PROJECT_ROOT)/applications/half_state.c
 APP_SRC += $(PROJECT_ROOT)/applications/default_profile.c
 APP_SRC += $(PROJECT_ROOT)/applications/factory_profile_image.c
 APP_SRC += $(PROJECT_ROOT)/applications/profile_store.c
 APP_SRC += $(PROJECT_ROOT)/applications/profile_runtime.c
+APP_SRC += $(PROJECT_ROOT)/applications/profile_activate.c
 APP_SRC += $(PROJECT_ROOT)/applications/profile_sync.c
 APP_SRC += $(PROJECT_ROOT)/applications/pc_link.c
 APP_SRC += $(PROJECT_ROOT)/applications/rf_report_bridge.c
@@ -106,7 +111,7 @@ ifeq ($(V3F_ENABLE_USBHS_8K),1)
 APP_SRC += $(PROJECT_ROOT)/drivers/usbhs_hid_nkro/src/ch32h417_usbhs_hid_nkro.c
 APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/src/ch32h417_usbhs_device.c
 APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbhs_compat_hid/src/usb_desc.c
-ifneq ($(filter 1,$(V3F_ENABLE_USBFS_CDC) $(V3F_ENABLE_USBFS_CDC_TRACE)),)
+ifeq ($(V3F_ENABLE_USBFS_CDC),1)
 APP_SRC += $(PROJECT_ROOT)/drivers/usbfs_hid_nkro/src/ch32h417_usbfs_hid_nkro.c
 APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/src/ch32h417_usbfs_device.c
 APP_SRC += $(PROJECT_ROOT)/drivers/wch_usbfs_compat_hid/src/usbfs_desc.c

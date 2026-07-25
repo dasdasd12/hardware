@@ -199,7 +199,7 @@ uint32_t ch32h417_usbhs_hid_nkro_reports(void)
     return s_report_count;
 }
 
-uint8_t ch32h417_usbhs_hid_nkro_cdc_write(const char *line)
+uint8_t ch32h417_usbhs_hid_nkro_debug_write(const char *line)
 {
     (void)line;
     return 0U;

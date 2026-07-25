@@ -42,6 +42,9 @@ extern "C" {
 #define AIK_OUTPUT_MODE_BLE   2U
 
 #define AIK_SPI_FLAG_OUTPUT_MODE_MASK 0x03U
+#define AIK_SPI_FLAG_APPROVAL_ACTIVE       0x04U
+#define AIK_SPI_FLAG_APPROVAL_SELECTED_YES 0x08U
+#define AIK_SPI_FLAG_RIGHT_STATE_VALID     0x10U
 
 #define AIK_HALF_ID_LEFT 0U
 #define AIK_HALF_ID_RIGHT 1U
@@ -60,7 +63,9 @@ extern "C" {
 #define AIK_LEFT_LOCAL_BIT_SCR_CENTER 40U
 #define AIK_LEFT_LOCAL_BIT_SCR_WHEEL_UP   41U
 #define AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN 42U
-#define AIK_HALF_FRAME_BITS_LEFT      43U
+/* Center-only gesture after direction classification, held until release. */
+#define AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED 43U
+#define AIK_HALF_FRAME_BITS_LEFT      44U
 
 #define AIK_RIGHT_LOCAL_BIT_EC11_CW   41U
 #define AIK_RIGHT_LOCAL_BIT_EC11_CCW  42U
@@ -75,8 +80,8 @@ extern "C" {
 #define AIK_CONSUMER_USAGE_VOLUME_UP   0x00E9U
 #define AIK_CONSUMER_USAGE_VOLUME_DOWN 0x00EAU
 
-#define AIK_PROFILE_FACTORY_ID16         0x0C77U
-#define AIK_PROFILE_FACTORY_GENERATION16 1U
+#define AIK_PROFILE_DEBUG_ID16 0xA117U
+#define AIK_PROFILE_DEBUG_GENERATION16 1U
 
 #define AIK_PROFILE_STATUS_FLAG_VALID   0x01U
 #define AIK_PROFILE_STATUS_FLAG_DEFAULT 0x02U
@@ -434,15 +439,15 @@ static inline uint8_t aik_spi_profile_status_valid(
            (status->crc16 == aik_spi_profile_status_crc(status));
 }
 
-static inline uint8_t aik_spi_profile_status_matches_factory_profile(
+static inline uint8_t aik_spi_profile_status_matches_debug_profile(
     const aik_spi_profile_status_v1_t *status,
     uint8_t half_id)
 {
     return (aik_spi_profile_status_valid(status) != 0U) &&
            (status->half_id == half_id) &&
            ((status->flags & AIK_PROFILE_STATUS_FLAG_VALID) != 0U) &&
-            (status->profile_id16 == AIK_PROFILE_FACTORY_ID16) &&
-            (status->generation16 == AIK_PROFILE_FACTORY_GENERATION16);
+           (status->profile_id16 == AIK_PROFILE_DEBUG_ID16) &&
+           (status->generation16 == AIK_PROFILE_DEBUG_GENERATION16);
 }
 
 static inline uint8_t aik_spi_profile_status_active_slot(

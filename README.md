@@ -1,99 +1,137 @@
-# AI Keyboard Hardware
+# AI_keyb_wch Hardware
 
-本仓库包含 AI Keyboard 的产品固件和与芯片绑定的底层依赖。项目规格、原理图、引脚分配和发布文档以 [Docs-For-AI-Keyboard](https://github.com/dasdasd12/Docs-For-AI-Keyboard) 为准；本仓库只说明固件构建、烧录和联调入口。
+本仓库保存硬件侧主线固件、随固件管理的芯片底层依赖和本地自动化脚本。
 
-## V1.0 固件组成
+`main` 保持主线固件结构，不混入临时 bring-up 输出；硬件单项测试放在 `hardware-test` / `origin/test` 分支维护。`hardware-test` 必须保持包含 `main` 的代码，再额外保留测试工程、测试资产和测试检查脚本。硬件资料、规格书、原理图、LaTeX 和完整项目文档优先放在 [`dasdasd12/Docs-For-AI-Keyboard`](https://github.com/dasdasd12/Docs-For-AI-Keyboard)。
 
-V1.0 由三个独立 MCU 固件组成：
+## 关联仓库
 
-- H417 V3F：键盘主控，负责 USB、Profile 运行时、左右半键盘汇聚、RGB、旋钮和五向键。
-- 左 CH585：左半键盘扫描和 RF/BLE 无线链路。
-- 右 CH585：右半键盘扫描和 RF/BLE 无线链路。
+- [`dasdasd12/software`](https://github.com/dasdasd12/software)：本项目的软件侧关联仓库。
+- [`dasdasd12/Docs-For-AI-Keyboard`](https://github.com/dasdasd12/Docs-For-AI-Keyboard)：项目文档、原理图、规格书和设计资料主仓库。
 
-H417 的 USBFS HID 和 USBHS 通道可通过同一物理 USB 口工作。Profile 上传使用 H417 USBFS CDC 控制通道；不要用诊断串口代替该通道。
+## 目录原则
 
-## 目录
+- 顶层不维护通用 `basic/`。底层依赖必须跟随实际使用它的芯片固件目录。
+- H417 相关内容放在 `firmware/h417/`，H417 使用的 WCH 底层库放在 `firmware/h417/basic/wch/SRC/`。
+- CH585 相关内容进入 `firmware/ch585/`，CH585 底层依赖放在 `firmware/ch585/basic/` 下。
+- 主线产品驱动优先放在实际拥有它的固件目录；测试分支中可被同一芯片多个测试复用的驱动可以放在 `firmware/<chip>/drivers/`。
+- `hw_tests/` 只属于 `hardware-test` / `origin/test`，用于单项硬件验证代码和测试资产，不合入 `main`。
+- `docs/` 只保留早期设计和调研资料；芯片手册、屏幕规格书等用户手册不放在本仓库。
+- `build/`、`.wch-skill-logs/`、`.tmp_pdf_text/`、OpenOCD 日志和临时 dump 文件由 `.gitignore` 忽略，不属于仓库结构。
 
-```text
-firmware/
-  common/                         跨 MCU 的键盘、RF 和 Profile 协议
-  h417/
-    v3f/                           V3F 启动、平台代码和键盘主控应用
-      applications/               H417 V1.0 键盘功能
-    Makefile
-  ch585/
-    applications/                 左右半键盘扫描应用
-    tools/                         CH585 诊断工具
-    Makefile
-README.md
-```
-
-## 构建和烧录
-
-在仓库根目录构建产品固件：
-
-```powershell
-make -C firmware/h417 v3f_keyboard
-make -C firmware/ch585 half_scan_left_keyboard
-make -C firmware/ch585 half_scan_right_keyboard
-```
-
-对应产物：
+## 当前文件树
 
 ```text
-firmware/h417/build/V3F_keyboard/h417_V3F_keyboard.bin
-firmware/ch585/build/half_scan_left_keyboard/ch585_half_scan_left_keyboard.bin
-firmware/ch585/build/half_scan_right_keyboard/ch585_half_scan_right_keyboard.bin
+hardware/
+|-- firmware/
+|   |-- h417/
+|   |   |-- Makefile                       # H417 双核统一构建入口
+|   |   |-- basic/wch/SRC/                 # H417 固件本地依赖的 WCH 底层库
+|   |   |-- drivers/                       # hardware-test 分支共享测试驱动
+|   |   |   |-- gd5f1g_spi_nand/           # GD5F1G SPI-NAND 底层驱动与 H417 SPI1 适配
+|   |   |   |-- gpha_2d/                   # V5F GPHA 阻塞式 2D helper
+|   |   |   `-- ltdc_rgb/                  # RGB LCD/LTDC 面板与 framebuffer helper
+|   |   |-- v3f/                           # V3F 固件目标
+|   |   `-- v5f_rtthread/                  # V5F RT-Thread 固件目标
+|   `-- ch585/
+|       |-- Makefile
+|       |-- basic/wch/                     # CH585 WCH 底层库和 BLE/RF 库
+|       |-- applications/
+|       |-- bsp/
+|       `-- drivers/
+|-- hw_tests/                              # 仅 hardware-test/test 分支维护
+|   |-- h417/
+|   |   |-- Makefile
+|   |   `-- passed/
+|   |       |-- v3f_standalone/
+|   |       `-- v5f_rtthread/
+|   `-- ch585/
+|       |-- Makefile
+|       `-- src/
+|-- skills/
+|-- tools/                                 # hardware-test 中包含测试边界检查
+`-- README.md
 ```
 
-分别将 H417 主控、左 CH585 和右 CH585 的产物烧录到对应芯片。烧录后先确认键盘默认出厂 Profile 的按键行为正常，再进行运行时 Profile 验证。
+## H417 测试驱动
 
-诊断固件只用于定位问题，不是产品烧录目标：
+- `firmware/h417/drivers/ltdc_rgb/`：800x480 RGB 面板时序、PA9 DISP、PA10 CTRL、RGB565、L8+CLUT、旋转 framebuffer helper。驱动不分配 framebuffer，调用方负责内存。
+- `firmware/h417/drivers/gpha_2d/`：GPHA R2M 填充、L8 到 RGB565 PFC、ARGB4444 over RGB565 blend、L8 4-byte quad fill。GPHA 不能原生输出 L8，L8 fill 通过 ARGB8888 R2M 写 4 个相邻索引实现，x 和 width 必须 4 字节对齐。
+- `firmware/h417/drivers/gd5f1g_spi_nand/`：GD5F1G SPI-NAND core 和 CH32H417 SPI1 板级适配，只负责外置 NAND 的 ID、reset、feature、erase、program、read、坏块标记读取等底层操作。图片/LUT 写入读取属于当前硬件测试流程，不放入主驱动区。
 
-```powershell
-make -C firmware/ch585 half_scan_left_uart_diag
-make -C firmware/ch585 half_scan_right_uart_diag
+## 构建入口
+
+```bash
+# H417 双核主线固件
+make -B -C firmware/h417
+make -B -C firmware/h417 v3f
+make -B -C firmware/h417 v5f
+make -C firmware/h417 clean
+
+# CH585 RF basic smoke 固件
+make -B -C firmware/ch585
+make -C firmware/ch585 clean
+
+# H417 V5F 单项硬件测试，会同时生成 V3F 启动固件和 V5F 测试固件
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_ltdc
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_ltdc_l8_palette_image
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_ltdc_rgb565_diag
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_ltdc_ui_frames
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_flash
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_flash_l8_assets
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_gpha_r2m_fill
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_gpha_pfc_l8_rgb565
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_gpha_blend_rgb565
+make -B -C hw_tests/h417 HW_TEST=h417_v5f_gpha_l8_ltdc_fullscreen
+
+# H417 V3F standalone 单项测试
+make -B -C hw_tests/h417 HW_TEST=h417_ws2812
+make -B -C hw_tests/h417 HW_TEST=h417_lcd_backlight
+make -B -C hw_tests/h417 HW_TEST=h417_ltdc
+make -B -C hw_tests/h417 HW_TEST=h417_flash_image
+
+# 边界检查
+python tools/check_hw_tests.py
 ```
 
-## 运行时更新 Profile
+## 维护规则
 
-Profile JSON 的编译、上传和激活工具位于相邻的 `software` 仓库。以下命令从 `software` 根目录执行，并假设 H417 已烧录 `h417_V3F_keyboard.bin`、PC 已枚举到其 USBFS CDC 端口。
+- `main` 不保留 `hw_tests/` 和测试资产；`hardware-test` / `origin/test` 保持包含 `main`，再叠加测试工程。
+- 单项测试尽量保持一个硬件项一个 `HW_TEST`，可以共享 runner 和驱动，但不要让测试互相依赖。
+- 测试驱动要求即插即用：少依赖、不分配大块内存、头文件写清初始化顺序、内存归属和硬件限制。
+- V5F 测试资产放在 `hw_tests/h417/passed/v5f_rtthread/assets/`；不要放回 `firmware/h417/v5f_rtthread/applications/`。
+- 图片/LUT 存入外置 flash 只是当前通路验证测试，相关 manifest、LZSS、checksum 和 display flow 保留在 `hw_tests/`，不要抽象成主驱动接口。
+- 需要擦写 flash 的测试必须在测试代码和注释里明确说明擦写范围。
+- 移动文件时同步更新 README、Makefile 和自动化脚本。
 
-```powershell
-cd ..\software
-pip install -r src\bridge\requirements.txt
-$PORT = 'COM5'                    # 替换为 H417 USBFS CDC 的实际端口
-python scripts\upload-profile.py --port $PORT --info
+## 提交规范
+
+提交前先看 `git status --short`，确认没有误带本地日志、构建产物或其他分支的未完成改动。提交信息使用简短英文，推荐格式：
+
+```text
+type(scope): summary
 ```
 
-先从出厂 JSON 创建待修改的 Profile。编辑 `build\my_profile.json` 中需要变更的 `keymap` 项；例如为一个已知按键换成不同的键值，以便验证结果。
+示例：
 
-```powershell
-New-Item -ItemType Directory -Force build | Out-Null
-Copy-Item config\factory_default_profile.json build\my_profile.json
-# 编辑 build\my_profile.json
-
-# 上传到槽位 1，但暂不切换，避免上传失败影响当前键盘行为。
-python scripts\upload-profile.py --port $PORT --slot 1 --chunk 64 --no-activate build\my_profile.json
-python scripts\upload-profile.py --port $PORT --info
-
-# 确认 slots 中槽位 1 已存在后，激活它。
-python scripts\upload-profile.py --port $PORT --activate 1
-python scripts\upload-profile.py --port $PORT --info
+```text
+chore(h417): move basic library under firmware
+refactor(h417): split v5f hardware test drivers
+docs: update hardware tree overview
 ```
 
-验证顺序：确认改动的按键已生效，断开并重新上电后再次确认，并运行 `--info` 检查活动槽位仍为 `1`。恢复内置出厂 Profile：
+## Firmware hardware contract
 
-```powershell
-python scripts\upload-profile.py --port $PORT --factory
+`../latex/contest_report_template.tex` is the source of truth for board
+hardware. A default firmware path must not initialize or depend on a device,
+peripheral instance, pin role, or board resource that is not described there.
+
+Run this before changing default firmware hardware bring-up code:
+
+```bash
+python tools/check_firmware_hardware_contract.py
 ```
 
-要修改固件内置的出厂回退 Profile，而非运行时槽位，请编辑 `software\config\factory_default_profile.json`，执行 `python scripts\compile-factory-akpk.py`，然后重新构建并烧录 H417 固件。
-
-## 分支约定
-
-- `main` 只保留产品固件和必要工具。
-- `test` 包含 `main`，并额外承载单项硬件 bring-up、诊断资产和试验代码。
-- `build/`、日志、烧录工具输出和临时抓包文件不提交。
-
-提交前至少执行对应的三个产品构建目标，并检查 `git status --short`，避免把构建产物或本地日志带入提交。
+The check intentionally fails while default firmware still contains stale
+hardware assumptions, such as undeclared H417 UART8 console use, eval-board
+LED pins, fake CH585 halves, or old SPI fallback pins.

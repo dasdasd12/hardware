@@ -1,64 +1,41 @@
-$openocd = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\OpenOCD\OpenOCD\bin\openocd.exe"
-$ocdBin  = "C:\MounRiver\MounRiver_Studio2\resources\app\resources\win32\components\WCH\OpenOCD\OpenOCD\bin"
-$cfg     = "wch-dual-core.cfg"
+param([switch]$DryRun)
 
-$v5fElf = "build\V5F\rtthread_ch32h417_V5F.elf"
-$v3fElf = "build\V3F\h417_V3F.elf"
+$ErrorActionPreference = "Stop"
 
-Set-Location $PSScriptRoot
+$projectDir = $PSScriptRoot
+$flashHelper = Join-Path $projectDir `
+    "..\..\skills\wch-mrs-automation\scripts\wch-auto.ps1"
+$v3fImage = Join-Path $projectDir "build\V3F\h417_V3F.hex"
+$v5fImage = Join-Path $projectDir `
+    "build\V5F\rtthread_ch32h417_V5F.hex"
 
-function Quote-CmdArg([string]$arg) {
-    return '"' + ($arg -replace '"', '\"') + '"'
+foreach($path in @($flashHelper, $v3fImage, $v5fImage))
+{
+    if(-not (Test-Path -LiteralPath $path))
+    {
+        throw "Required production file was not found: $path"
+    }
 }
 
-if (!(Test-Path $v5fElf)) {
-    Write-Host "ERROR: V5F ELF not found: $v5fElf"
-    exit 1
-}
-
-if (!(Test-Path $v3fElf)) {
-    Write-Host "ERROR: V3F ELF not found: $v3fElf"
-    exit 1
-}
-
-$v5fElfArg = $v5fElf.Replace("\", "/")
-$v3fElfArg = $v3fElf.Replace("\", "/")
-$stdoutLog = "openocd_dual_flash.out.log"
-$stderrLog = "openocd_dual_flash.err.log"
-
-Write-Host "=== Flash V5F, flash V3F, then run V3F firmware ==="
-$openocdArgs = @(
-    "-s", $ocdBin,
-    "-f", $cfg,
-    "-c", "page_erase",
-    "-c", "init",
-    "-c", "targets wch_riscv.cpu.1",
-    "-c", "halt",
-    "-c", "program `"$v5fElfArg`" verify",
-    "-c", "targets wch_riscv.cpu.0",
-    "-c", "halt",
-    "-c", "program `"$v3fElfArg`" verify",
-    "-c", "reset run",
-    "-c", "shutdown"
+$arguments = @(
+    "-NoLogo",
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $flashHelper,
+    "-Action", "flash",
+    "-ProjectDir", $projectDir,
+    "-Chip", "CH32H417",
+    "-Core", "both",
+    "-ImagePathV3F", $v3fImage,
+    "-ImagePathV5F", $v5fImage
 )
-
-$cmdLine = (Quote-CmdArg $openocd) + " " +
-    (($openocdArgs | ForEach-Object { Quote-CmdArg $_ }) -join " ") +
-    " 1> " + (Quote-CmdArg $stdoutLog) +
-    " 2> " + (Quote-CmdArg $stderrLog)
-
-& "C:\Windows\System32\cmd.exe" /d /c $cmdLine
-$openocdExitCode = $LASTEXITCODE
-
-$ocdOut = Get-Content $stdoutLog -Raw
-$ocdErr = Get-Content $stderrLog -Raw
-if ($ocdOut) { Write-Host $ocdOut }
-if ($ocdErr) { Write-Host $ocdErr }
-
-if ($openocdExitCode -ne 0) {
-    Write-Host "ERROR: OpenOCD flash failed. See $stdoutLog and $stderrLog"
-    exit $openocdExitCode
+if($DryRun)
+{
+    $arguments += "-DryRun"
 }
 
-Write-Host "Done. V3F firmware should now be running and has started V5F."
-Write-Host "No H417 UART console is defined by the board hardware contract; use USB CDC after boot for firmware diagnostics."
+& powershell @arguments
+if($LASTEXITCODE -ne 0)
+{
+    exit $LASTEXITCODE
+}

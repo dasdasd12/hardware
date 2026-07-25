@@ -99,6 +99,29 @@ static int profile_apply_patch(mag_key_engine_t *engine,
     {
         return -1;
     }
+    if(((hdr->flags & AIK_HP_FLAG_HAS_DISPATCH77) != 0U) &&
+       (((uint32_t)hdr->dispatch_offset +
+         (AIK_KEY_COUNT_TOTAL * sizeof(aik_hp_key_output_t))) >
+        hdr->total_len))
+    {
+        return -1;
+    }
+    if(((hdr->flags & AIK_HP_FLAG_HAS_FN_DISPATCH77) != 0U) &&
+       (((hdr->flags & AIK_HP_FLAG_HAS_DISPATCH77) == 0U) ||
+        (hdr->fn_hold_key >= AIK_KEY_COUNT_TOTAL) ||
+        (((uint32_t)hdr->fn_dispatch_offset +
+          (AIK_KEY_COUNT_TOTAL * sizeof(aik_hp_key_output_t))) >
+         hdr->total_len)))
+    {
+        return -1;
+    }
+    if((hdr->local_count != 0U) &&
+       (((uint32_t)hdr->local_offset +
+         ((uint32_t)hdr->local_count * sizeof(aik_hp_local_entry_t))) >
+        hdr->total_len))
+    {
+        return -1;
+    }
 
     if(engine != 0)
     {
@@ -121,11 +144,7 @@ static int profile_apply_patch(mag_key_engine_t *engine,
             }
             else if(trig->mode == AIK_RT_MODE_DISABLED)
             {
-                /* No engine-level disable: park the press threshold
-                 * above full travel so the key can never fire. */
-                cfg.mode = MAG_KEY_MODE_STATIC;
-                cfg.press_pm = 2000U;
-                cfg.release_pm = 1999U;
+                cfg.mode = MAG_KEY_MODE_DISABLED;
             }
             else
             {
@@ -137,12 +156,13 @@ static int profile_apply_patch(mag_key_engine_t *engine,
 
     if((hdr->flags & AIK_HP_FLAG_HAS_DISPATCH77) != 0U)
     {
-        if((hdr->dispatch_offset +
-            (AIK_KEY_COUNT_TOTAL * 2U)) > hdr->total_len)
-        {
-            return -1;
-        }
         ch585_half_report_set_key_outputs(patch + hdr->dispatch_offset);
+    }
+    ch585_half_report_clear_fn_overlay();
+    if((hdr->flags & AIK_HP_FLAG_HAS_FN_DISPATCH77) != 0U)
+    {
+        ch585_half_report_set_fn_overlay(hdr->fn_hold_key,
+                                        patch + hdr->fn_dispatch_offset);
     }
 
     ch585_half_report_clear_locals();
@@ -390,16 +410,21 @@ static void profile_handle_chunk(const aik_spi_host_cmd_v1_t *cmd)
 
     aik_spi_host_cmd_get_payload(cmd, &chunk, sizeof(chunk));
 
-    if(chunk.offset == (uint16_t)(s_xfer.received_len - chunk.len))
+    if((chunk.len == 0U) ||
+       (chunk.len > AIK_SPI_PROFILE_CHUNK_DATA_MAX) ||
+       (((uint32_t)chunk.offset + chunk.len) > s_xfer.expected_len))
+    {
+        xfer_fail(AIK_SPI_XFER_ERR_RANGE);
+        return;
+    }
+    if((s_xfer.received_len >= chunk.len) &&
+       (chunk.offset == (uint16_t)(s_xfer.received_len - chunk.len)))
     {
         /* Duplicate of the chunk we already accepted (host retried the
          * command because the ack got lost): acknowledge idempotently. */
         return;
     }
-    if((chunk.len == 0U) ||
-       (chunk.len > AIK_SPI_PROFILE_CHUNK_DATA_MAX) ||
-       (chunk.offset != s_xfer.received_len) ||
-       ((uint16_t)(chunk.offset + chunk.len) > s_xfer.expected_len))
+    if(chunk.offset != s_xfer.received_len)
     {
         xfer_fail(AIK_SPI_XFER_ERR_RANGE);
         return;
@@ -419,7 +444,8 @@ static void profile_handle_commit(const aik_spi_host_cmd_v1_t *cmd,
     if((s_xfer.state != AIK_SPI_XFER_STATE_RECEIVING) ||
        (s_xfer.received_len != s_xfer.expected_len) ||
        (commit.total_len != s_xfer.expected_len) ||
-       (commit.slot_id != s_xfer.slot_id))
+       (commit.slot_id != s_xfer.slot_id) ||
+       (commit.patch_flags != s_xfer.patch_flags))
     {
         xfer_fail(AIK_SPI_XFER_ERR_STATE);
         return;
@@ -452,7 +478,8 @@ static void profile_handle_commit(const aik_spi_host_cmd_v1_t *cmd,
             return;
         }
         s_state.active_slot = s_xfer.slot_id;
-        if((s_xfer.patch_flags & AIK_SPI_PROFILE_FLAG_PERSIST) != 0U)
+        if(((s_xfer.patch_flags & AIK_SPI_PROFILE_FLAG_PERSIST) != 0U) ||
+           (s_xfer.slot_id == AIK_PROFILE_SLOT_FACTORY))
         {
             if(profile_meta_write(s_xfer.slot_id) != 0)
             {

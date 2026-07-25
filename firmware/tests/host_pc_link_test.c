@@ -10,6 +10,7 @@
  *       -I common -I h417/v3f/applications \
  *       tests/host_pc_link_test.c \
  *       h417/v3f/applications/pc_link.c \
+ *       h417/v3f/applications/profile_activate.c \
  *       h417/v3f/applications/profile_runtime.c \
  *       h417/v3f/applications/profile_sync.c \
  *       h417/v3f/applications/factory_profile_image.c \
@@ -21,6 +22,7 @@
 #include <string.h>
 
 #include "aik_profile_format.h"
+#include "approval_mailbox.h"
 #include "pc_link.h"
 #include "profile_runtime.h"
 #include "profile_store.h"
@@ -47,6 +49,104 @@ static uint8_t s_active_slot;
 static uint32_t s_staging_expected;
 static uint32_t s_staging_written;
 static uint8_t s_staging_active;
+static uint8_t s_fail_set_active;
+static uint32_t s_set_active_calls;
+
+/* Approval mailbox is hardware-fixed in product code.  This parser test
+ * stubs the public API so it never dereferences 0x20178800 on the host. */
+static uint8_t s_approval_active;
+static uint8_t s_approval_selected_yes;
+static uint8_t s_approval_risk;
+static uint8_t s_claude_state;
+static uint32_t s_approval_tag;
+static uint16_t s_approval_tool_len;
+static uint16_t s_approval_summary_len;
+static char s_approval_tool[AIK_APPROVAL_TOOL_MAX];
+static char s_approval_summary[AIK_APPROVAL_SUMMARY_MAX];
+
+void v3f_approval_mailbox_init(void)
+{
+    s_approval_active = 0u;
+    s_approval_selected_yes = 0u;
+    s_claude_state = AIK_CLAUDE_STATE_OFF;
+}
+
+uint8_t v3f_approval_mailbox_active(void)
+{
+    return s_approval_active;
+}
+
+uint8_t v3f_approval_mailbox_selected_yes(void)
+{
+    return s_approval_selected_yes;
+}
+
+void v3f_approval_mailbox_set_selected_yes(uint8_t selected_yes)
+{
+    s_approval_selected_yes = (uint8_t)(selected_yes != 0u);
+}
+
+int v3f_approval_mailbox_set_claude_state(uint8_t claude_state)
+{
+    if(claude_state > AIK_CLAUDE_STATE_DONE)
+    {
+        return V3F_APPROVAL_MAILBOX_ERR_PARAM;
+    }
+
+    s_claude_state = claude_state;
+    if(claude_state == AIK_CLAUDE_STATE_OFF)
+    {
+        s_approval_active = 0u;
+        s_approval_selected_yes = 0u;
+    }
+    return V3F_APPROVAL_MAILBOX_OK;
+}
+
+int v3f_approval_mailbox_show(uint32_t request_tag,
+                              uint8_t risk,
+                              const char *tool,
+                              uint16_t tool_len,
+                              const char *summary,
+                              uint16_t summary_len)
+{
+    if((risk > AIK_APPROVAL_RISK_MAX) ||
+       (tool_len > AIK_APPROVAL_TOOL_MAX) ||
+       (summary_len > AIK_APPROVAL_SUMMARY_MAX))
+    {
+        return V3F_APPROVAL_MAILBOX_ERR_PARAM;
+    }
+    memset(s_approval_tool, 0, sizeof(s_approval_tool));
+    memset(s_approval_summary, 0, sizeof(s_approval_summary));
+    if(tool_len != 0u)
+    {
+        memcpy(s_approval_tool, tool, tool_len);
+    }
+    if(summary_len != 0u)
+    {
+        memcpy(s_approval_summary, summary, summary_len);
+    }
+    s_approval_tag = request_tag;
+    s_approval_risk = risk;
+    s_approval_tool_len = tool_len;
+    s_approval_summary_len = summary_len;
+    s_approval_active = 1u;
+    s_approval_selected_yes = 0u;
+    return V3F_APPROVAL_MAILBOX_OK;
+}
+
+int v3f_approval_mailbox_clear(uint32_t request_tag)
+{
+    if(s_approval_active == 0u)
+    {
+        return V3F_APPROVAL_MAILBOX_ERR_STATE;
+    }
+    if(request_tag != s_approval_tag)
+    {
+        return V3F_APPROVAL_MAILBOX_ERR_TAG;
+    }
+    s_approval_active = 0u;
+    return V3F_APPROVAL_MAILBOX_OK;
+}
 
 const uint8_t *v3f_profile_store_slot_ptr(uint8_t slot_id)
 {
@@ -127,9 +227,14 @@ uint8_t v3f_profile_store_get_active_slot(void)
 
 int v3f_profile_store_set_active_slot(uint8_t slot_id)
 {
+    s_set_active_calls++;
     if(slot_id >= AIK_PROFILE_SLOT_COUNT_TOTAL)
     {
         return V3F_PROFILE_STORE_ERR_PARAM;
+    }
+    if(s_fail_set_active != 0U)
+    {
+        return V3F_PROFILE_STORE_ERR_FLASH;
     }
     s_active_slot = slot_id;
     return V3F_PROFILE_STORE_OK;
@@ -173,6 +278,15 @@ static const char *send(const char *line)
 static uint8_t reply_starts(const char *prefix)
 {
     return (uint8_t)(strncmp(s_reply, prefix, strlen(prefix)) == 0);
+}
+
+static void set_package_revision(uint8_t *pkg, uint32_t revision)
+{
+    aik_pkg_header_t *hdr = (aik_pkg_header_t *)pkg;
+
+    hdr->revision = revision;
+    hdr->package_crc32c = 0U;
+    hdr->package_crc32c = aik_crc32c(0U, pkg, hdr->total_size);
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,7 +333,9 @@ static void upload_package(const uint8_t *pkg, uint32_t len,
 
 int main(void)
 {
+    memset(s_slots, 0xFF, sizeof(s_slots));
     v3f_pc_link_set_writer(reply_capture);
+    v3f_approval_mailbox_init();
 
     CHECK(v3f_profile_runtime_init() == AIK_PROFILE_SLOT_FACTORY);
 
@@ -228,7 +344,126 @@ int main(void)
 
     send("AK INFO");
     CHECK(reply_starts("OK INFO active=0"));
-    CHECK(strstr(s_reply, "slots=000") != 0);
+    CHECK(strstr(s_reply, "slots=111") != 0);
+
+    /* Erased slots use the factory profile virtually; a non-erased package
+     * with a valid header but bad payload CRC is reported unavailable. */
+    memcpy(s_slots[1], g_v3f_factory_profile_image,
+           g_v3f_factory_profile_image_size);
+    s_slots[1][g_v3f_factory_profile_image_size / 2U] ^= 0x5AU;
+    send("AK INFO");
+    CHECK(strstr(s_reply, "slots=101") != 0);
+    memset(s_slots[1], 0xFF, sizeof(s_slots[1]));
+
+    send("AK CLAUDE STATE RUNNING");
+    CHECK(reply_starts("OK CLAUDE STATE RUNNING"));
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_RUNNING);
+
+    /* Strict approval SHOW parser: fixed tag/risk, printable ASCII hex,
+     * bounded tool/summary, No selected by default, and Claude state kept. */
+    send("AK APPROVAL SHOW 1234abcd 2 42617368 "
+         "52756e206d616b65202d42");
+    CHECK(reply_starts("OK APPROVAL SHOW 1234abcd"));
+    CHECK(s_approval_active == 1u);
+    CHECK(s_approval_selected_yes == 0u);
+    CHECK(s_approval_tag == 0x1234abcdu);
+    CHECK(s_approval_risk == 2u);
+    CHECK(s_approval_tool_len == 4u);
+    CHECK(memcmp(s_approval_tool, "Bash", 4u) == 0);
+    CHECK(s_approval_summary_len == 11u);
+    CHECK(memcmp(s_approval_summary, "Run make -B", 11u) == 0);
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_RUNNING);
+
+    send("AK CLAUDE STATE DONE");
+    CHECK(reply_starts("OK CLAUDE STATE DONE"));
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_DONE);
+    CHECK(s_approval_active == 1u);
+
+    send("AK APPROVAL SHOW 00000001 0 - -");
+    CHECK(reply_starts("OK APPROVAL SHOW 00000001"));
+    CHECK(s_approval_active == 1u);
+    CHECK(s_approval_selected_yes == 0u);
+    CHECK(s_approval_tool_len == 0u);
+    CHECK(s_approval_summary_len == 0u);
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_DONE);
+
+    send("AK APPROVAL SHOW 1234abc 2 - -");
+    CHECK(reply_starts("ERR 2 approval-show"));
+    send("AK APPROVAL SHOW 01234abcd 2 - -");
+    CHECK(reply_starts("ERR 2 approval-show"));
+    send("AK APPROVAL SHOW 1234abcd 22 - -");
+    CHECK(reply_starts("ERR 2 approval-show"));
+    send("AK APPROVAL SHOW 1234abcd g - -");
+    CHECK(reply_starts("ERR 2 approval-show"));
+    send("AK APPROVAL SHOW 1234abcd 2 4 -");
+    CHECK(reply_starts("ERR 2 approval-text"));
+    send("AK APPROVAL SHOW 1234abcd 2 0a -");
+    CHECK(reply_starts("ERR 2 approval-text"));
+    send("AK APPROVAL SHOW 1234abcd 2 - - extra");
+    CHECK(reply_starts("ERR 2 approval-show"));
+    {
+        char line[400];
+        uint16_t index;
+        int used = snprintf(line, sizeof(line),
+                            "AK APPROVAL SHOW 1234abcd 2 ");
+
+        for(index = 0u; index < (AIK_APPROVAL_TOOL_MAX + 1u); index++)
+        {
+            used += snprintf(&line[used],
+                             sizeof(line) - (size_t)used,
+                             "41");
+        }
+        (void)snprintf(&line[used], sizeof(line) - (size_t)used, " -");
+        send(line);
+        CHECK(reply_starts("ERR 4 approval-text"));
+    }
+    {
+        char line[400];
+        uint16_t index;
+        int used = snprintf(line, sizeof(line),
+                            "AK APPROVAL SHOW 1234abcd 2 - ");
+
+        for(index = 0u; index < (AIK_APPROVAL_SUMMARY_MAX + 1u); index++)
+        {
+            used += snprintf(&line[used],
+                             sizeof(line) - (size_t)used,
+                             "41");
+        }
+        send(line);
+        CHECK(reply_starts("ERR 4 approval-text"));
+    }
+
+    send("AK APPROVAL CLEAR 00000002");
+    CHECK(reply_starts("ERR 3 approval-tag"));
+    CHECK(s_approval_active == 1u);
+    send("AK APPROVAL CLEAR 00000001");
+    CHECK(reply_starts("OK APPROVAL CLEAR 00000001"));
+    CHECK(s_approval_active == 0u);
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_DONE);
+    send("AK APPROVAL CLEAR 00000001");
+    CHECK(reply_starts("ERR 3 approval-inactive"));
+    send("AK APPROVAL CLEAR 00000001 extra");
+    CHECK(reply_starts("ERR 2 approval-clear"));
+
+    send("AK APPROVAL SHOW 00000003 0 - -");
+    CHECK(reply_starts("OK APPROVAL SHOW 00000003"));
+    CHECK(s_approval_active == 1u);
+    send("AK CLAUDE STATE OFF");
+    CHECK(reply_starts("OK CLAUDE STATE OFF"));
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_OFF);
+    CHECK(s_approval_active == 0u);
+
+    send("AK CLAUDE STATE");
+    CHECK(reply_starts("ERR 2 claude-state"));
+    send("AK CLAUDE STATE RUNNING extra");
+    CHECK(reply_starts("ERR 2 claude-state"));
+    send("AK CLAUDE STATE running");
+    CHECK(reply_starts("ERR 4 claude-state"));
+    send("AK CLAUDE RUNNING");
+    CHECK(reply_starts("ERR 1 claude"));
+    send("AK CLAUDEX STATE RUNNING");
+    CHECK(reply_starts("ERR 1 cmd"));
+    CHECK(s_claude_state == AIK_CLAUDE_STATE_OFF);
 
     /* Bad requests. */
     send("AK BEGIN 0 100 0");
@@ -246,15 +481,83 @@ int main(void)
     CHECK(reply_starts("OK COMMIT 1"));
 
     send("AK INFO");
-    CHECK(strstr(s_reply, "slots=100") != 0);
+    CHECK(strstr(s_reply, "slots=111") != 0);
 
     send("AK ACTIVATE 1");
     CHECK(reply_starts("OK ACTIVATE 1"));
     CHECK(v3f_profile_runtime_get()->active_slot == 1U);
     CHECK(s_active_slot == 1U);
 
+    /* An unchanged package in the already-active slot is a true no-op:
+     * no metadata write and no release-to-rearm event. */
+    {
+        uint32_t calls = s_set_active_calls;
+
+        (void)v3f_profile_runtime_rearm_take();
+        send("AK ACTIVATE 1");
+        CHECK(reply_starts("OK ACTIVATE 1"));
+        CHECK(s_set_active_calls == calls);
+        CHECK(v3f_profile_runtime_rearm_take() == 0U);
+    }
+
+    /* Replacing the package in the current slot must still reload it;
+     * slot equality alone is not sufficient for the no-op decision. */
+    {
+        uint32_t calls = s_set_active_calls;
+        uint32_t next_revision =
+            v3f_profile_runtime_get()->revision + 1U;
+
+        set_package_revision(s_slots[0], next_revision);
+        send("AK ACTIVATE 1");
+        CHECK(reply_starts("OK ACTIVATE 1"));
+        CHECK(s_set_active_calls == (calls + 1U));
+        CHECK(v3f_profile_runtime_get()->revision == next_revision);
+        CHECK(v3f_profile_runtime_rearm_take() == 1U);
+    }
+
+    /* An erased user slot starts as a logical copy of Default and can be
+     * selected without first writing a package into flash. */
+    send("AK ACTIVATE 2");
+    CHECK(reply_starts("OK ACTIVATE 2"));
+    CHECK(v3f_profile_runtime_get()->active_slot == 2U);
+    CHECK(s_active_slot == 2U);
+    CHECK(s_slots[1][0] == 0xFFU);
+    CHECK(v3f_profile_runtime_rearm_take() == 1U);
+
+    /* Non-erased corrupt content is still rejected before either
+     * persistent or visible runtime state changes. */
+    {
+        v3f_profile_runtime_t before = *v3f_profile_runtime_get();
+        uint8_t active_before = s_active_slot;
+
+        s_slots[2][0] = 0U;
+        send("AK ACTIVATE 3");
+        CHECK(reply_starts("ERR 7"));
+        CHECK(memcmp(v3f_profile_runtime_get(), &before,
+                     sizeof(before)) == 0);
+        CHECK(s_active_slot == active_before);
+        CHECK(v3f_profile_runtime_rearm_take() == 0U);
+        memset(s_slots[2], 0xFF, sizeof(s_slots[2]));
+    }
+
+    /* Metadata failure is transactional as well: the fully parsed
+     * candidate must not become visible and must not arm rearm. */
+    {
+        v3f_profile_runtime_t before = *v3f_profile_runtime_get();
+        uint8_t active_before = s_active_slot;
+
+        s_fail_set_active = 1U;
+        send("AK ACTIVATE 3");
+        s_fail_set_active = 0U;
+        CHECK(reply_starts("ERR 5"));
+        CHECK(memcmp(v3f_profile_runtime_get(), &before,
+                     sizeof(before)) == 0);
+        CHECK(s_active_slot == active_before);
+        CHECK(v3f_profile_runtime_rearm_take() == 0U);
+    }
+
     /* Reboot: active slot restores from the (fake) store. */
-    CHECK(v3f_profile_runtime_init() == 1U);
+    CHECK(v3f_profile_runtime_init() == 2U);
 
     /* Out-of-order offset is rejected. */
     send("AK BEGIN 2 80 0");

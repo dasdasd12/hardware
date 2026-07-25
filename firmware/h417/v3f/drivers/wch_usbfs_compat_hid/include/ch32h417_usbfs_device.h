@@ -96,7 +96,7 @@ extern volatile uint8_t  USBFS_DevEnumStatus;
 /* Endpoint Buffer */
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP0_Buf[];
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP2_Buf[];
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
+#if V3F_ENABLE_USBFS_CDC_DEBUG
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP3_Buf[];
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP4_Buf[];
 #endif
@@ -112,9 +112,9 @@ extern void USBFS_Device_Init( FunctionalState sta );
 extern void USBFS_Device_Endp_Init(void);
 extern void USBFS_RCC_Init(void);
 extern void USBFS_Send_Resume(void);
-#if (V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE)
-extern uint8_t USBFS_CDC_Send(const uint8_t *data, uint16_t len);
-extern uint8_t USBFS_CDC_IsOpen(void);
+#if V3F_ENABLE_USBFS_CDC_DEBUG
+extern uint8_t USBFS_CDC_Debug_Send(const uint8_t *data, uint16_t len);
+extern uint8_t USBFS_CDC_Debug_IsOpen(void);
 #endif
 
 #ifdef __cplusplus

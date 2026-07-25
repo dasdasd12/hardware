@@ -3,6 +3,7 @@
 #include "ch32h417.h"
 #include "ch32h417_rcc.h"
 #include "ch32h417_pwr.h"
+#include "approval_mailbox.h"
 
 #define V3F_TRACE_BASE ((volatile uint32_t *)0x20178000u)
 #define V3F_TRACE_MAGIC 0x56334650u
@@ -41,14 +42,33 @@ void v3f_board_init(void)
     v3f_board_delay_cycles(10000U);
     V3F_TRACE_BASE[V3F_TRACE_VIO18_CTLR] = PWR->CTLR;
 
-#if V3F_WAKE_V5F
-    NVIC_WakeUp_V5F(V5F_START_ADDR);
-#endif
-
     V3F_TRACE_BASE[0] = V3F_TRACE_MAGIC;
     V3F_TRACE_BASE[1] = RCC->CFGR2;
     V3F_TRACE_BASE[2] = RCC->CTLR;
     V3F_TRACE_BASE[3] = RCC->HBPCENR;
+
+    /*
+     * Publish a valid inactive approval snapshot before V5F can start.
+     * The mailbox is NOLOAD shared SRAM, so retained power-on contents must
+     * never be interpreted as a live request.
+     */
+    v3f_approval_mailbox_init();
+}
+
+void v3f_board_start_v5f(void)
+{
+#if V3F_WAKE_V5F
+    /*
+     * V5F must already contain a valid image at V5F_START_ADDR.
+     * A V3F-only erase/program operation can leave this region blank; waking
+     * the secondary core in that state may destabilise shared chip resources,
+     * including USB. Use the production dual-core flash flow when this option
+     * is enabled.
+     */
+    /* Publish all V3F peripheral setup before V5F starts touching RCC/GPIO. */
+    __asm volatile("fence iorw, iorw" ::: "memory");
+    NVIC_WakeUp_V5F(V5F_START_ADDR);
+#endif
 }
 
 void v3f_board_delay_1ms(void)

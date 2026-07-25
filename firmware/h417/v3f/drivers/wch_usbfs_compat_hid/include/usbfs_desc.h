@@ -19,17 +19,13 @@
 /* file version */
 #define DEF_FILE_VERSION             0x01
 
-#ifndef V3F_ENABLE_USBFS_CDC
-#define V3F_ENABLE_USBFS_CDC         0
-#endif
-
-#ifndef V3F_ENABLE_USBFS_CDC_TRACE
-#define V3F_ENABLE_USBFS_CDC_TRACE   0
+#ifndef V3F_ENABLE_USBFS_CDC_DEBUG
+#define V3F_ENABLE_USBFS_CDC_DEBUG   0
 #endif
 
 /* usb device info define  */
 #define DEF_USB_VID                  0x1A86
-#if V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE
+#if V3F_ENABLE_USBFS_CDC_DEBUG
 #define DEF_USB_PID                  0xFE17
 #else
 #define DEF_USB_PID                  0xFE07
@@ -61,7 +57,7 @@
 /* LS end-point size */
 /* ... */
 
-#if V3F_ENABLE_USBFS_CDC || V3F_ENABLE_USBFS_CDC_TRACE
+#if V3F_ENABLE_USBFS_CDC_DEBUG
 #define DEF_USBD_HID_INTERFACE       0x02U
 #define DEF_USBD_HID_DESC_OFFSET     84U
 #else

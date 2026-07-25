@@ -45,6 +45,7 @@ RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
 #   ltdc  - full-screen L8 grayscale image LTDC framebuffer test
 #   ltdc_l8_palette_image - full-screen 256-color L8 palette image test
 #   ltdc_rgb565_diag - RGB565 direct-output diagnostic bands
+#   ltdc_ui_frames - three-frame Claude Code style L8 UI demo
 #   gpha_r2m_fill - GPHA register-to-memory fill animation
 #   gpha_pfc_l8_rgb565 - GPHA L8/CLUT to RGB565 pixel-format conversion
 #   gpha_blend_rgb565 - GPHA ARGB4444-over-RGB565 blend to RGB565
@@ -53,6 +54,8 @@ RTT_ROOT     := $(PROJECT_ROOT)/rt-thread
 #   flash_l8_assets - erase/write/read GD5F1G L8 image assets and display color L8
 #   tick_diag - V5F RT tick versus mcycle visual timing comparison
 #   ch585_spi_speed - CH585 SPI1 link SCK sweep with CDC debug output
+#   ch585_adc_key_cal - H417 USB CDC to CH585 single-key ADC calibration bridge
+#   sdram_official_16bit - WCH official FMC/SDRAM_16bit example init in hw_tests
 APP_V5F_HW_TEST ?= none
 APP_V5F_HW_TEST_ID := 0
 
@@ -91,19 +94,34 @@ APP_V5F_HW_TEST_ID := 7
 else ifeq ($(APP_V5F_HW_TEST),ch585_spi_speed)
 APP_ENABLE_V5F_HW_TEST := 1
 APP_V5F_HW_TEST_ID := 15
+else ifeq ($(APP_V5F_HW_TEST),ch585_adc_key_cal)
+APP_ENABLE_V5F_HW_TEST := 1
+APP_V5F_HW_TEST_ID := 16
+else ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
+APP_ENABLE_V5F_HW_TEST := 1
+APP_V5F_HW_TEST_ID := 17
+else ifeq ($(APP_V5F_HW_TEST),ltdc_ui_frames)
+APP_ENABLE_V5F_HW_TEST := 1
+APP_V5F_HW_TEST_ID := 18
 else
 $(error Unknown APP_V5F_HW_TEST '$(APP_V5F_HW_TEST)')
 endif
 
+ifeq ($(APP_V5F_HW_TEST),none)
+APP_ENABLE_V5F_DISPLAY ?= 1
+else
+APP_ENABLE_V5F_DISPLAY ?= 0
+endif
+
+ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
 ifneq ($(APP_V5F_HW_TEST),none)
+$(error APP_ENABLE_V5F_DISPLAY cannot be combined with APP_V5F_HW_TEST)
+endif
+endif
+
 APP_ENABLE_USB_TEST ?= 0
 APP_ENABLE_CH585_SPI_SCAN ?= 0
 APP_ENABLE_SERIAL_HEARTBEAT ?= 0
-else
-APP_ENABLE_USB_TEST ?= 1
-APP_ENABLE_CH585_SPI_SCAN ?= 1
-APP_ENABLE_SERIAL_HEARTBEAT ?= 1
-endif
 
 # Defines (only board-specific ones; RT-Thread config macros are in rtconfig.h)
 DEFS := -DCore_V5F -D__RT_KERNEL_SOURCE__ -D__RT_IPC_SOURCE__
@@ -122,6 +140,7 @@ DEFS += -DAPP_ENABLE_USB_TEST=$(APP_ENABLE_USB_TEST)
 DEFS += -DAPP_ENABLE_CH585_SPI_SCAN=$(APP_ENABLE_CH585_SPI_SCAN)
 DEFS += -DAPP_ENABLE_SERIAL_HEARTBEAT=$(APP_ENABLE_SERIAL_HEARTBEAT)
 DEFS += -DAPP_ENABLE_V5F_HW_TEST=$(APP_ENABLE_V5F_HW_TEST)
+DEFS += -DAPP_ENABLE_V5F_DISPLAY=$(APP_ENABLE_V5F_DISPLAY)
 DEFS += -DAPP_V5F_HW_TEST=$(APP_V5F_HW_TEST_ID)
 DEFS += -DAPP_V5F_HW_TEST_NAME=\"$(APP_V5F_HW_TEST)\"
 DEFS += -DAPP_ENABLE_USBSS_CDC=$(APP_ENABLE_USBSS_CDC)
@@ -138,6 +157,7 @@ DEFS += $(DEFS_EXTRA)
 # Include paths
 INC := -I"$(PROJECT_ROOT)" -I"$(PROJECT_ROOT)/bsp" -I"$(PROJECT_ROOT)/drivers" -I"$(PROJECT_ROOT)/libcpu"
 INC += -I"$(PROJECT_ROOT)/applications"
+INC += -I"../../common"
 INC += -I"$(RTT_ROOT)/include" -I"$(RTT_ROOT)/components/drivers/include"
 INC += -I"$(RTT_ROOT)/components/libc/compilers/common/include"
 INC += -I"$(RTT_ROOT)/components/libc/compilers/newlib"
@@ -148,6 +168,9 @@ ifneq ($(APP_V5F_HW_TEST),none)
 INC += -I"$(V5F_HW_TEST_ROOT)/include"
 INC += -I"$(HW_TEST_COMMON_ROOT)"
 INC += -I"$(V5F_HW_TEST_ASSET_ROOT)/ltdc" -I"$(V5F_HW_TEST_ASSET_ROOT)/flash"
+endif
+ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
+INC += -I"$(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit"
 endif
 
 # CherryUSB include paths
@@ -212,6 +235,9 @@ DRV_SRC := $(PROJECT_ROOT)/drivers/drv_gpio.c
 ifneq ($(APP_V5F_HW_TEST),none)
 DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_lcd_rgb_control.c
 DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_ltdc_rgb.c
+else ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
+DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_lcd_rgb_control.c
+DRV_SRC += $(LTDC_RGB_ROOT)/src/ch32h417_ltdc_rgb.c
 endif
 
 ifneq ($(filter $(APP_V5F_HW_TEST),gpha_r2m_fill gpha_pfc_l8_rgb565 gpha_blend_rgb565 gpha_l8_ltdc_fullscreen),)
@@ -223,13 +249,20 @@ DRV_SRC += $(FLASH_NAND_ROOT)/src/gd5f1g_spi_nand.c
 DRV_SRC += $(FLASH_NAND_ROOT)/src/ch32h417_gd5f1g_spi1.c
 endif
 
-ifeq ($(APP_V5F_HW_TEST),ch585_spi_speed)
+ifneq ($(filter $(APP_V5F_HW_TEST),ch585_spi_speed ch585_adc_key_cal),)
 DRV_SRC += $(CH585_SPI_LINK_ROOT)/src/ch32h417_ch585_spi_link.c
 endif
 
 # Application
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_ASM :=
+ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_display.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_ui_theme.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_competition_ui.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_claude_ui.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_approval_ui.c
+endif
 ifeq ($(APP_ENABLE_CH585_SPI_SCAN),1)
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_spi_scan.c
 APP_SRC += $(PROJECT_ROOT)/applications/keyboard_engine.c
@@ -247,8 +280,15 @@ endif
 ifneq ($(APP_V5F_HW_TEST),none)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/v5f_hw_test.c
 endif
+ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/hardware.c
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/h417_v5f_sdram_official_16bit_board.c
+endif
 ifeq ($(APP_V5F_HW_TEST),flash_l8_assets)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/gd5f1g_l8_asset_store.c
+endif
+ifeq ($(APP_V5F_HW_TEST),ltdc_ui_frames)
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/v5f_ltdc_ui_frames.c
 endif
 ifeq ($(APP_V5F_HW_TEST),ltdc)
 APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/ltdc/v5f_ltdc_gray_image.S

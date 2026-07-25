@@ -55,6 +55,10 @@ uint8_t ch32h417_pioc_rgb1w_send_sfr(const ch32h417_pioc_rgb1w_pin_t *pin,
                                      const uint8_t *data,
                                      uint16_t bytes,
                                      uint32_t timeout_loops);
+uint8_t ch32h417_pioc_rgb1w_start_ram(const ch32h417_pioc_rgb1w_pin_t *pin,
+                                      const uint8_t *data,
+                                      uint16_t bytes);
+uint8_t ch32h417_pioc_rgb1w_poll(uint8_t *result);
 uint8_t ch32h417_pioc_rgb1w_send_ram(const ch32h417_pioc_rgb1w_pin_t *pin,
                                      const uint8_t *data,
                                      uint16_t bytes,

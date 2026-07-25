@@ -41,6 +41,10 @@
 #define V3F_RGB_BOOT_RETRY_TICKS 256U
 #endif
 
+#ifndef V3F_RGB_ASYNC_TIMEOUT_POLLS
+#define V3F_RGB_ASYNC_TIMEOUT_POLLS 256U
+#endif
+
 #if V3F_ENABLE_RGB_STATUS
 #include "ch32h417_pioc_rgb1w.h"
 
@@ -53,6 +57,10 @@ static uint16_t s_rgb_boot_retry_ticks;
 static uint32_t s_rgb_render_count;
 static uint32_t s_rgb_error_count;
 static uint8_t s_rgb_last_result;
+static uint8_t s_rgb_in_flight;
+static uint8_t s_rgb_render_pending;
+static uint8_t s_rgb_pending_red_once;
+static uint16_t s_rgb_poll_count;
 #endif
 
 #if V3F_ENABLE_RGB_STATUS
@@ -127,11 +135,15 @@ static void rgb_fill(uint8_t red, uint8_t green, uint8_t blue)
     }
 }
 
-static void rgb_render(void)
+static void rgb_build_frame(uint8_t red_once)
 {
     uint16_t i;
 
-    if(s_rgb_enabled == 0U)
+    if(red_once != 0U)
+    {
+        rgb_fill(32U, 0U, 0U);
+    }
+    else if(s_rgb_enabled == 0U)
     {
         rgb_fill(0U, 0U, 0U);
     }
@@ -173,16 +185,72 @@ static void rgb_render(void)
             rgb_put(i, red, green, blue);
         }
     }
+}
 
-    s_rgb_last_result =
-        ch32h417_pioc_rgb1w_send_ram(&ch32h417_pioc_rgb1w_pin_pf13,
-                                     s_rgb_grb,
-                                     (uint16_t)sizeof(s_rgb_grb),
-                                     100000U);
-    s_rgb_render_count++;
-    if(s_rgb_last_result != CH32H417_PIOC_RGB1W_OK)
+static void rgb_record_result(uint8_t result)
+{
+    s_rgb_last_result = result;
+    if(result != CH32H417_PIOC_RGB1W_OK)
     {
         s_rgb_error_count++;
+    }
+}
+
+static void rgb_request_render(uint8_t red_once)
+{
+    s_rgb_render_pending = 1U;
+    s_rgb_pending_red_once = (red_once != 0U) ? 1U : 0U;
+}
+
+static void rgb_service(void)
+{
+    uint8_t result;
+
+    if(s_rgb_in_flight != 0U)
+    {
+        if(ch32h417_pioc_rgb1w_poll(&result) != 0U)
+        {
+            s_rgb_in_flight = 0U;
+            s_rgb_poll_count = 0U;
+            rgb_record_result(result);
+        }
+        else
+        {
+            if(s_rgb_poll_count < V3F_RGB_ASYNC_TIMEOUT_POLLS)
+            {
+                s_rgb_poll_count++;
+            }
+            if(s_rgb_poll_count >= V3F_RGB_ASYNC_TIMEOUT_POLLS)
+            {
+                ch32h417_pioc_rgb1w_halt();
+                s_rgb_in_flight = 0U;
+                s_rgb_poll_count = 0U;
+                rgb_record_result(CH32H417_PIOC_RGB1W_ERR_TIMEOUT);
+            }
+        }
+    }
+
+    if((s_rgb_in_flight != 0U) || (s_rgb_render_pending == 0U))
+    {
+        return;
+    }
+
+    rgb_build_frame(s_rgb_pending_red_once);
+    s_rgb_render_pending = 0U;
+    s_rgb_pending_red_once = 0U;
+    result =
+        ch32h417_pioc_rgb1w_start_ram(&ch32h417_pioc_rgb1w_pin_pf13,
+                                      s_rgb_grb,
+                                      (uint16_t)sizeof(s_rgb_grb));
+    s_rgb_render_count++;
+    if(result == CH32H417_PIOC_RGB1W_OK)
+    {
+        s_rgb_in_flight = 1U;
+        s_rgb_poll_count = 0U;
+    }
+    else
+    {
+        rgb_record_result(result);
     }
 }
 #endif
@@ -196,24 +264,16 @@ void v3f_rgb_status_init(void)
     }
     ch32h417_pioc_rgb1w_init(&ch32h417_pioc_rgb1w_pin_pf13);
     s_rgb_boot_retry_ticks = V3F_RGB_BOOT_RETRY_TICKS;
-    rgb_render();
+    rgb_request_render(0U);
+    rgb_service();
 #endif
 }
 
 void v3f_rgb_status_red_once(void)
 {
 #if V3F_ENABLE_RGB_STATUS
-    rgb_fill(32U, 0U, 0U);
-    s_rgb_last_result =
-        ch32h417_pioc_rgb1w_send_ram(&ch32h417_pioc_rgb1w_pin_pf13,
-                                     s_rgb_grb,
-                                     (uint16_t)sizeof(s_rgb_grb),
-                                     100000U);
-    s_rgb_render_count++;
-    if(s_rgb_last_result != CH32H417_PIOC_RGB1W_OK)
-    {
-        s_rgb_error_count++;
-    }
+    rgb_request_render(1U);
+    rgb_service();
 #endif
 }
 
@@ -221,7 +281,8 @@ void v3f_rgb_status_set_enabled(uint8_t enabled)
 {
 #if V3F_ENABLE_RGB_STATUS
     s_rgb_enabled = (enabled != 0U) ? 1U : 0U;
-    rgb_render();
+    rgb_request_render(0U);
+    rgb_service();
 #else
     (void)enabled;
 #endif
@@ -243,7 +304,8 @@ void v3f_rgb_status_next_effect(void)
         s_rgb_effect = 0U;
     }
     s_rgb_enabled = 1U;
-    rgb_render();
+    rgb_request_render(0U);
+    rgb_service();
 #endif
 }
 
@@ -253,6 +315,7 @@ void v3f_rgb_status_task(uint16_t tick)
     uint16_t elapsed = (uint16_t)(tick - s_rgb_last_tick);
     uint8_t boot_retry = (s_rgb_boot_retry_ticks != 0U) ? 1U : 0U;
 
+    rgb_service();
     if(elapsed < V3F_RGB_UPDATE_TICKS)
     {
         return;
@@ -268,12 +331,14 @@ void v3f_rgb_status_task(uint16_t tick)
     {
         if(boot_retry != 0U)
         {
-            rgb_render();
+            rgb_request_render(0U);
         }
-        return;
     }
-
-    rgb_render();
+    else
+    {
+        rgb_request_render(0U);
+    }
+    rgb_service();
 #else
     (void)tick;
 #endif

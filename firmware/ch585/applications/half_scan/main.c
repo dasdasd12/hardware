@@ -3,6 +3,8 @@
 
 #include <string.h>
 
+#include "aik_approval_control.h"
+#include "aik_host_shortcut.h"
 #include "aik_spi_protocol.h"
 #include "ch585_ads7948_mux_acq.h"
 #include "ch585_half_report.h"
@@ -39,16 +41,16 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_SPI_ACCEPT_HOST_CMD (CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE)
 #endif
 
-#ifndef CH585_HALF_SCAN_UART_DIAG
-#define CH585_HALF_SCAN_UART_DIAG 0
+#ifndef CH585_HALF_SCAN_DEBUG_UART
+#define CH585_HALF_SCAN_DEBUG_UART 0
 #endif
 
-#ifndef CH585_HALF_SCAN_UART_DIAG_BAUD
-#define CH585_HALF_SCAN_UART_DIAG_BAUD 921600U
+#ifndef CH585_HALF_SCAN_DEBUG_UART_BAUD
+#define CH585_HALF_SCAN_DEBUG_UART_BAUD 921600U
 #endif
 
-#ifndef CH585_HALF_SCAN_UART_DIAG_PERIOD_FRAMES
-#define CH585_HALF_SCAN_UART_DIAG_PERIOD_FRAMES 100U
+#ifndef CH585_HALF_SCAN_DEBUG_PERIOD_FRAMES
+#define CH585_HALF_SCAN_DEBUG_PERIOD_FRAMES 100U
 #endif
 
 #ifndef CH585_LOCAL_ROTARY_PULSE_FRAMES
@@ -72,7 +74,7 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #endif
 
 #ifndef CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES
-#define CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES 6U
+#define CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES 50U
 #endif
 
 #ifndef CH585_LOCAL_SWITCH_ENTER_PULSE_FRAMES
@@ -107,8 +109,8 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_LOCAL_SWITCH_GESTURE_ENTER   2U
 #define CH585_LOCAL_SWITCH_GESTURE_DIR     3U
 
-#if CH585_HALF_SCAN_UART_DIAG && !defined(DEBUG)
-#error CH585_HALF_SCAN_UART_DIAG requires DEBUG=Debug_UART1 or another WCH DEBUG UART.
+#if CH585_HALF_SCAN_DEBUG_UART && !defined(DEBUG)
+#error CH585_HALF_SCAN_DEBUG_UART requires DEBUG=Debug_UART1 or another WCH DEBUG UART.
 #endif
 
 static ch585_ads7948_mux_acq_t s_acq;
@@ -133,10 +135,10 @@ static uint8_t s_local_rotary_cw_frames;
 static uint8_t s_local_rotary_ccw_frames;
 static uint32_t s_local_rotary_cw_total;
 static uint32_t s_local_rotary_ccw_total;
-static uint8_t s_local_rotary_diag_last_raw_ab;
-static uint32_t s_local_rotary_diag_edge_count;
-static volatile uint32_t s_local_rotary_diag_irq_count;
-static volatile uint16_t s_local_rotary_diag_irq_flags;
+static uint8_t s_local_rotary_debug_last_raw_ab;
+static uint32_t s_local_rotary_debug_edge_count;
+static volatile uint32_t s_local_rotary_debug_irq_count;
+static volatile uint16_t s_local_rotary_debug_irq_flags;
 static int16_t s_local_mouse_wheel_pending;
 static uint8_t s_local_button_last_raw;
 static uint8_t s_local_button_stable;
@@ -216,11 +218,11 @@ static void half_scan_local_gpio_init(void)
     GPIOADigitalCfg(ENABLE, GPIO_Pin_7 | GPIO_Pin_10 | GPIO_Pin_11);
     GPIOBDigitalCfg(ENABLE, GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7);
     GPIOA_ModeCfg(GPIO_Pin_10 | GPIO_Pin_11, GPIO_ModeIN_PU);
-    s_local_rotary_diag_last_raw_ab = half_scan_read_rotary_raw_ab();
-    s_local_rotary_diag_edge_count = 0U;
-    s_local_rotary_diag_irq_count = 0U;
-    s_local_rotary_diag_irq_flags = 0U;
-#if CH585_HALF_SCAN_UART_DIAG
+    s_local_rotary_debug_last_raw_ab = half_scan_read_rotary_raw_ab();
+    s_local_rotary_debug_edge_count = 0U;
+    s_local_rotary_debug_irq_count = 0U;
+    s_local_rotary_debug_irq_flags = 0U;
+#if CH585_HALF_SCAN_DEBUG_UART
     GPIOA_ClearITFlagBit(GPIO_Pin_10 | GPIO_Pin_11);
     GPIOA_ITModeCfg(GPIO_Pin_10 | GPIO_Pin_11, GPIO_ITMode_FallEdge);
     PFIC_EnableIRQ(GPIO_A_IRQn);
@@ -286,12 +288,14 @@ static int8_t half_scan_take_local_mouse_wheel(void)
     if(s_local_mouse_wheel_pending > 0)
     {
         s_local_mouse_wheel_pending--;
-        return 1;
+        return ch585_half_report_mouse_wheel_step(
+            AIK_HP_SIGNAL_WHEEL_UP);
     }
     if(s_local_mouse_wheel_pending < 0)
     {
         s_local_mouse_wheel_pending++;
-        return -1;
+        return ch585_half_report_mouse_wheel_step(
+            AIK_HP_SIGNAL_WHEEL_DOWN);
     }
     return 0;
 }
@@ -346,10 +350,10 @@ static void half_scan_local_rotary_poll(void)
         (int8_t)CH585_LOCAL_ROTARY_QUAD_STEPS_PER_EVENT_RIGHT :
         (int8_t)CH585_LOCAL_ROTARY_QUAD_STEPS_PER_EVENT;
 
-    if(raw_ab != s_local_rotary_diag_last_raw_ab)
+    if(raw_ab != s_local_rotary_debug_last_raw_ab)
     {
-        s_local_rotary_diag_last_raw_ab = raw_ab;
-        s_local_rotary_diag_edge_count++;
+        s_local_rotary_debug_last_raw_ab = raw_ab;
+        s_local_rotary_debug_edge_count++;
     }
 
     s_local_rotary_last_ab = next_ab;
@@ -416,14 +420,38 @@ static void half_scan_apply_left_five_way(void)
 
     if(center == 0U)
     {
+        if((s_local_switch_gesture ==
+                CH585_LOCAL_SWITCH_GESTURE_PENDING) &&
+           (dirs == 0U))
+        {
+            /* Preserve a fast center-only tap that released during the
+             * direction-classification window. */
+            s_local_switch_enter_frames =
+                CH585_LOCAL_SWITCH_ENTER_PULSE_FRAMES;
+        }
+        else if(s_local_switch_gesture !=
+                CH585_LOCAL_SWITCH_GESTURE_NONE)
+        {
+            s_local_switch_enter_frames = 0U;
+        }
         s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_NONE;
         s_local_switch_guard_frames = 0U;
-        s_local_switch_enter_frames = 0U;
+        if(s_local_switch_enter_frames != 0U)
+        {
+            aik_spi_half_set_bit(
+                &s_tx_frame,
+                AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED);
+            aik_spi_half_set_bit(
+                &s_tx_frame,
+                AIK_LEFT_LOCAL_BIT_SCR_CENTER);
+            s_local_switch_enter_frames--;
+        }
         return;
     }
 
     if(s_local_switch_gesture == CH585_LOCAL_SWITCH_GESTURE_NONE)
     {
+        s_local_switch_enter_frames = 0U;
         s_local_switch_gesture = CH585_LOCAL_SWITCH_GESTURE_PENDING;
         s_local_switch_guard_frames = CH585_LOCAL_SWITCH_ENTER_GUARD_FRAMES;
     }
@@ -448,6 +476,9 @@ static void half_scan_apply_left_five_way(void)
 
     if(s_local_switch_gesture == CH585_LOCAL_SWITCH_GESTURE_ENTER)
     {
+        aik_spi_half_set_bit(
+            &s_tx_frame,
+            AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED);
         if(s_local_switch_enter_frames != 0U)
         {
             aik_spi_half_set_bit(&s_tx_frame, AIK_LEFT_LOCAL_BIT_SCR_CENTER);
@@ -628,14 +659,52 @@ static void half_scan_prepare_profile_xfer(void)
 }
 
 #if CH585_BLE_HID_ENABLE
+static uint8_t half_scan_nkro_usage_down(
+    const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
+    uint8_t usage)
+{
+    uint8_t bit_index;
+    uint8_t byte_index;
+
+    if((usage < 0x04U) || (usage > 0x73U))
+    {
+        return 0U;
+    }
+    bit_index = (uint8_t)(usage - 0x04U);
+    byte_index = (uint8_t)(2U + (bit_index >> 3));
+    if(byte_index >= AIK_NKRO_REPORT_BYTES)
+    {
+        return 0U;
+    }
+    return (uint8_t)(
+        (nkro16[byte_index] >> (bit_index & 7U)) & 1U);
+}
+
 static void half_scan_nkro16_to_boot8(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
                                       uint8_t boot8[BLE_HID_KBD_REPORT_LEN])
 {
+    static const uint8_t priority_usages[3] = {
+        AIK_APPROVAL_CONTROL_HID_USAGE_YES,
+        AIK_APPROVAL_CONTROL_HID_USAGE_NO,
+        AIK_HOST_SHORTCUT_HID_USAGE_F24
+    };
     uint8_t byte_index;
     uint8_t out_index = 2U;
+    uint8_t priority_index;
 
     memset(boot8, 0, BLE_HID_KBD_REPORT_LEN);
     boot8[0] = nkro16[0];
+    for(priority_index = 0U;
+        (priority_index < 3U) &&
+        (out_index < BLE_HID_KBD_REPORT_LEN);
+        priority_index++)
+    {
+        if(half_scan_nkro_usage_down(
+               nkro16, priority_usages[priority_index]) != 0U)
+        {
+            boot8[out_index++] = priority_usages[priority_index];
+        }
+    }
 
     for(byte_index = 2U;
         (byte_index < AIK_NKRO_REPORT_BYTES) && (out_index < BLE_HID_KBD_REPORT_LEN);
@@ -648,8 +717,15 @@ static void half_scan_nkro16_to_boot8(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES
         {
             if((bits & (uint8_t)(1U << bit)) != 0U)
             {
-                boot8[out_index++] =
+                uint8_t usage =
                     (uint8_t)(0x04U + ((byte_index - 2U) * 8U) + bit);
+
+                if((usage != AIK_APPROVAL_CONTROL_HID_USAGE_YES) &&
+                   (usage != AIK_APPROVAL_CONTROL_HID_USAGE_NO) &&
+                   (usage != AIK_HOST_SHORTCUT_HID_USAGE_F24))
+                {
+                    boot8[out_index++] = usage;
+                }
             }
         }
     }
@@ -763,7 +839,12 @@ static void half_scan_set_output_mode(uint8_t mode)
     else
     {
 #if CH585_RF_TX_ENABLE
-        ch585_rf_nkro_tx_set_enabled(0U);
+        /*
+         * Do not spend the RF release burst between the SPI command and
+         * its response. TMR0 sends those zero reports in the background
+         * after this command has returned to the link loop.
+         */
+        ch585_rf_nkro_tx_disable_async();
 #endif
 #if CH585_BLE_HID_ENABLE
         BLE_HID_SetEnabled(0U);
@@ -857,15 +938,29 @@ static void half_scan_apply_host_cmd(void)
     if((s_rx_cmd.cmd >= AIK_SPI_CMD_PROFILE_BEGIN) &&
        (s_rx_cmd.cmd <= AIK_SPI_CMD_PROFILE_GET_XFER))
     {
-        ch585_profile_handle_transfer_cmd(&s_rx_cmd, &s_engine);
-        if((s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_COMMIT) ||
-           (s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_SET_ACTIVE))
+        uint8_t activates = (uint8_t)(
+            s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_SET_ACTIVE);
+
+        if(s_rx_cmd.cmd == AIK_SPI_CMD_PROFILE_COMMIT)
         {
+            aik_spi_profile_commit_v1_t commit;
+
+            aik_spi_host_cmd_get_payload(&s_rx_cmd, &commit,
+                                         sizeof(commit));
+            activates = (uint8_t)(
+                (commit.patch_flags &
+                 AIK_SPI_PROFILE_FLAG_ACTIVATE) != 0U);
+        }
+        ch585_profile_handle_transfer_cmd(&s_rx_cmd, &s_engine);
+        half_scan_prepare_profile_xfer();
+        if((activates != 0U) &&
+           (s_profile_xfer.state == AIK_SPI_XFER_STATE_DONE))
+        {
+            s_local_mouse_wheel_pending = 0;
             ch585_half_report_arm_release_gate(
                 &s_tx_frame,
                 s_right_frame_valid ? &s_right_frame : 0);
         }
-        half_scan_prepare_profile_xfer();
         return;
     }
 
@@ -892,17 +987,45 @@ static void half_scan_apply_host_cmd(void)
     else if(s_rx_cmd.cmd == AIK_SPI_CMD_PUSH_RIGHT_STATE)
     {
         aik_spi_half_state_v1_t next_right;
+        uint8_t right_state_valid;
         uint8_t output_mode = half_scan_host_output_mode(s_rx_cmd.cmd,
                                                          s_rx_cmd.flags);
 
         memcpy(&next_right, s_rx_cmd.nkro16, sizeof(next_right));
         if(aik_spi_half_state_valid(&next_right) == 0U)
         {
+            ch585_half_report_set_approval_context(
+                (uint8_t)(
+                    (s_rx_cmd.flags &
+                     AIK_SPI_FLAG_APPROVAL_ACTIVE) != 0U),
+                (uint8_t)(
+                    (s_rx_cmd.flags &
+                     AIK_SPI_FLAG_APPROVAL_SELECTED_YES) != 0U),
+                0U);
+            s_right_frame_valid = 0U;
+            ch585_half_report_build_nkro16(
+                &s_tx_frame, 0, s_rf_nkro16);
+            half_scan_output_nkro16(
+                s_rf_nkro16,
+                AIK_CONSUMER_USAGE_NONE,
+                0,
+                0,
+                s_rx_cmd.host_seq,
+                output_mode);
             return;
         }
 
+        right_state_valid = (uint8_t)(
+            (s_rx_cmd.flags & AIK_SPI_FLAG_RIGHT_STATE_VALID) != 0U);
+        ch585_half_report_set_approval_context(
+            (uint8_t)(
+                (s_rx_cmd.flags & AIK_SPI_FLAG_APPROVAL_ACTIVE) != 0U),
+            (uint8_t)(
+                (s_rx_cmd.flags &
+                 AIK_SPI_FLAG_APPROVAL_SELECTED_YES) != 0U),
+            right_state_valid);
         s_right_frame = next_right;
-        s_right_frame_valid = 1U;
+        s_right_frame_valid = right_state_valid;
         ch585_half_report_build_nkro16(&s_tx_frame,
                                        s_right_frame_valid ? &s_right_frame : 0,
                                        s_rf_nkro16);
@@ -919,18 +1042,18 @@ static void half_scan_apply_host_cmd(void)
 #endif
 }
 
-#if CH585_HALF_SCAN_UART_DIAG
-static void half_scan_uart_diag_init(void)
+#if CH585_HALF_SCAN_DEBUG_UART
+static void half_scan_debug_uart_init(void)
 {
     GPIOPinRemap(DISABLE, RB_PIN_UART1);
     GPIOA_SetBits(GPIO_Pin_9);
     GPIOA_ModeCfg(GPIO_Pin_8, GPIO_ModeIN_PU);
     GPIOA_ModeCfg(GPIO_Pin_9, GPIO_ModeOut_PP_5mA);
     UART1_DefInit();
-    UART1_BaudRateCfg(CH585_HALF_SCAN_UART_DIAG_BAUD);
+    UART1_BaudRateCfg(CH585_HALF_SCAN_DEBUG_UART_BAUD);
 }
 
-static uint8_t half_scan_uart_diag_first_down(uint8_t key_count)
+static uint8_t half_scan_debug_first_down(uint8_t key_count)
 {
     uint8_t key;
 
@@ -944,16 +1067,16 @@ static uint8_t half_scan_uart_diag_first_down(uint8_t key_count)
     return 0xFFU;
 }
 
-static void half_scan_uart_diag_poll(uint8_t key_count)
+static void half_scan_debug_poll(uint8_t key_count)
 {
     ch585_spi0_slave_link_stats_t spi_stats;
     uint16_t host_crc;
     uint16_t host_calc_crc;
     int8_t mouse_wheel_now;
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
-    int8_t last_output_mouse_wheel_diag = s_last_output_mouse_wheel;
+    int8_t last_output_mouse_wheel_debug = s_last_output_mouse_wheel;
 #else
-    int8_t last_output_mouse_wheel_diag = 0;
+    int8_t last_output_mouse_wheel_debug = 0;
 #endif
     uint8_t key;
     uint8_t rotary_ab;
@@ -968,7 +1091,7 @@ static void half_scan_uart_diag_poll(uint8_t key_count)
     uint8_t host_ok = 0U;
 #endif
 
-    if((s_tx_frame.half_seq % CH585_HALF_SCAN_UART_DIAG_PERIOD_FRAMES) != 0U)
+    if((s_tx_frame.half_seq % CH585_HALF_SCAN_DEBUG_PERIOD_FRAMES) != 0U)
     {
         return;
     }
@@ -1016,7 +1139,7 @@ static void half_scan_uart_diag_poll(uint8_t key_count)
           (unsigned int)s_tx_frame.down_bits[3],
           (unsigned int)s_tx_frame.down_bits[4],
           (unsigned int)s_tx_frame.down_bits[5],
-          (unsigned int)half_scan_uart_diag_first_down(key_count),
+          (unsigned int)half_scan_debug_first_down(key_count),
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
           (unsigned int)s_output_mode,
 #else
@@ -1036,9 +1159,9 @@ static void half_scan_uart_diag_poll(uint8_t key_count)
           (unsigned int)host_crc,
           (unsigned int)host_calc_crc,
           (unsigned int)rotary_raw_ab,
-          (unsigned long)s_local_rotary_diag_edge_count,
-          (unsigned long)s_local_rotary_diag_irq_count,
-          (unsigned int)s_local_rotary_diag_irq_flags,
+          (unsigned long)s_local_rotary_debug_edge_count,
+          (unsigned long)s_local_rotary_debug_irq_count,
+          (unsigned int)s_local_rotary_debug_irq_flags,
           (unsigned int)rotary_ab,
           (int)s_local_rotary_accum,
           (unsigned int)s_local_rotary_cw_frames,
@@ -1047,7 +1170,7 @@ static void half_scan_uart_diag_poll(uint8_t key_count)
           (unsigned long)s_local_rotary_ccw_total,
           (int)mouse_wheel_now,
           (int)s_local_mouse_wheel_pending,
-          (int)last_output_mouse_wheel_diag);
+          (int)last_output_mouse_wheel_debug);
 #if CH585_BLE_HID_ENABLE
     PRINT("ble conn=%u sent=%lu drop=%lu boot=%02x %02x %02x %02x %02x %02x %02x %02x\r\n",
           (unsigned int)BLE_HID_IsConnected(),
@@ -1064,11 +1187,11 @@ static void half_scan_uart_diag_poll(uint8_t key_count)
 #endif
 }
 #else
-static void half_scan_uart_diag_init(void)
+static void half_scan_debug_uart_init(void)
 {
 }
 
-static void half_scan_uart_diag_poll(uint8_t key_count)
+static void half_scan_debug_poll(uint8_t key_count)
 {
     (void)key_count;
 }
@@ -1081,14 +1204,14 @@ static void half_scan_init(void)
 
     HSECFG_Capacitance(HSECap_18p);
     SetSysClock(SYSCLK_FREQ);
-    half_scan_uart_diag_init();
-    PRINT("half_scan start half=%u sys=%lu keys=%u rf=%u ble=%u uart_diag=%u\r\n",
+    half_scan_debug_uart_init();
+    PRINT("half_scan start half=%u sys=%lu keys=%u rf=%u ble=%u uart_dbg=%u\r\n",
           (unsigned int)CH585_HALF_ID,
           (unsigned long)GetSysClock(),
           (unsigned int)aik_spi_half_key_count((uint8_t)CH585_HALF_ID),
           (unsigned int)CH585_RF_TX_ENABLE,
           (unsigned int)CH585_BLE_HID_ENABLE,
-          (unsigned int)CH585_HALF_SCAN_UART_DIAG);
+          (unsigned int)CH585_HALF_SCAN_DEBUG_UART);
 #if CH585_BLE_PAIRING_EXT_EEPROM
     /* SNV callbacks hit the external EEPROM as soon as the BLE stack
      * starts; bring the I2C bus up first. */
@@ -1157,7 +1280,7 @@ static void half_scan_init(void)
     half_scan_build_frame();
 }
 
-#if CH585_HALF_SCAN_UART_DIAG
+#if CH585_HALF_SCAN_DEBUG_UART
 __INTERRUPT
 void GPIOA_IRQHandler(void)
 {
@@ -1166,8 +1289,8 @@ void GPIOA_IRQHandler(void)
 
     if(rotary_flags != 0U)
     {
-        s_local_rotary_diag_irq_count++;
-        s_local_rotary_diag_irq_flags |= rotary_flags;
+        s_local_rotary_debug_irq_count++;
+        s_local_rotary_debug_irq_flags |= rotary_flags;
     }
 
     if(flags != 0U)
@@ -1219,7 +1342,7 @@ int main(void)
         half_scan_compact_raw(&s_acq, s_compact_raw, key_count);
         (void)mag_key_engine_update(&s_engine, s_compact_raw);
         half_scan_build_frame();
-        half_scan_uart_diag_poll(key_count);
+        half_scan_debug_poll(key_count);
 #if CH585_RF_TX_ENABLE
         ch585_rf_nkro_tx_poll();
 #elif CH585_BLE_HID_ENABLE

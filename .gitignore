@@ -83,3 +83,8 @@ ocd_*.txt
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Python test/runtime caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

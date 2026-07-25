@@ -40,7 +40,7 @@ uint8_t ch32h417_usbfs_hid_nkro_submit(const uint8_t nkro16[AIK_NKRO_REPORT_BYTE
 uint8_t ch32h417_usbfs_hid_nkro_submit_consumer(uint16_t usage);
 uint8_t ch32h417_usbfs_hid_nkro_submit_mouse_wheel(int8_t wheel);
 uint32_t ch32h417_usbfs_hid_nkro_reports(void);
-uint8_t ch32h417_usbfs_hid_nkro_cdc_write(const char *line);
+uint8_t ch32h417_usbfs_hid_nkro_debug_write(const char *line);
 void ch32h417_usbfs_hid_nkro_diag_snapshot(ch32h417_usbfs_hid_nkro_diag_t *diag);
 
 #endif
