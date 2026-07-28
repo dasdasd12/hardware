@@ -9,7 +9,6 @@ typedef struct
     uint32_t ok_frames;
     uint32_t link_errors;
     uint32_t invalid_frames;
-    uint32_t command_phase_frames;
     uint16_t last_seq;
     uint8_t last_magic;
     uint8_t last_type;
@@ -31,8 +30,8 @@ uint8_t v3f_ch585_link_query_profile_status(
     uint8_t half_id,
     uint16_t host_seq,
     aik_spi_profile_status_v1_t *out);
-/* Send one AIK_SPI_CMD_PROFILE_* command and read one transfer response.
- * A later caller retries the command if the half was not ready for it. */
+/* Send one AIK_SPI_CMD_PROFILE_* command and read back the transfer
+ * acknowledge frame (retrying the read while the half prepares it). */
 uint8_t v3f_ch585_link_profile_cmd(uint8_t half_id,
                                    const aik_spi_host_cmd_v1_t *cmd,
                                    aik_spi_profile_xfer_v1_t *out);
