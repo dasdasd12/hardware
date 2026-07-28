@@ -45,6 +45,11 @@ extern tmosTaskID halTaskID;
 extern void HAL_Init(void);
 
 /**
+ * @brief   Enable periodic radio calibration while a wireless output is active.
+ */
+extern void HAL_RadioCalibrationSetEnabled(uint8_t enabled);
+
+/**
  * @brief   硬件层事务处理
  *
  * @param   task_id - The TMOS assigned task ID.

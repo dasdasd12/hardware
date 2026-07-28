@@ -16,6 +16,7 @@
 
 tmosTaskID halTaskID;
 uint32_t g_LLE_IRQLibHandlerLocation;
+static uint8_t s_radio_calibration_enabled = 1U;
 /*******************************************************************************
  * @fn      Lib_Calibration_LSI
  *
@@ -246,6 +247,10 @@ tmosEvents HAL_ProcessEvent(tmosTaskID task_id, tmosEvents events)
     {
         uint8_t x32Kpw;
 #if(defined BLE_CALIBRATION_ENABLE) && (BLE_CALIBRATION_ENABLE == TRUE) // У׼���񣬵���У׼��ʱС��10ms
+        if(s_radio_calibration_enabled == 0U)
+        {
+            return events ^ HAL_REG_INIT_EVENT;
+        }
 #ifndef RF_8K
         BLE_RegInit();                                                  // У׼RF����ر�RF���ı�RF��ؼĴ��������ʹ����RF�շ�������ע��У׼������������
 #endif
@@ -296,6 +301,32 @@ void HAL_Init()
     tmos_start_task(halTaskID, HAL_REG_INIT_EVENT, 800); // ����У׼����500ms����������У׼��ʱС��10ms
 #endif
 //    tmos_start_task( halTaskID, HAL_TEST_EVENT, 1600 );    // ����һ����������
+}
+
+void HAL_RadioCalibrationSetEnabled(uint8_t enabled)
+{
+#if(defined BLE_CALIBRATION_ENABLE) && (BLE_CALIBRATION_ENABLE == TRUE)
+    uint8_t next = (enabled != 0U) ? 1U : 0U;
+
+    if(next == s_radio_calibration_enabled)
+    {
+        return;
+    }
+
+    s_radio_calibration_enabled = next;
+    (void)tmos_stop_task(halTaskID, HAL_REG_INIT_EVENT);
+    (void)tmos_clear_event(halTaskID, HAL_REG_INIT_EVENT);
+    if(next != 0U)
+    {
+        /*
+         * Never calibrate synchronously inside an SPI mode command.
+         * Resume after the boot delay so the current reply can finish.
+         */
+        (void)tmos_start_task(halTaskID, HAL_REG_INIT_EVENT, 800U);
+    }
+#else
+    (void)enabled;
+#endif
 }
 
 /*******************************************************************************

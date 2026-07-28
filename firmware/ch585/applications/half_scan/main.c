@@ -817,6 +817,11 @@ static void half_scan_set_output_mode(uint8_t mode)
         return;
     }
 
+#if CH585_BLE_HID_ENABLE
+    /* Pause calibration before every handoff; wireless resumes below. */
+    HAL_RadioCalibrationSetEnabled(0U);
+#endif
+
     if(mode == AIK_OUTPUT_MODE_RF24)
     {
 #if CH585_BLE_HID_ENABLE
@@ -850,6 +855,14 @@ static void half_scan_set_output_mode(uint8_t mode)
         BLE_HID_SetEnabled(0U);
 #endif
     }
+
+#if CH585_BLE_HID_ENABLE
+    if(mode != AIK_OUTPUT_MODE_USBHS)
+    {
+        /* Resume later; never run calibration inside this SPI command. */
+        HAL_RadioCalibrationSetEnabled(1U);
+    }
+#endif
 
 #if CH585_BLE_HID_ENABLE
     if(mode != AIK_OUTPUT_MODE_BLE)
