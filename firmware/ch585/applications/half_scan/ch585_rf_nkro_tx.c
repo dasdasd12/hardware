@@ -19,6 +19,7 @@
 #define RF_TX_TARGET_ID     0
 #define RF_RELEASE_BURST_FRAMES 4U
 #define RF_RELEASE_FRAME_GAP_MS 2U
+#define RF_IDLE_WAIT_TIMEOUT_MS 20U
 
 static tmosTaskID s_rf_task_id;
 static rfRoleParam_t s_rf_param;
@@ -155,6 +156,21 @@ static void rf_send_release_burst(void)
         mDelaymS(RF_RELEASE_FRAME_GAP_MS);
         TMOS_SystemProcess();
     }
+}
+
+static uint8_t rf_wait_idle(uint16_t timeout_ms)
+{
+    while(RFRole_GetStatus(RF_TX_TARGET_ID) != 0U)
+    {
+        if(timeout_ms == 0U)
+        {
+            return 0U;
+        }
+        TMOS_SystemProcess();
+        mDelaymS(1);
+        timeout_ms--;
+    }
+    return 1U;
 }
 
 static void rf_process_callback(rfRole_States_t state, uint8_t id)
@@ -342,6 +358,12 @@ void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
         if(s_enabled != 0U)
         {
             rf_send_release_burst();
+            /* Finish the release burst before BLE takes ownership of RFIP. */
+            if(rf_wait_idle(RF_IDLE_WAIT_TIMEOUT_MS) == 0U)
+            {
+                PRINT("half_scan rf idle timeout status=%08lx\r\n",
+                      (unsigned long)RFRole_GetStatus(RF_TX_TARGET_ID));
+            }
         }
         s_enabled = 0U;
         (void)RFRole_Stop();

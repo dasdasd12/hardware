@@ -1138,7 +1138,7 @@ static void half_scan_debug_poll(uint8_t key_count)
     mouse_wheel_now =
         ch585_half_report_mouse_wheel(&s_tx_frame,
                                       s_right_frame_valid ? &s_right_frame : 0);
-    PRINT("hs half=%u seq=%u scan=%lu raw_min=%u:%u pos_max=%u:%u down=%02x%02x%02x%02x%02x%02x first=%u out=%u spi=%lu abort=%lu last=%d host=%u cmd=%u hseq=%u rxcnt=%u rx=%02x%02x%02x%02x hcrc=%04x/%04x rawab=%u redge=%lu irq=%lu if=%04x rot=%u racc=%d cw=%u ccw=%u cwT=%lu ccwT=%lu wh=%d pend=%d lastwh=%d\r\n",
+    PRINT("hs half=%u seq=%u scan=%lu raw_min=%u:%u pos_max=%u:%u down=%02x%02x%02x%02x%02x%02x first=%u out=%u spi=%lu abort=%lu timeout=%lu last=%d host=%u cmd=%u hseq=%u rxcnt=%u rx=%02x%02x%02x%02x hcrc=%04x/%04x rawab=%u redge=%lu irq=%lu if=%04x rot=%u racc=%d cw=%u ccw=%u cwT=%lu ccwT=%lu wh=%d pend=%d lastwh=%d\r\n",
           (unsigned int)CH585_HALF_ID,
           (unsigned int)s_tx_frame.half_seq,
           (unsigned long)s_acq.frames,
@@ -1160,6 +1160,7 @@ static void half_scan_debug_poll(uint8_t key_count)
 #endif
           (unsigned long)spi_stats.frames,
           (unsigned long)spi_stats.aborts,
+          (unsigned long)spi_stats.timeouts,
           s_last_spi_result,
           (unsigned int)host_ok,
           (unsigned int)s_rx_cmd.cmd,
