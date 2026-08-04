@@ -7,6 +7,7 @@
 #include "aik_host_shortcut.h"
 #include "aik_spi_protocol.h"
 #include "ch585_ads7948_mux_acq.h"
+#include "ch585_board_config.h"
 #include "ch585_half_report.h"
 #include "ch585_profile.h"
 
@@ -35,6 +36,13 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 
 #ifndef CH585_BLE_HID_ENABLE
 #define CH585_BLE_HID_ENABLE 0
+#endif
+
+#ifndef CH585_WIRELESS_MODE_SWITCH_ENABLE
+#define CH585_WIRELESS_MODE_SWITCH_ENABLE \
+    ((CH585_BOARD_HAS_WIRELESS_MODE_SWITCH != 0U) && \
+     (CH585_HALF_ID == AIK_HALF_ID_LEFT) && \
+     CH585_RF_TX_ENABLE && CH585_BLE_HID_ENABLE)
 #endif
 
 #ifndef CH585_SPI_ACCEPT_HOST_CMD
@@ -93,6 +101,11 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_LOCAL_BUTTON_COOLDOWN_FRAMES 100U
 #endif
 
+#ifndef CH585_WIRELESS_MODE_SWITCH_DEBOUNCE_FRAMES
+/* The normal H417 poll cadence is 125 us, so 160 frames is about 20 ms. */
+#define CH585_WIRELESS_MODE_SWITCH_DEBOUNCE_FRAMES 160U
+#endif
+
 #ifndef BLE_HID_KBD_REPORT_LEN
 #define BLE_HID_KBD_REPORT_LEN 8U
 #endif
@@ -108,6 +121,12 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_LOCAL_SWITCH_GESTURE_PENDING 1U
 #define CH585_LOCAL_SWITCH_GESTURE_ENTER   2U
 #define CH585_LOCAL_SWITCH_GESTURE_DIR     3U
+
+#define CH585_WIRELESS_MODE_BLE_PB11       GPIO_Pin_11
+#define CH585_WIRELESS_MODE_RF24_PB10      GPIO_Pin_10
+#define CH585_WIRELESS_MODE_BLE_ACTIVE     0x01U
+#define CH585_WIRELESS_MODE_RF24_ACTIVE    0x02U
+#define CH585_WIRELESS_MODE_INVALID        0xFFU
 
 #if CH585_HALF_SCAN_DEBUG_UART && !defined(DEBUG)
 #error CH585_HALF_SCAN_DEBUG_UART requires DEBUG=Debug_UART1 or another WCH DEBUG UART.
@@ -162,6 +181,11 @@ static uint16_t s_ble_last_consumer_usage;
 static uint8_t s_output_mode;
 static int8_t s_last_output_mouse_wheel;
 #endif
+#if CH585_WIRELESS_MODE_SWITCH_ENABLE
+static uint8_t s_wireless_mode_switch_last_raw;
+static uint8_t s_wireless_mode_switch_raw_count;
+static uint8_t s_wireless_mode_switch_mode;
+#endif
 
 static ch585_ads7948_mux_side_t half_scan_side(void)
 {
@@ -196,6 +220,86 @@ static uint8_t half_scan_gpiob_pressed(uint32_t pin)
 {
     return (GPIOB_ReadPortPin(pin) == 0U) ? 1U : 0U;
 }
+
+#if CH585_WIRELESS_MODE_SWITCH_ENABLE
+static uint8_t half_scan_wireless_mode_switch_read_raw(void)
+{
+    uint8_t raw = 0U;
+
+    if(half_scan_gpiob_pressed(CH585_WIRELESS_MODE_BLE_PB11) != 0U)
+    {
+        raw |= CH585_WIRELESS_MODE_BLE_ACTIVE;
+    }
+    if(half_scan_gpiob_pressed(CH585_WIRELESS_MODE_RF24_PB10) != 0U)
+    {
+        raw |= CH585_WIRELESS_MODE_RF24_ACTIVE;
+    }
+    return raw;
+}
+
+static uint8_t half_scan_wireless_mode_switch_decode(uint8_t raw)
+{
+    if(raw == CH585_WIRELESS_MODE_BLE_ACTIVE)
+    {
+        return AIK_OUTPUT_MODE_BLE;
+    }
+    if(raw == CH585_WIRELESS_MODE_RF24_ACTIVE)
+    {
+        return AIK_OUTPUT_MODE_RF24;
+    }
+    if(raw == 0U)
+    {
+        /* Center detent: neither externally pulled-up input is grounded. */
+        return AIK_OUTPUT_MODE_USBHS;
+    }
+    /* Both low is not a valid position for this single-pole switch. */
+    return CH585_WIRELESS_MODE_INVALID;
+}
+
+static void half_scan_wireless_mode_switch_state_init(void)
+{
+    uint8_t raw = half_scan_wireless_mode_switch_read_raw();
+    uint8_t mode = half_scan_wireless_mode_switch_decode(raw);
+
+    s_wireless_mode_switch_last_raw = raw;
+    s_wireless_mode_switch_raw_count = 0U;
+    /* Fail safely to wired mode if both contacts are unexpectedly low at
+     * boot; later invalid samples retain the last valid position. */
+    s_wireless_mode_switch_mode =
+        (mode == CH585_WIRELESS_MODE_INVALID) ?
+        AIK_OUTPUT_MODE_USBHS : mode;
+}
+
+static void half_scan_wireless_mode_switch_poll(void)
+{
+    uint8_t raw = half_scan_wireless_mode_switch_read_raw();
+    uint8_t mode;
+
+    if(raw != s_wireless_mode_switch_last_raw)
+    {
+        s_wireless_mode_switch_last_raw = raw;
+        s_wireless_mode_switch_raw_count = 1U;
+        return;
+    }
+
+    if(s_wireless_mode_switch_raw_count <
+       CH585_WIRELESS_MODE_SWITCH_DEBOUNCE_FRAMES)
+    {
+        s_wireless_mode_switch_raw_count++;
+    }
+    if(s_wireless_mode_switch_raw_count <
+       CH585_WIRELESS_MODE_SWITCH_DEBOUNCE_FRAMES)
+    {
+        return;
+    }
+
+    mode = half_scan_wireless_mode_switch_decode(raw);
+    if(mode != CH585_WIRELESS_MODE_INVALID)
+    {
+        s_wireless_mode_switch_mode = mode;
+    }
+}
+#endif
 
 static uint8_t half_scan_read_rotary_ab(void)
 {
@@ -237,6 +341,21 @@ static void half_scan_local_gpio_init(void)
     {
         GPIOA_ModeCfg(GPIO_Pin_7, GPIO_ModeIN_PU);
     }
+
+#if CH585_WIRELESS_MODE_SWITCH_ENABLE
+    /* PB10/PB11 are USBFS D-/D+ when RB_PIN_USB_EN is set. Keep that analog
+     * function disabled and use floating digital inputs: R31/R50 provide the
+     * external pull-ups and SW1 grounds the selected contact. PB11 is also an
+     * optional boot pin, so production option bytes must retain default PB22. */
+    GPIOAGPPCfg(DISABLE, RB_PIN_USB_EN);
+    GPIOBDigitalCfg(ENABLE,
+                    CH585_WIRELESS_MODE_BLE_PB11 |
+                        CH585_WIRELESS_MODE_RF24_PB10);
+    GPIOB_ModeCfg(CH585_WIRELESS_MODE_BLE_PB11 |
+                      CH585_WIRELESS_MODE_RF24_PB10,
+                  GPIO_ModeIN_Floating);
+    half_scan_wireless_mode_switch_state_init();
+#endif
 
     s_local_rotary_last_ab = half_scan_read_rotary_ab();
     s_local_rotary_accum = 0;
@@ -569,6 +688,11 @@ static void half_scan_apply_local_inputs(void)
             aik_spi_half_set_bit(&s_tx_frame, AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN);
             s_local_rotary_ccw_frames--;
         }
+#if CH585_WIRELESS_MODE_SWITCH_ENABLE
+        half_scan_wireless_mode_switch_poll();
+        aik_spi_left_set_output_mode(&s_tx_frame,
+                                     s_wireless_mode_switch_mode);
+#endif
     }
     else
     {

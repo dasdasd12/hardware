@@ -22,6 +22,16 @@ __attribute__((weak)) void ch32h417_usbhs_hid_nkro_on_bus_reset(void)
 {
 }
 
+__attribute__((weak)) void ch32h417_usbhs_hid_nkro_on_output_report(
+    uint8_t report_id,
+    const uint8_t *data,
+    uint16_t len)
+{
+    (void)report_id;
+    (void)data;
+    (void)len;
+}
+
 /******************************************************************************/
 /* Variable Definition */
 /* test mode */
@@ -254,7 +264,20 @@ void USBHS_IRQHandler(void)
                             switch(USBHS_SetupReqCode)
                             {
                             case HID_SET_REPORT: /* 0x09: SET_REPORT */
-                                Hid_Report_Ptr = 0;
+                                if((USBHS_SetupReqIndex == 0x00U) &&
+                                   ((uint8_t)(USBHS_SetupReqValue >> 8) ==
+                                    0x02U) &&
+                                   ((uint8_t)USBHS_SetupReqValue == 0x01U) &&
+                                   (USBHS_SetupReqLen >= 1U) &&
+                                   (USBHS_SetupReqLen <= 2U))
+                                {
+                                    Hid_Report_Len = USBHS_SetupReqLen;
+                                    Hid_Report_Ptr = 0U;
+                                }
+                                else
+                                {
+                                    errflag = 0xFF;
+                                }
                                 break;
 
                             case HID_GET_REPORT: /* 0x01: GET_REPORT */
@@ -806,12 +829,25 @@ void USBHS_IRQHandler(void)
                         {
                             if(USBHS_SetupReqCode == HID_SET_REPORT)
                             {
+                                if(len > USBHS_SetupReqLen)
+                                {
+                                    len = USBHS_SetupReqLen;
+                                }
                                 memcpy(&HID_Report_Buffer[Hid_Report_Ptr], USBHS_EP0_Buf, len);
                                 USBHS_SetupReqLen -= len;
                                 Hid_Report_Ptr += len;
-                                if(Hid_Report_Ptr >= USBHS_DevMaxPackLen)
+                                if(USBHS_SetupReqLen == 0U)
                                 {
                                     HID_Set_Report_Flag = SET_REPORT_WAIT_DEAL;
+                                    if(((uint8_t)(USBHS_SetupReqValue >> 8) ==
+                                        0x02U) &&
+                                       ((uint8_t)USBHS_SetupReqIndex == 0U))
+                                    {
+                                        ch32h417_usbhs_hid_nkro_on_output_report(
+                                            (uint8_t)USBHS_SetupReqValue,
+                                            HID_Report_Buffer,
+                                            Hid_Report_Ptr);
+                                    }
                                 }
                                 USBHSD->UEP0_RX_CTRL ^= USBHS_UEP_R_TOG_DATA1;
                                 USBHSD->UEP0_RX_CTRL = (USBHSD->UEP0_RX_CTRL & USBHS_UEP_R_TOG_MASK) | USBHS_UEP_R_RES_ACK;

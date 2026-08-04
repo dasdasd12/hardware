@@ -17,6 +17,7 @@ static uint8_t s_pending_report[AIK_NKRO_REPORT_BYTES + 1U];
 static uint8_t s_pending_len;
 static volatile uint8_t s_pending_full;
 static volatile uint8_t s_in_flight;
+static volatile uint8_t s_keyboard_leds;
 static ch32h417_usbhs_hid_nkro_diag_t s_diag;
 
 #define H417_HID_REPORT_ID_NKRO      1U
@@ -25,6 +26,7 @@ static ch32h417_usbhs_hid_nkro_diag_t s_diag;
 #define H417_HID_NKRO_PACKET_BYTES   (AIK_NKRO_REPORT_BYTES + 1U)
 #define H417_HID_CONSUMER_PACKET_BYTES 3U
 #define H417_HID_MOUSE_PACKET_BYTES  5U
+#define H417_HID_KEYBOARD_LED_CAPS_LOCK 0x02U
 
 static void refresh_diag(void)
 {
@@ -89,6 +91,7 @@ void ch32h417_usbhs_hid_nkro_init(void)
     s_pending_len = 0U;
     s_pending_full = 0U;
     s_in_flight = 0U;
+    s_keyboard_leds = 0U;
     Data_Pack_Max_Len = 0U;
     Head_Pack_Len = 0U;
     HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
@@ -194,6 +197,12 @@ uint8_t ch32h417_usbhs_hid_nkro_submit_mouse_wheel(int8_t wheel)
     return accepted;
 }
 
+uint8_t ch32h417_usbhs_hid_nkro_caps_lock_on(void)
+{
+    return (uint8_t)(
+        (s_keyboard_leds & H417_HID_KEYBOARD_LED_CAPS_LOCK) != 0U);
+}
+
 uint32_t ch32h417_usbhs_hid_nkro_reports(void)
 {
     return s_report_count;
@@ -225,4 +234,29 @@ void ch32h417_usbhs_hid_nkro_on_bus_reset(void)
 {
     s_pending_full = 0U;
     s_in_flight = 0U;
+    s_keyboard_leds = 0U;
+    HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
+}
+
+void ch32h417_usbhs_hid_nkro_on_output_report(uint8_t report_id,
+                                              const uint8_t *data,
+                                              uint16_t len)
+{
+    if((report_id != H417_HID_REPORT_ID_NKRO) || (data == 0) || (len == 0U))
+    {
+        HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
+        return;
+    }
+
+    /* HID control SET_REPORT commonly carries only the LED byte, while some
+     * hosts include Report ID 1 as the first byte. Accept both forms. */
+    if((len >= 2U) && (data[0] == H417_HID_REPORT_ID_NKRO))
+    {
+        s_keyboard_leds = data[1];
+    }
+    else
+    {
+        s_keyboard_leds = data[0];
+    }
+    HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 }

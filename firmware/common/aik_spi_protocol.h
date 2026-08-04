@@ -65,7 +65,12 @@ extern "C" {
 #define AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN 42U
 /* Center-only gesture after direction classification, held until release. */
 #define AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED 43U
-#define AIK_HALF_FRAME_BITS_LEFT      44U
+/* NEW left-half firmware reports the physical USB/2.4G/BLE selector in the
+ * formerly unused tail bits. The valid bit keeps older CH585 firmware (which
+ * leaves these bits zero) compatible with newer H417 firmware. */
+#define AIK_LEFT_LOCAL_OUTPUT_MODE_SHIFT     44U
+#define AIK_LEFT_LOCAL_BIT_OUTPUT_MODE_VALID 46U
+#define AIK_HALF_FRAME_BITS_LEFT             47U
 
 #define AIK_RIGHT_LOCAL_BIT_EC11_CW   41U
 #define AIK_RIGHT_LOCAL_BIT_EC11_CCW  42U
@@ -322,6 +327,39 @@ static inline void aik_spi_half_set_2bit(aik_spi_half_state_v1_t *state,
     {
         aik_spi_half_set_bit(state, (uint8_t)(bit_shift + 1U));
     }
+}
+
+static inline uint8_t aik_spi_left_output_mode_valid(
+    const aik_spi_half_state_v1_t *state)
+{
+    return aik_spi_half_bit_down(
+        state, AIK_LEFT_LOCAL_BIT_OUTPUT_MODE_VALID);
+}
+
+static inline uint8_t aik_spi_left_output_mode(
+    const aik_spi_half_state_v1_t *state)
+{
+    return aik_spi_half_get_2bit(
+        state, AIK_LEFT_LOCAL_OUTPUT_MODE_SHIFT);
+}
+
+static inline void aik_spi_left_set_output_mode(
+    aik_spi_half_state_v1_t *state,
+    uint8_t mode)
+{
+    if(state == 0)
+    {
+        return;
+    }
+
+    state->down_bits[AIK_LEFT_LOCAL_OUTPUT_MODE_SHIFT >> 3] &=
+        (uint8_t)~(0x03U <<
+                   (AIK_LEFT_LOCAL_OUTPUT_MODE_SHIFT & 7U));
+    aik_spi_half_set_2bit(state,
+                          AIK_LEFT_LOCAL_OUTPUT_MODE_SHIFT,
+                          mode);
+    aik_spi_half_set_bit(state,
+                         AIK_LEFT_LOCAL_BIT_OUTPUT_MODE_VALID);
 }
 
 static inline uint16_t aik_spi_host_cmd_consumer_usage(

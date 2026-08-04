@@ -11,6 +11,7 @@ uint8_t USBFS_HID_Report_Buffer[64];
 volatile uint8_t USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 
 static uint32_t s_report_count;
+static volatile uint8_t s_keyboard_leds;
 static ch32h417_usbfs_hid_nkro_diag_t s_diag;
 
 #define H417_HID_REPORT_ID_NKRO      1U
@@ -19,6 +20,7 @@ static ch32h417_usbfs_hid_nkro_diag_t s_diag;
 #define H417_HID_NKRO_PACKET_BYTES   (AIK_NKRO_REPORT_BYTES + 1U)
 #define H417_HID_CONSUMER_PACKET_BYTES 3U
 #define H417_HID_MOUSE_PACKET_BYTES  5U
+#define H417_HID_KEYBOARD_LED_CAPS_LOCK 0x02U
 
 void Delay_Us(uint32_t n)
 {
@@ -72,6 +74,7 @@ void ch32h417_usbfs_hid_nkro_init(void)
     memset((void *)USBFS_Data_Buffer, 0, DEF_RING_BUFFER_SIZE);
     memset(&s_diag, 0, sizeof(s_diag));
     s_report_count = 0U;
+    s_keyboard_leds = 0U;
     USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 
     USBFS_RCC_Init();
@@ -198,6 +201,12 @@ uint8_t ch32h417_usbfs_hid_nkro_submit_mouse_wheel(int8_t wheel)
     return accepted;
 }
 
+uint8_t ch32h417_usbfs_hid_nkro_caps_lock_on(void)
+{
+    return (uint8_t)(
+        (s_keyboard_leds & H417_HID_KEYBOARD_LED_CAPS_LOCK) != 0U);
+}
+
 uint32_t ch32h417_usbfs_hid_nkro_reports(void)
 {
     return s_report_count;
@@ -232,4 +241,33 @@ void ch32h417_usbfs_hid_nkro_diag_snapshot(ch32h417_usbfs_hid_nkro_diag_t *diag)
         refresh_diag();
         *diag = s_diag;
     }
+}
+
+void ch32h417_usbfs_hid_nkro_on_bus_reset(void)
+{
+    s_keyboard_leds = 0U;
+    USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
+}
+
+void ch32h417_usbfs_hid_nkro_on_output_report(uint8_t report_id,
+                                              const uint8_t *data,
+                                              uint16_t len)
+{
+    if((report_id != H417_HID_REPORT_ID_NKRO) || (data == 0) || (len == 0U))
+    {
+        USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
+        return;
+    }
+
+    /* The report ID is carried in wValue for control SET_REPORT. Some hosts
+     * also repeat it in the data stage, so accept either wire representation. */
+    if((len >= 2U) && (data[0] == H417_HID_REPORT_ID_NKRO))
+    {
+        s_keyboard_leds = data[1];
+    }
+    else
+    {
+        s_keyboard_leds = data[0];
+    }
+    USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 }

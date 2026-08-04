@@ -1,14 +1,26 @@
 #include "board_init.h"
 
 #include "ch32h417.h"
+#include "ch32h417_gpio.h"
 #include "ch32h417_rcc.h"
 #include "ch32h417_pwr.h"
 #include "approval_mailbox.h"
+#include "h417_board_config.h"
 
 #define V3F_TRACE_BASE ((volatile uint32_t *)0x20178000u)
 #define V3F_TRACE_MAGIC 0x56334650u
 #define V3F_TRACE_VIO18_INITIAL 47u
 #define V3F_TRACE_VIO18_CTLR    48u
+
+#if H417_BOARD_HAS_CAPS_LOCK_LED
+#define V3F_CAPS_LOCK_LED_PORT  GPIOB
+#define V3F_CAPS_LOCK_LED_PIN   GPIO_Pin_7
+#endif
+
+#if H417_BOARD_HAS_RGB_POWER_ENABLE
+#define V3F_RGB_POWER_EN_PORT   GPIOE
+#define V3F_RGB_POWER_EN_PIN    GPIO_Pin_12
+#endif
 
 #ifndef V3F_WAKE_V5F
 #define V3F_WAKE_V5F 0
@@ -19,6 +31,13 @@
 volatile uint32_t WFE_MASK = 0;
 volatile uint32_t WFE_WkupSource = 0;
 
+#if H417_BOARD_HAS_CAPS_LOCK_LED
+static uint8_t s_caps_lock_led_enabled;
+#endif
+#if H417_BOARD_HAS_RGB_POWER_ENABLE
+static uint8_t s_rgb_power_enabled;
+#endif
+
 static void v3f_board_delay_cycles(uint32_t cycles)
 {
     volatile uint32_t i;
@@ -27,6 +46,88 @@ static void v3f_board_delay_cycles(uint32_t cycles)
     {
         __asm volatile("nop");
     }
+}
+
+#if H417_BOARD_HAS_RGB_POWER_ENABLE
+static void v3f_board_rgb_power_init(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    RCC_HB2PeriphClockCmd(RCC_HB2Periph_GPIOE, ENABLE);
+    /* LED_EN is externally pulled up, but the software lighting default is
+     * off. Preload PE12 low before enabling its output to shorten the VLED
+     * power-on window during reset. PE12 high enables the Q2/Q1 power path. */
+    GPIO_ResetBits(V3F_RGB_POWER_EN_PORT, V3F_RGB_POWER_EN_PIN);
+    gpio.GPIO_Pin = V3F_RGB_POWER_EN_PIN;
+    gpio.GPIO_Speed = GPIO_Speed_Low;
+    gpio.GPIO_Mode = GPIO_Mode_Out_PP;
+    GPIO_Init(V3F_RGB_POWER_EN_PORT, &gpio);
+    GPIO_ResetBits(V3F_RGB_POWER_EN_PORT, V3F_RGB_POWER_EN_PIN);
+    s_rgb_power_enabled = 0U;
+}
+#endif
+
+#if H417_BOARD_HAS_CAPS_LOCK_LED
+static void v3f_board_caps_lock_led_init(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    RCC_HB2PeriphClockCmd(RCC_HB2Periph_GPIOB, ENABLE);
+    /* The LED anode is tied to VDD, so PB7 is an active-low current sink.
+     * Drive it high before enabling the output to avoid a startup flash. */
+    GPIO_SetBits(V3F_CAPS_LOCK_LED_PORT, V3F_CAPS_LOCK_LED_PIN);
+    gpio.GPIO_Pin = V3F_CAPS_LOCK_LED_PIN;
+    gpio.GPIO_Speed = GPIO_Speed_Low;
+    gpio.GPIO_Mode = GPIO_Mode_Out_PP;
+    GPIO_Init(V3F_CAPS_LOCK_LED_PORT, &gpio);
+    s_caps_lock_led_enabled = 0U;
+}
+#endif
+
+void v3f_board_rgb_power_set(uint8_t enabled)
+{
+#if H417_BOARD_HAS_RGB_POWER_ENABLE
+    enabled = (enabled != 0U) ? 1U : 0U;
+    if(enabled == s_rgb_power_enabled)
+    {
+        return;
+    }
+
+    s_rgb_power_enabled = enabled;
+    if(enabled != 0U)
+    {
+        GPIO_SetBits(V3F_RGB_POWER_EN_PORT, V3F_RGB_POWER_EN_PIN);
+    }
+    else
+    {
+        GPIO_ResetBits(V3F_RGB_POWER_EN_PORT, V3F_RGB_POWER_EN_PIN);
+    }
+#else
+    (void)enabled;
+#endif
+}
+
+void v3f_board_caps_lock_led_set(uint8_t enabled)
+{
+#if H417_BOARD_HAS_CAPS_LOCK_LED
+    enabled = (enabled != 0U) ? 1U : 0U;
+    if(enabled == s_caps_lock_led_enabled)
+    {
+        return;
+    }
+
+    s_caps_lock_led_enabled = enabled;
+    if(enabled != 0U)
+    {
+        GPIO_ResetBits(V3F_CAPS_LOCK_LED_PORT, V3F_CAPS_LOCK_LED_PIN);
+    }
+    else
+    {
+        GPIO_SetBits(V3F_CAPS_LOCK_LED_PORT, V3F_CAPS_LOCK_LED_PIN);
+    }
+#else
+    (void)enabled;
+#endif
 }
 
 void v3f_board_init(void)
@@ -41,6 +142,13 @@ void v3f_board_init(void)
     PWR_VIO18LevelCfg(PWR_VIO18Level_MODE3);
     v3f_board_delay_cycles(10000U);
     V3F_TRACE_BASE[V3F_TRACE_VIO18_CTLR] = PWR->CTLR;
+#if H417_BOARD_HAS_RGB_POWER_ENABLE
+    /* Match the hardware-tested sequence: claim PE12 after VIO is stable. */
+    v3f_board_rgb_power_init();
+#endif
+#if H417_BOARD_HAS_CAPS_LOCK_LED
+    v3f_board_caps_lock_led_init();
+#endif
 
     V3F_TRACE_BASE[0] = V3F_TRACE_MAGIC;
     V3F_TRACE_BASE[1] = RCC->CFGR2;
