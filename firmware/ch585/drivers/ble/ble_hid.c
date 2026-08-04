@@ -81,6 +81,8 @@ static uint8_t g_consumer_tap_queue_head = 0;
 static uint8_t g_consumer_tap_queue_tail = 0;
 static uint8_t g_consumer_tap_queue_count = 0;
 static uint8_t g_ble_enabled = FALSE;
+static uint8_t g_battery_level = 100U;
+static uint8_t g_battery_valid = FALSE;
 
 static uint8_t scanRspData[] = {
     0x0E,
@@ -148,6 +150,7 @@ static uint8_t bleHidConsumerTapQueuePush(uint16_t usage);
 static uint8_t bleHidConsumerTapQueuePop(bleHidConsumerTap_t *tap);
 static void bleHidClearConsumerTapQueue(void);
 static void bleHidResetConsumerTapState(void);
+static uint8_t bleHidBatteryCalc(uint16_t adc_value);
 
 static hidDevCB_t hidCBs = {
     hidRptCB,
@@ -198,6 +201,10 @@ void BLE_HID_Init(void)
         Batt_SetParameter(BATT_PARAM_CRITICAL_LEVEL, sizeof(uint8_t), &critical_level);
     }
 
+    /* Keep the SDK's periodic Battery Service task, but feed it the cached
+     * MAX17048 percentage instead of its built-in adc=300 demo value. */
+    Batt_Setup(0U, 0U, 4095U, NULL, NULL, bleHidBatteryCalc);
+
     bleHidUseFastAdvertising();
 
     {
@@ -238,6 +245,29 @@ void BLE_HID_Init(void)
         bStatus_t erase_status = HidDev_SetParameter(HIDDEV_ERASE_ALLBONDS, 0, NULL);
         BLE_HID_LOG("%s: erase bonds=%x\n", BLE_HID_DEVICE_NAME, erase_status);
     }
+}
+
+uint8_t BLE_HID_SetBatteryLevel(uint8_t percent)
+{
+    if(percent > 100U)
+    {
+        return INVALIDPARAMETER;
+    }
+
+    if((g_battery_valid != FALSE) && (g_battery_level == percent))
+    {
+        return SUCCESS;
+    }
+
+    g_battery_level = percent;
+    g_battery_valid = TRUE;
+    return SUCCESS;
+}
+
+static uint8_t bleHidBatteryCalc(uint16_t adc_value)
+{
+    (void)adc_value;
+    return (g_battery_valid != FALSE) ? g_battery_level : 100U;
 }
 
 uint16_t BLE_HID_ProcessEvent(uint8_t task_id, uint16_t events)

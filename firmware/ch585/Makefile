@@ -75,6 +75,12 @@ ifneq (,$(findstring -DCH585_BLE_PAIRING_EXT_EEPROM=1,$(DEFS_EXTRA)))
 APP_C_SOURCES += drivers/eeprom_i2c/ch585_eeprom_i2c.c
 INC += -I"drivers/eeprom_i2c"
 endif
+ifneq (,$(findstring -DCH585_BATTERY_ENABLE=1,$(DEFS_EXTRA)))
+APP_C_SOURCES += drivers/ch585_i2c_bus.c
+APP_C_SOURCES += drivers/ch585_soft_i2c_bus.c
+APP_C_SOURCES += drivers/max17048.c
+APP_C_SOURCES += drivers/ch585_power_status.c
+endif
 else ifeq ($(APP),rf_basic)
 APP_C_SOURCES += applications/rf_basic/main.c
 APP_C_SOURCES += drivers/rf/RF_basic.c
@@ -134,7 +140,7 @@ half_scan_left:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left BUILD_VARIANT=half_scan_left DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1 -DCH585_BLE_HID_ENABLE=1 -DCH585_BLE_PAIRING_EXT_EEPROM=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
 
 half_scan_right:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right BUILD_VARIANT=half_scan_right DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right BUILD_VARIANT=half_scan_right DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0 -DCH585_BATTERY_ENABLE=1" firmware
 
 half_scan_left_rf:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_rf BUILD_VARIANT=half_scan_left_rf DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1" firmware
@@ -152,7 +158,7 @@ half_scan_left_debug_uart:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_debug_uart BUILD_VARIANT=half_scan_left_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0" firmware
 
 half_scan_right_debug_uart:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right_debug_uart BUILD_VARIANT=half_scan_right_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right_debug_uart BUILD_VARIANT=half_scan_right_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0 -DCH585_BATTERY_ENABLE=1" firmware
 
 rf_basic rf_receiver_usbhs:
 	@$(MAKE) APP=$@ firmware

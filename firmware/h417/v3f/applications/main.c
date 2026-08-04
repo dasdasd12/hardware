@@ -847,7 +847,9 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
                                          uint8_t approval_active,
                                          uint8_t approval_selected_yes,
                                          uint16_t consumer_usage,
-                                         int8_t consumer_delta)
+                                         int8_t consumer_delta,
+                                         uint8_t battery_percent,
+                                         uint8_t power_flags)
 {
 #if V3F_ENABLE_SPI_HOST_CMD && V3F_ENABLE_RF_BRIDGE
     aik_spi_half_state_v1_t empty_right;
@@ -860,7 +862,9 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
                                                      output_mode,
                                                      approval_active,
                                                      approval_selected_yes,
-                                                     1U);
+                                                     1U,
+                                                     battery_percent,
+                                                     power_flags);
         aik_spi_host_cmd_set_consumer_usage(cmd, consumer_usage);
         aik_spi_host_cmd_set_consumer_delta(cmd, consumer_delta);
         aik_spi_host_cmd_finish(cmd);
@@ -877,7 +881,9 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
                                                  output_mode,
                                                  approval_active,
                                                  approval_selected_yes,
-                                                 0U);
+                                                 0U,
+                                                 battery_percent,
+                                                 power_flags);
     aik_spi_host_cmd_set_consumer_usage(cmd, consumer_usage);
     aik_spi_host_cmd_set_consumer_delta(cmd, consumer_delta);
     aik_spi_host_cmd_finish(cmd);
@@ -888,6 +894,8 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
     (void)approval_selected_yes;
     (void)consumer_usage;
     (void)consumer_delta;
+    (void)battery_percent;
+    (void)power_flags;
 #endif
 }
 
@@ -1074,11 +1082,15 @@ int main(void)
     aik_host_shortcut_state_t host_shortcut;
     aik_profile_shortcut_state_t profile_shortcut;
     aik_approval_control_state_t approval_control;
+    uint8_t right_battery_percent;
+    uint8_t right_power_flags;
 
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
     memset(nkro16, 0, sizeof(nkro16));
     memset(zero_nkro16, 0, sizeof(zero_nkro16));
+    right_battery_percent = AIK_BATTERY_PERCENT_UNKNOWN;
+    right_power_flags = 0U;
     aik_host_shortcut_reset(&host_shortcut);
     aik_profile_shortcut_reset(&profile_shortcut);
     aik_approval_control_reset(&approval_control);
@@ -1147,6 +1159,13 @@ int main(void)
                     v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx) :
                     0U;
         update_half_cache(&right, got_right, &rx);
+        if((got_right != 0U) &&
+           (aik_spi_half_seq_battery_valid(rx.half_seq) != 0U))
+        {
+            right_battery_percent =
+                aik_spi_half_seq_battery_percent(rx.half_seq);
+            right_power_flags = AIK_SPI_POWER_FLAG_BAT_VALID;
+        }
         age_half_cache_on_usb_report(&right, got_right);
         approval_confirm_action =
             aik_approval_control_update_confirm_valid(
@@ -1200,7 +1219,9 @@ int main(void)
                                          approval_active,
                                          approval_selected_yes,
                                          left_push_consumer_usage,
-                                         left_push_consumer_delta);
+                                         left_push_consumer_delta,
+                                         right_battery_percent,
+                                         right_power_flags);
             last_wireless_right_consumer_usage = right_consumer_usage;
         }
         else

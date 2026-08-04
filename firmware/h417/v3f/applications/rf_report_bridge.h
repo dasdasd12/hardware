@@ -15,6 +15,8 @@ void v3f_rf_report_bridge_prepare_right_state_cmd(
     uint8_t output_mode,
     uint8_t approval_active,
     uint8_t approval_selected_yes,
-    uint8_t right_state_valid);
+    uint8_t right_state_valid,
+    uint8_t battery_percent,
+    uint8_t power_flags);
 
 #endif

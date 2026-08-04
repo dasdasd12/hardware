@@ -23,6 +23,7 @@ void BLE_HID_StartAdvert(void);
 void BLE_HID_StopAdvert(void);
 void BLE_HID_SetEnabled(uint8_t enabled);
 void BLE_HID_DisableForRadio(uint16_t wait_ms);
+uint8_t BLE_HID_SetBatteryLevel(uint8_t percent);
 uint8_t BLE_HID_SendKeyboard(const uint8_t *report8);
 uint8_t BLE_HID_SendConsumer(uint16_t usage);
 uint8_t BLE_HID_TriggerKeyTap(uint8_t keycode);
