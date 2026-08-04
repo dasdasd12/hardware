@@ -4,11 +4,24 @@
 
 #include "magnetic_key_engine.h"
 
+#include "ch585_ads7948_mux_acq.h"
+
 #include <stddef.h>
 #include <string.h>
 
-#define MAG_KEY_DEFAULT_RELEASED_ADC       490U
-#define MAG_KEY_DEFAULT_PRESSED_ADC        330U
+/* Rescale the 3.3 V characterization codes to preserve the same physical
+ * Hall-sensor voltages when the external ADC reference changes. */
+#define MAG_KEY_LEGACY_REFERENCE_MV        3300U
+#define MAG_KEY_LEGACY_RELEASED_ADC        490U
+#define MAG_KEY_LEGACY_PRESSED_ADC         330U
+#define MAG_KEY_ADC_FOR_REFERENCE(code) \
+    ((uint16_t)((((uint32_t)(code) * MAG_KEY_LEGACY_REFERENCE_MV) + \
+                 (CH585_ADS7948_REFERENCE_MV / 2U)) / \
+                CH585_ADS7948_REFERENCE_MV))
+#define MAG_KEY_DEFAULT_RELEASED_ADC \
+    MAG_KEY_ADC_FOR_REFERENCE(MAG_KEY_LEGACY_RELEASED_ADC)
+#define MAG_KEY_DEFAULT_PRESSED_ADC \
+    MAG_KEY_ADC_FOR_REFERENCE(MAG_KEY_LEGACY_PRESSED_ADC)
 #define MAG_KEY_DEFAULT_PRESS_PM           450U
 #define MAG_KEY_DEFAULT_RELEASE_PM         350U
 #define MAG_KEY_DEFAULT_RT_PRESS_DELTA_PM  300U
