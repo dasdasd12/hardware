@@ -1151,7 +1151,9 @@ int main(void)
 #endif
     (void)v3f_profile_runtime_init();
     v3f_profile_sync_init();
-    v3f_profile_sync_mark_all_dirty();
+    /* On boot, periodic status queries first compare the profile identity
+     * restored by each CH585.  Matching halves need no flash rewrite;
+     * mismatches are marked dirty by v3f_profile_sync_status_poll(). */
     v3f_ch585_link_init();
     v3f_rgb_status_init();
     v3f_rgb_status_set_enabled(0U);

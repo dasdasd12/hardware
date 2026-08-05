@@ -4,11 +4,18 @@
 #include <stdint.h>
 #include "aik_spi_protocol.h"
 
+typedef union
+{
+    aik_spi_profile_status_v1_t status;
+    aik_spi_profile_xfer_v1_t xfer;
+} v3f_ch585_profile_response_t;
+
 typedef struct
 {
     uint32_t ok_frames;
     uint32_t link_errors;
     uint32_t invalid_frames;
+    uint32_t command_phase_frames;
     uint16_t last_seq;
     uint8_t last_magic;
     uint8_t last_type;
@@ -19,7 +26,7 @@ typedef struct
     uint32_t last_diag;
     uint32_t profile_status_ok;
     uint32_t profile_status_invalid;
-    aik_spi_profile_status_v1_t last_profile_status;
+    v3f_ch585_profile_response_t last_profile_response;
 } v3f_ch585_link_stats_t;
 
 void v3f_ch585_link_init(void);
@@ -30,8 +37,8 @@ uint8_t v3f_ch585_link_query_profile_status(
     uint8_t half_id,
     uint16_t host_seq,
     aik_spi_profile_status_v1_t *out);
-/* Send one AIK_SPI_CMD_PROFILE_* command and read back the transfer
- * acknowledge frame (retrying the read while the half prepares it). */
+/* Send one AIK_SPI_CMD_PROFILE_* command and read one transfer response.
+ * A later caller retries the logical command if the half was not ready. */
 uint8_t v3f_ch585_link_profile_cmd(uint8_t half_id,
                                    const aik_spi_host_cmd_v1_t *cmd,
                                    aik_spi_profile_xfer_v1_t *out);

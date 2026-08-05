@@ -584,10 +584,13 @@ int v3f_profile_runtime_prepare_slot(
         pkg = v3f_profile_store_slot_ptr(slot_id);
         if(pkg == 0)
         {
-            return V3F_PROFILE_ERR_PACKAGE;
+            /* An empty/deleted user slot is a named copy of Default.
+             * Keep the requested slot id so offline Fn switching remains
+             * predictable before the PC has uploaded every slot. */
+            pkg = g_v3f_factory_profile_image;
+            pkg_limit = g_v3f_factory_profile_image_size;
         }
-
-        if(user_slot_is_erased(pkg) != 0U)
+        else if(user_slot_is_erased(pkg) != 0U)
         {
             pkg = g_v3f_factory_profile_image;
             pkg_limit = g_v3f_factory_profile_image_size;
