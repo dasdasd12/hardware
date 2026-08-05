@@ -14,6 +14,9 @@
 #ifndef CH585_BATTERY_ENABLE
 #define CH585_BATTERY_ENABLE 0
 #endif
+#ifndef CH585_BATTERY_TRANSPORT_ENABLE
+#define CH585_BATTERY_TRANSPORT_ENABLE CH585_BATTERY_ENABLE
+#endif
 #if CH585_BATTERY_ENABLE
 #include "ch585_i2c_bus.h"
 #include "ch585_power_status.h"
@@ -118,6 +121,14 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 
 #ifndef CH585_BATTERY_SAMPLE_FRAMES
 #define CH585_BATTERY_SAMPLE_FRAMES 4096U
+#endif
+
+/* Software I2C is synchronous. Polling it in the scan loop can make the
+ * SPI-slave side miss an H417 transaction, so production defaults to one
+ * sample before SPI is started. A coordinated pause/ack protocol is required
+ * before runtime refresh can be enabled safely. */
+#ifndef CH585_BATTERY_RUNTIME_POLL_ENABLE
+#define CH585_BATTERY_RUNTIME_POLL_ENABLE 0
 #endif
 
 #ifndef BLE_HID_KBD_REPORT_LEN
@@ -274,6 +285,7 @@ static void half_scan_battery_init(void)
 
 static void half_scan_battery_poll(void)
 {
+#if CH585_BATTERY_RUNTIME_POLL_ENABLE
     if(s_battery_sample_countdown != 0U)
     {
         s_battery_sample_countdown--;
@@ -282,6 +294,7 @@ static void half_scan_battery_poll(void)
 
     s_battery_sample_countdown = CH585_BATTERY_SAMPLE_FRAMES;
     half_scan_battery_sample();
+#endif
 }
 
 static uint8_t half_scan_battery_percent(void)
@@ -871,7 +884,7 @@ static void half_scan_compact_raw(const ch585_ads7948_mux_acq_t *acq,
 
 static void half_scan_build_frame(void)
 {
-#if CH585_BATTERY_ENABLE
+#if CH585_BATTERY_ENABLE && CH585_BATTERY_TRANSPORT_ENABLE
     uint8_t frame_counter = (uint8_t)(s_tx_frame.half_seq + 1U);
     uint8_t battery_valid = (uint8_t)(
         (s_battery_status.flags & CH585_POWER_FLAG_BAT_VALID) != 0U);
@@ -1455,6 +1468,20 @@ static void half_scan_debug_poll(uint8_t key_count)
           (unsigned int)s_ble_boot8[5],
           (unsigned int)s_ble_boot8[6],
           (unsigned int)s_ble_boot8[7]);
+#endif
+#if CH585_SPI_ACCEPT_HOST_CMD
+    PRINT("bridge flags=%02x rvalid=%u rseq=%u rdown=%02x%02x%02x%02x%02x%02x batcmd=%u/%02x\r\n",
+          (unsigned int)s_rx_cmd.flags,
+          (unsigned int)s_right_frame_valid,
+          (unsigned int)s_right_frame.half_seq,
+          (unsigned int)s_right_frame.down_bits[0],
+          (unsigned int)s_right_frame.down_bits[1],
+          (unsigned int)s_right_frame.down_bits[2],
+          (unsigned int)s_right_frame.down_bits[3],
+          (unsigned int)s_right_frame.down_bits[4],
+          (unsigned int)s_right_frame.down_bits[5],
+          (unsigned int)aik_spi_host_cmd_battery_percent(&s_rx_cmd),
+          (unsigned int)aik_spi_host_cmd_power_flags(&s_rx_cmd));
 #endif
 #if CH585_BATTERY_ENABLE
     PRINT("bat valid=%u pct=%u mv=%u charge=%u flags=%02x fail=%u\r\n",

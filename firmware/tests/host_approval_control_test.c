@@ -113,6 +113,34 @@ static void test_right_state_context_flags(void)
     CHECK((cmd.flags & AIK_SPI_FLAG_RIGHT_STATE_VALID) == 0U);
 }
 
+static void test_state_only_poll_stays_plain(void)
+{
+    aik_spi_host_cmd_v1_t cmd;
+    uint8_t nkro[AIK_NKRO_REPORT_BYTES];
+
+    v3f_rf_report_bridge_prepare_cmd(
+        &cmd, 11U, 0, AIK_OUTPUT_MODE_RF24);
+    CHECK(aik_spi_host_cmd_valid(&cmd) == 1U);
+    CHECK(cmd.cmd == AIK_SPI_CMD_POLL);
+    CHECK((cmd.flags & AIK_SPI_FLAG_OUTPUT_MODE_MASK) ==
+          AIK_OUTPUT_MODE_RF24);
+
+    v3f_rf_report_bridge_prepare_cmd(
+        &cmd, 12U, 0, AIK_OUTPUT_MODE_BLE);
+    CHECK(aik_spi_host_cmd_valid(&cmd) == 1U);
+    CHECK(cmd.cmd == AIK_SPI_CMD_POLL);
+    CHECK((cmd.flags & AIK_SPI_FLAG_OUTPUT_MODE_MASK) ==
+          AIK_OUTPUT_MODE_BLE);
+
+    memset(nkro, 0, sizeof(nkro));
+    nkro[2] = 1U;
+    v3f_rf_report_bridge_prepare_cmd(
+        &cmd, 13U, nkro, AIK_OUTPUT_MODE_RF24);
+    CHECK(aik_spi_host_cmd_valid(&cmd) == 1U);
+    CHECK(cmd.cmd == AIK_SPI_CMD_POLL_WITH_RF);
+    CHECK(memcmp(cmd.nkro16, nkro, sizeof(nkro)) == 0);
+}
+
 static void test_battery_piggyback(void)
 {
     uint16_t half_seq;
@@ -131,6 +159,7 @@ int main(void)
 {
     test_control_actions();
     test_right_state_context_flags();
+    test_state_only_poll_stays_plain();
     test_battery_piggyback();
     if(s_failures == 0)
     {
