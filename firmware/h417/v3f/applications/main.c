@@ -79,6 +79,18 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_ENABLE_SPI_HOST_CMD 0
 #endif
 
+#ifndef V3F_ENABLE_USB_RF_COEXIST
+#define V3F_ENABLE_USB_RF_COEXIST 0
+#endif
+
+#ifndef V3F_ENABLE_USB_BLE_COEXIST
+#define V3F_ENABLE_USB_BLE_COEXIST 0
+#endif
+
+#ifndef V3F_ENABLE_FN_OUTPUT_SWITCH
+#define V3F_ENABLE_FN_OUTPUT_SWITCH 0
+#endif
+
 #ifndef V3F_ENABLE_USBFS_CDC_DEBUG
 #define V3F_ENABLE_USBFS_CDC_DEBUG 0
 #endif
@@ -112,13 +124,15 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #endif
 
 #define V3F_FN_LAYER_KEY   38U
-#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+#if V3F_ENABLE_FN_OUTPUT_SWITCH || H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
 #define V3F_SWITCH_KEY_F1  45U
 #define V3F_SWITCH_KEY_F2  44U
 #define V3F_SWITCH_KEY_F3  43U
 #define V3F_MODE_MASK_F1   0x01U
 #define V3F_MODE_MASK_F2   0x02U
 #define V3F_MODE_MASK_F3   0x04U
+#endif
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
 #define V3F_SWITCH_KEY_F5  41U
 #define V3F_SWITCH_KEY_F6  6U
 #endif
@@ -283,6 +297,32 @@ static uint8_t v3f_output_mode_is_wireless(uint8_t mode)
 {
     return (uint8_t)((mode == AIK_OUTPUT_MODE_RF24) ||
                      (mode == AIK_OUTPUT_MODE_BLE));
+}
+
+static uint8_t v3f_output_mode_usb_enabled(uint8_t mode)
+{
+    if(mode == AIK_OUTPUT_MODE_USBHS)
+    {
+        return 1U;
+    }
+
+#if V3F_ENABLE_USB_RF_COEXIST
+    /* USBHS is an independent H417 peripheral. A wireless selection adds the
+     * matching CH585 radio path instead of taking USBHS away. */
+    if(mode == AIK_OUTPUT_MODE_RF24)
+    {
+        return 1U;
+    }
+#endif
+
+#if V3F_ENABLE_USB_BLE_COEXIST
+    if(mode == AIK_OUTPUT_MODE_BLE)
+    {
+        return 1U;
+    }
+#endif
+
+    return 0U;
 }
 
 static void v3f_nkro_set_usage(uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
@@ -513,7 +553,7 @@ static int8_t v3f_mouse_wheel_from_local_controls(
     return 0;
 }
 
-#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+#if V3F_ENABLE_FN_OUTPUT_SWITCH || H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
 static uint8_t v3f_output_mode_update_from_keys(
     v3f_global_key_state_t *keys,
     uint8_t current_mode)
@@ -587,7 +627,10 @@ static uint8_t v3f_output_mode_update(
     v3f_global_key_state_t *keys,
     uint8_t current_mode)
 {
-#if H417_BOARD_HAS_PHYSICAL_MODE_SWITCH
+#if V3F_ENABLE_FN_OUTPUT_SWITCH
+    (void)left;
+    return v3f_output_mode_update_from_keys(keys, current_mode);
+#elif H417_BOARD_HAS_PHYSICAL_MODE_SWITCH
     (void)keys;
     if((left != 0) && (aik_spi_left_output_mode_valid(left) != 0U))
     {
@@ -1462,12 +1505,12 @@ int main(void)
         aik_host_shortcut_apply(host_shortcut_action, nkro16);
         aik_approval_control_apply_confirm(
             approval_confirm_action, nkro16);
-        if(output_mode == AIK_OUTPUT_MODE_USBHS)
+        if(v3f_output_mode_usb_enabled(output_mode) != 0U)
         {
             v3f_consumer_delta_accumulate(&usb_consumer_delta_pending,
                                           consumer_delta);
         }
-        if((output_mode == AIK_OUTPUT_MODE_USBHS) &&
+        if((v3f_output_mode_usb_enabled(output_mode) != 0U) &&
            (mouse_wheel != 0) &&
            (last_usb_mouse_wheel == 0))
         {
@@ -1480,8 +1523,8 @@ int main(void)
                 usb_mouse_wheel_pending--;
             }
         }
-        if((previous_output_mode == AIK_OUTPUT_MODE_USBHS) &&
-           (output_mode != AIK_OUTPUT_MODE_USBHS))
+        if((v3f_output_mode_usb_enabled(previous_output_mode) != 0U) &&
+           (v3f_output_mode_usb_enabled(output_mode) == 0U))
         {
             usb_nkro_release_pending = 1U;
             usb_consumer_release_pending = 1U;
@@ -1509,7 +1552,7 @@ int main(void)
                     usb_consumer_release_pending = 0U;
                 }
             }
-            else if(output_mode == AIK_OUTPUT_MODE_USBHS)
+            else if(v3f_output_mode_usb_enabled(output_mode) != 0U)
             {
                 if((consumer_usage != AIK_CONSUMER_USAGE_NONE) &&
                    (last_usb_consumer_usage == AIK_CONSUMER_USAGE_NONE))
@@ -1562,7 +1605,7 @@ int main(void)
                 }
             }
         }
-        if(output_mode == AIK_OUTPUT_MODE_USBHS)
+        if(v3f_output_mode_usb_enabled(output_mode) != 0U)
         {
             last_usb_consumer_usage = consumer_usage;
             last_usb_mouse_wheel = mouse_wheel;
