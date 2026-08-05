@@ -16,11 +16,14 @@ SIZE    := "$(PREFIX)size"
 # V3F has no FPU: rv32imac
 ARCH_FLAGS := -march=rv32imac_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
 
-COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -g -fmessage-length=0 -fsigned-char
+# LTO keeps the product image inside the 64KB zero-wait RAM_CODE window.
+# Disable linker relaxation because late GP shortening can target constants
+# outside the signed 12-bit GP range once that window is nearly full.
+COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -flto -g -fmessage-length=0 -fsigned-char
 COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized -std=gnu99
 
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
-LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
+LDFLAGS := $(ARCH_FLAGS) -flto -nostartfiles -Xlinker --gc-sections -Xlinker --no-relax --specs=nano.specs --specs=nosys.specs
 
 # H417-local WCH EVT hardware library root
 WCH_H417_ROOT ?= ../basic/wch
