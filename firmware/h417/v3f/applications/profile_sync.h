@@ -6,8 +6,9 @@
  *
  * Derives the AKHR patch for each half from the installed runtime and
  * streams it over the SPI profile command group, one transaction per
- * main-loop tick (interleaved with normal state polling so the report
- * path keeps running). Reconciliation: the periodic profile status
+ * main-loop tick. Normal polling continues for the other half while the
+ * active half keeps command/response phase ownership. Reconciliation:
+ * the periodic profile status
  * poll compares each half's reported slot/id/generation against the
  * active runtime and re-marks the half dirty on mismatch.
  */
@@ -30,6 +31,20 @@ uint8_t v3f_profile_sync_poll(uint16_t host_seq);
 void v3f_profile_sync_status_poll(uint16_t host_seq);
 
 uint8_t v3f_profile_sync_half_synced(uint8_t half_id);
+
+typedef struct
+{
+    uint8_t state;
+    uint8_t retries;
+    uint16_t offset;
+    uint16_t patch_len;
+    uint16_t backoff;
+    uint16_t commit_waits;
+} v3f_profile_sync_diag_t;
+
+/* Read-only snapshot used by the USBFS diagnostic command. */
+uint8_t v3f_profile_sync_get_diag(uint8_t half_id,
+                                  v3f_profile_sync_diag_t *diag);
 
 #ifdef __cplusplus
 }

@@ -867,6 +867,7 @@ static void test_lossy_link(void)
 static void test_user_slot_persistence(void)
 {
     const ch585_profile_state_t *state;
+    uint32_t link_cmds_before_boot_check;
 
     /* Install the same package as user slot 2 on the V3F side; the
      * push must persist the patch into the fake Data-Flash. */
@@ -888,6 +889,16 @@ static void test_user_slot_persistence(void)
     CHECK(state->active_slot == 2U);
     CHECK(state->patch_applied == 1U);
     CHECK(s_engine.cfg[0].press_pm == 400U); /* patch, not 450 default */
+
+    /* A normal H417 boot must first compare the identity loaded by the
+     * CH585.  A matching persistent profile reaches SYNCED without sending
+     * BEGIN/CHUNK/COMMIT or rewriting Data-Flash. */
+    link_cmds_before_boot_check = s_link_cmd_count;
+    v3f_profile_sync_init();
+    v3f_profile_sync_status_poll(0U);
+    v3f_profile_sync_status_poll(1U);
+    CHECK(v3f_profile_sync_half_synced((uint8_t)CH585_HALF_ID) == 1U);
+    CHECK(s_link_cmd_count == link_cmds_before_boot_check);
 }
 
 static void test_status_reconciliation(void)

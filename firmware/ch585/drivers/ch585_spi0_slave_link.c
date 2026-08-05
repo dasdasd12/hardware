@@ -14,7 +14,11 @@
 
 #if CH585_SPI0_SLAVE_LINK_TMOS_HOOK
 #include "HAL.h"
-#define CH585_SPI0_SLAVE_LINK_WAIT_TICKS MS1_TO_SYSTEM_TIME(4U)
+#define CH585_SPI0_SLAVE_LINK_TX_WAIT_TICKS MS1_TO_SYSTEM_TIME(8U)
+#define CH585_SPI0_SLAVE_LINK_RX_WAIT_TICKS MS1_TO_SYSTEM_TIME(8U)
+#else
+#define CH585_SPI0_SLAVE_LINK_TX_WAIT_TICKS 0U
+#define CH585_SPI0_SLAVE_LINK_RX_WAIT_TICKS 0U
 #endif
 
 static uint32_t s_ch585_spi0_slave_link_frames;
@@ -45,14 +49,16 @@ static uint32_t ch585_spi0_slave_link_wait_start(void)
 #endif
 }
 
-static uint8_t ch585_spi0_slave_link_wait_expired(uint32_t start)
+static uint8_t ch585_spi0_slave_link_wait_expired(uint32_t start,
+                                                   uint32_t timeout_ticks)
 {
 #if CH585_SPI0_SLAVE_LINK_TMOS_HOOK
     /* Bound a missing-master transaction so BLE scheduling cannot starve. */
     return (uint8_t)((uint32_t)(TMOS_GetSystemClock() - start) >=
-                     CH585_SPI0_SLAVE_LINK_WAIT_TICKS);
+                     timeout_ticks);
 #else
     (void)start;
+    (void)timeout_ticks;
     return 0U;
 #endif
 }
@@ -131,7 +137,8 @@ static int ch585_spi0_slave_link_wait_tx_done(uint8_t *rx, uint16_t len)
     {
         ch585_spi0_slave_link_wait_hook();
 
-        if(ch585_spi0_slave_link_wait_expired(wait_start) != 0U)
+        if(ch585_spi0_slave_link_wait_expired(
+               wait_start, CH585_SPI0_SLAVE_LINK_TX_WAIT_TICKS) != 0U)
         {
             ch585_spi0_slave_link_abort_dma();
             return CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT;
@@ -199,7 +206,8 @@ static int ch585_spi0_slave_link_wait_tx_only_done(void)
     {
         ch585_spi0_slave_link_wait_hook();
 
-        if(ch585_spi0_slave_link_wait_expired(wait_start) != 0U)
+        if(ch585_spi0_slave_link_wait_expired(
+               wait_start, CH585_SPI0_SLAVE_LINK_TX_WAIT_TICKS) != 0U)
         {
             ch585_spi0_slave_link_abort_dma();
             return CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT;
@@ -229,7 +237,8 @@ static int ch585_spi0_slave_link_wait_rx_done(uint8_t *rx, uint16_t len)
     {
         ch585_spi0_slave_link_wait_hook();
 
-        if(ch585_spi0_slave_link_wait_expired(wait_start) != 0U)
+        if(ch585_spi0_slave_link_wait_expired(
+               wait_start, CH585_SPI0_SLAVE_LINK_RX_WAIT_TICKS) != 0U)
         {
             ch585_spi0_slave_link_abort_dma();
             return CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT;

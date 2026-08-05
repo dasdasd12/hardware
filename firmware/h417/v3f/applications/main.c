@@ -513,6 +513,7 @@ static int8_t v3f_mouse_wheel_from_local_controls(
     return 0;
 }
 
+#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
 static uint8_t v3f_output_mode_update_from_keys(
     v3f_global_key_state_t *keys,
     uint8_t current_mode)
@@ -1151,7 +1152,9 @@ int main(void)
 #endif
     (void)v3f_profile_runtime_init();
     v3f_profile_sync_init();
-    v3f_profile_sync_mark_all_dirty();
+    /* On boot, periodic status queries first compare the profile identity
+     * restored by each CH585.  Matching halves need no flash rewrite;
+     * mismatches are marked dirty by v3f_profile_sync_status_poll(). */
     v3f_ch585_link_init();
     v3f_rgb_status_init();
     v3f_rgb_status_set_enabled(0U);
@@ -1343,7 +1346,10 @@ int main(void)
         v3f_half_state_merge(left.valid ? &left.frame : 0,
                              right.valid ? &right.frame : 0,
                              &keys);
-        output_mode = v3f_output_mode_update_from_keys(&keys, output_mode);
+        output_mode = v3f_output_mode_update(
+            left.valid ? &left.frame : 0,
+            &keys,
+            output_mode);
         approval_nav_action = aik_approval_control_update_nav_valid(
             &approval_control,
             approval_active,
