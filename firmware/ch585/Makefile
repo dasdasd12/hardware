@@ -6,8 +6,17 @@ APP          ?= half_scan
 PROJECT_NAME ?= ch585_$(APP)
 BUILD_ROOT   ?= build
 BUILD_VARIANT ?= $(APP)
+CH585_BOARD_MODEL ?= NEW
 HALF_SCAN_CLOCK_DEFS := -DSYSCLK_FREQ=CLK_SOURCE_HSE_PLL_78MHz -DFREQ_SYS=78000000
 HALF_SCAN_DEBUG_UART_DEFS := -DCH585_HALF_SCAN_DEBUG_UART=1 -DDEBUG=Debug_UART1
+ifeq ($(CH585_BOARD_MODEL),NEW)
+HALF_SCAN_BOARD_DEFS := -DCH585_BOARD_MODEL=CH585_BOARD_MODEL_NEW
+else ifeq ($(CH585_BOARD_MODEL),OLD)
+HALF_SCAN_BOARD_DEFS := -DCH585_BOARD_MODEL=CH585_BOARD_MODEL_OLD
+else
+$(error Unsupported CH585_BOARD_MODEL '$(CH585_BOARD_MODEL)'; expected NEW or OLD)
+endif
+# NEW and OLD share output directories; force a rebuild when switching models.
 
 CC      := "$(PREFIX)gcc"
 AS      := "$(PREFIX)gcc" -x assembler-with-cpp
@@ -23,6 +32,9 @@ COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wunini
 # WCH SDK sources keep unused locals behind compile-time feature gates.
 COMMON_FLAGS += -Wno-unused-variable
 COMMON_FLAGS += $(DEFS_EXTRA)
+ifeq ($(APP),half_scan)
+COMMON_FLAGS += $(HALF_SCAN_BOARD_DEFS)
+endif
 
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
 LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs

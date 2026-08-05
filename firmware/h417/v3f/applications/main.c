@@ -9,6 +9,7 @@
 #include "board_init.h"
 #include "ch585_link.h"
 #include "default_profile.h"
+#include "h417_board_config.h"
 #include "half_state.h"
 #include "pc_link.h"
 #include "profile_activate.h"
@@ -30,6 +31,7 @@ typedef ch32h417_usbhs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define v3f_usb_hid_nkro_submit ch32h417_usbhs_hid_nkro_submit
 #define v3f_usb_hid_nkro_submit_consumer ch32h417_usbhs_hid_nkro_submit_consumer
 #define v3f_usb_hid_nkro_submit_mouse_wheel ch32h417_usbhs_hid_nkro_submit_mouse_wheel
+#define v3f_usb_hid_caps_lock_on ch32h417_usbhs_hid_nkro_caps_lock_on
 #define v3f_usb_hid_nkro_reports ch32h417_usbhs_hid_nkro_reports
 #define v3f_usb_hid_nkro_debug_write ch32h417_usbhs_hid_nkro_debug_write
 #define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbhs_hid_nkro_diag_snapshot
@@ -50,6 +52,7 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define v3f_usb_hid_nkro_submit ch32h417_usbfs_hid_nkro_submit
 #define v3f_usb_hid_nkro_submit_consumer ch32h417_usbfs_hid_nkro_submit_consumer
 #define v3f_usb_hid_nkro_submit_mouse_wheel ch32h417_usbfs_hid_nkro_submit_mouse_wheel
+#define v3f_usb_hid_caps_lock_on ch32h417_usbfs_hid_nkro_caps_lock_on
 #define v3f_usb_hid_nkro_reports ch32h417_usbfs_hid_nkro_reports
 #define v3f_usb_hid_nkro_debug_write ch32h417_usbfs_hid_nkro_debug_write
 #define v3f_usb_hid_nkro_diag_snapshot ch32h417_usbfs_hid_nkro_diag_snapshot
@@ -109,6 +112,7 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #endif
 
 #define V3F_FN_LAYER_KEY   38U
+#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
 #define V3F_SWITCH_KEY_F1  45U
 #define V3F_SWITCH_KEY_F2  44U
 #define V3F_SWITCH_KEY_F3  43U
@@ -117,11 +121,13 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_MODE_MASK_F3   0x04U
 #define V3F_SWITCH_KEY_F5  41U
 #define V3F_SWITCH_KEY_F6  6U
+#endif
 #define V3F_PROFILE_KEY_0   10U
 #define V3F_PROFILE_KEY_1   52U
 #define V3F_PROFILE_KEY_2   51U
 #define V3F_PROFILE_KEY_3   50U
 
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
 #ifndef V3F_LIGHTING_COMBO_PRESS_FRAMES
 #define V3F_LIGHTING_COMBO_PRESS_FRAMES 4U
 #endif
@@ -133,6 +139,7 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_LIGHTING_COMBO_NONE   0U
 #define V3F_LIGHTING_COMBO_TOGGLE 1U
 #define V3F_LIGHTING_COMBO_EFFECT 2U
+#endif
 
 #define V3F_HID_USAGE_A           0x04U
 #define V3F_HID_USAGE_RIGHT_ARROW 0x4FU
@@ -572,7 +579,36 @@ static uint8_t v3f_output_mode_update_from_keys(
 
     return v3f_output_mode_sanitize(next_mode);
 }
+#endif
 
+static uint8_t v3f_output_mode_update(
+    const aik_spi_half_state_v1_t *left,
+    v3f_global_key_state_t *keys,
+    uint8_t current_mode)
+{
+#if H417_BOARD_HAS_PHYSICAL_MODE_SWITCH
+    (void)keys;
+    if((left != 0) && (aik_spi_left_output_mode_valid(left) != 0U))
+    {
+        uint8_t mode = aik_spi_left_output_mode(left);
+
+        if(mode <= AIK_OUTPUT_MODE_BLE)
+        {
+            return v3f_output_mode_sanitize(mode);
+        }
+        return current_mode;
+    }
+
+    /* NEW uses the physical selector exclusively. Retain the last valid mode
+     * across startup or brief SPI link gaps instead of falling back to Fn. */
+    return current_mode;
+#else
+    (void)left;
+    return v3f_output_mode_update_from_keys(keys, current_mode);
+#endif
+}
+
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
 static uint8_t v3f_lighting_combo_from_keys(v3f_global_key_state_t *keys)
 {
     uint8_t f5_down;
@@ -643,6 +679,7 @@ static void v3f_lighting_update_from_keys(v3f_global_key_state_t *keys)
     }
     armed = 0U;
 }
+#endif
 
 static void v3f_global_key_clear_one(v3f_global_key_state_t *keys,
                                      uint8_t key_id)
@@ -1358,7 +1395,9 @@ int main(void)
             wireless_consumer_usage_pending = AIK_CONSUMER_USAGE_NONE;
             last_wireless_right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
         }
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
         v3f_lighting_update_from_keys(&keys);
+#endif
         if((host_shortcut_consumed != 0U) ||
            (approval_any_consumed != 0U))
         {

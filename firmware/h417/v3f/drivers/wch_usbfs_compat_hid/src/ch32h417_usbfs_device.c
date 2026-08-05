@@ -13,6 +13,20 @@
 #include "usbfs_desc.h"
 #include "ch32h417_usb.h"
 #include "usbfs_compatibility_hid.h"
+
+__attribute__((weak)) void ch32h417_usbfs_hid_nkro_on_bus_reset(void)
+{
+}
+
+__attribute__((weak)) void ch32h417_usbfs_hid_nkro_on_output_report(
+    uint8_t report_id,
+    const uint8_t *data,
+    uint16_t len)
+{
+    (void)report_id;
+    (void)data;
+    (void)len;
+}
 /*******************************************************************************/
 /* Variable Definition */
 
@@ -36,6 +50,7 @@ volatile uint8_t  USBFS_DevEnumStatus;
 /* HID Class Command */
 volatile uint8_t USBFS_HidIdle;
 volatile uint8_t USBFS_HidProtocol;
+static uint16_t s_usbfs_hid_report_ptr;
 
 #if V3F_ENABLE_USBFS_CDC_DEBUG
 uint8_t USBFS_CDC_LineCoding[7] = {0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08};
@@ -297,10 +312,30 @@ void USBFS_IRQHandler( void )
                                         switch( USBFS_SetupReqCode )
                                         {
                                             case HID_SET_REPORT:
-                                                memcpy(&USBFS_HID_Report_Buffer[0],USBFS_EP0_Buf,DEF_USBD_UEP0_SIZE);
-                                                USBFS_HID_Set_Report_Flag = SET_REPORT_WAIT_DEAL;
+                                            {
+                                                uint16_t copy_len = USBFSD->RX_LEN;
+
+                                                if(copy_len > USBFS_SetupReqLen)
+                                                {
+                                                    copy_len = USBFS_SetupReqLen;
+                                                }
+                                                memcpy(
+                                                    &USBFS_HID_Report_Buffer[s_usbfs_hid_report_ptr],
+                                                    USBFS_EP0_Buf,
+                                                    copy_len);
+                                                s_usbfs_hid_report_ptr += copy_len;
+                                                USBFS_SetupReqLen -= copy_len;
+                                                if(USBFS_SetupReqLen == 0U)
+                                                {
+                                                    USBFS_HID_Set_Report_Flag = SET_REPORT_WAIT_DEAL;
+                                                    ch32h417_usbfs_hid_nkro_on_output_report(
+                                                        (uint8_t)USBFS_SetupReqValue,
+                                                        USBFS_HID_Report_Buffer,
+                                                        s_usbfs_hid_report_ptr);
+                                                }
                                                 USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_TOG | USBFS_UEP_T_RES_NAK;
                                                 break;
+                                            }
                                             default:
                                                 break;
                                         }
@@ -414,6 +449,18 @@ void USBFS_IRQHandler( void )
 #endif
 
                             case HID_SET_REPORT:
+                                if((USBFS_SetupReqIndex == DEF_USBD_HID_INTERFACE) &&
+                                   ((uint8_t)(USBFS_SetupReqValue >> 8) == 0x02U) &&
+                                   ((uint8_t)USBFS_SetupReqValue == 0x01U) &&
+                                   (USBFS_SetupReqLen >= 1U) &&
+                                   (USBFS_SetupReqLen <= 2U))
+                                {
+                                    s_usbfs_hid_report_ptr = 0U;
+                                }
+                                else
+                                {
+                                    errflag = 0xFF;
+                                }
                                 break;
 
                             case HID_GET_REPORT:
@@ -831,6 +878,8 @@ void USBFS_IRQHandler( void )
         USBFS_DevAddr = 0;
         USBFS_DevSleepStatus = 0;
         USBFS_DevEnumStatus = 0;
+        s_usbfs_hid_report_ptr = 0U;
+        ch32h417_usbfs_hid_nkro_on_bus_reset();
 #if V3F_ENABLE_USBFS_CDC_DEBUG
         USBFS_CDC_ControlLineState = 0U;
 #endif

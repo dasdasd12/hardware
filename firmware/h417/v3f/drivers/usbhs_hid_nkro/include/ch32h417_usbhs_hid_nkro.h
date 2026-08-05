@@ -39,10 +39,14 @@ uint8_t ch32h417_usbhs_hid_nkro_pending_empty(void);
 uint8_t ch32h417_usbhs_hid_nkro_submit(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES]);
 uint8_t ch32h417_usbhs_hid_nkro_submit_consumer(uint16_t usage);
 uint8_t ch32h417_usbhs_hid_nkro_submit_mouse_wheel(int8_t wheel);
+uint8_t ch32h417_usbhs_hid_nkro_caps_lock_on(void);
 uint32_t ch32h417_usbhs_hid_nkro_reports(void);
 uint8_t ch32h417_usbhs_hid_nkro_debug_write(const char *line);
 void ch32h417_usbhs_hid_nkro_diag_snapshot(ch32h417_usbhs_hid_nkro_diag_t *diag);
 void ch32h417_usbhs_hid_nkro_on_in_complete(void);
 void ch32h417_usbhs_hid_nkro_on_bus_reset(void);
+void ch32h417_usbhs_hid_nkro_on_output_report(uint8_t report_id,
+                                              const uint8_t *data,
+                                              uint16_t len);
 
 #endif

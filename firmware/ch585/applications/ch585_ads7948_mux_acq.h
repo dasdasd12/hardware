@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "ch585_board_config.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -10,11 +12,15 @@ extern "C" {
 #define CH585_ADS7948_MUX_ADC_COUNT 2U
 #define CH585_ADS7948_MUX_LANE_COUNT 4U
 #define CH585_ADS7948_MUX_MUX_CHANNEL_COUNT 16U
-/* Actual REF voltage fitted on the current PCB revision. Legacy 3.3 V
- * boards can override this macro at build time. ADS7948 specifies 2.5 V as
- * its recommended minimum VREF, so validate 2.048 V behavior on hardware. */
+/* Follow the selected board model unless a test build overrides VREF. */
 #ifndef CH585_ADS7948_REFERENCE_MV
+#if CH585_BOARD_MODEL == CH585_BOARD_MODEL_NEW
+/* ADS7948 specifies 2.5 V as its recommended minimum VREF, so validate the
+ * new board's 2.048 V reference behavior on hardware. */
 #define CH585_ADS7948_REFERENCE_MV 2048U
+#else
+#define CH585_ADS7948_REFERENCE_MV 3300U
+#endif
 #endif
 #define CH585_ADS7948_MUX_KEY_COUNT \
     (CH585_ADS7948_MUX_LANE_COUNT * CH585_ADS7948_MUX_MUX_CHANNEL_COUNT)

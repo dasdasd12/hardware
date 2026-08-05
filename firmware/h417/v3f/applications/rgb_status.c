@@ -1,5 +1,7 @@
 #include "rgb_status.h"
 
+#include "board_init.h"
+
 #ifndef V3F_ENABLE_RGB_STATUS
 #define V3F_ENABLE_RGB_STATUS 0
 #endif
@@ -61,6 +63,12 @@ static uint8_t s_rgb_in_flight;
 static uint8_t s_rgb_render_pending;
 static uint8_t s_rgb_pending_red_once;
 static uint16_t s_rgb_poll_count;
+
+static void rgb_set_enabled_state(uint8_t enabled)
+{
+    s_rgb_enabled = (enabled != 0U) ? 1U : 0U;
+    v3f_board_rgb_power_set(s_rgb_enabled);
+}
 #endif
 
 #if V3F_ENABLE_RGB_STATUS
@@ -262,6 +270,7 @@ void v3f_rgb_status_init(void)
     {
         s_rgb_effect = V3F_RGB_EFFECT_STATIC;
     }
+    rgb_set_enabled_state(s_rgb_enabled);
     ch32h417_pioc_rgb1w_init(&ch32h417_pioc_rgb1w_pin_pf13);
     s_rgb_boot_retry_ticks = V3F_RGB_BOOT_RETRY_TICKS;
     rgb_request_render(0U);
@@ -280,7 +289,7 @@ void v3f_rgb_status_red_once(void)
 void v3f_rgb_status_set_enabled(uint8_t enabled)
 {
 #if V3F_ENABLE_RGB_STATUS
-    s_rgb_enabled = (enabled != 0U) ? 1U : 0U;
+    rgb_set_enabled_state(enabled);
     rgb_request_render(0U);
     rgb_service();
 #else
@@ -303,7 +312,7 @@ void v3f_rgb_status_next_effect(void)
     {
         s_rgb_effect = 0U;
     }
-    s_rgb_enabled = 1U;
+    rgb_set_enabled_state(1U);
     rgb_request_render(0U);
     rgb_service();
 #endif

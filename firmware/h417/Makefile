@@ -2,13 +2,16 @@
 
 PREFIX ?= /c/riscv-wch-toolchain/bin/riscv-wch-elf-
 BUILD_ROOT ?= build
+H417_BOARD_MODEL ?= NEW
 
 .PHONY: all v3f V3F v5f V5F clean flash
 
 all: v3f v5f
 
 v3f V3F:
-	@$(MAKE) -C v3f PREFIX="$(PREFIX)" BUILD_ROOT=../$(BUILD_ROOT)/V3F
+	@$(MAKE) -C v3f PREFIX="$(PREFIX)" \
+		BUILD_ROOT=../$(BUILD_ROOT)/V3F \
+		H417_BOARD_MODEL="$(H417_BOARD_MODEL)"
 
 v5f V5F:
 	@$(MAKE) -C v5f_rtthread PREFIX="$(PREFIX)" BUILD_ROOT=../$(BUILD_ROOT) CORE=V5F

@@ -189,6 +189,17 @@ const uint8_t  MyHIDReportDesc[ ] =
     0x75, 0x01,                     //   Report Size (1)
     0x95, 0x70,                     //   Report Count (112)
     0x81, 0x02,                     //   Input (Data,Var,Abs)
+    0x05, 0x08,                     //   Usage Page (LEDs)
+    0x19, 0x01,                     //   Usage Minimum (Num Lock)
+    0x29, 0x05,                     //   Usage Maximum (Kana)
+    0x15, 0x00,                     //   Logical Minimum (0)
+    0x25, 0x01,                     //   Logical Maximum (1)
+    0x75, 0x01,                     //   Report Size (1)
+    0x95, 0x05,                     //   Report Count (5)
+    0x91, 0x02,                     //   Output (Data,Var,Abs)
+    0x75, 0x03,                     //   Report Size (3)
+    0x95, 0x01,                     //   Report Count (1)
+    0x91, 0x03,                     //   Output (Const,Var,Abs)
     0xC0,                           // End Collection
 
     0x05, 0x0C,                     // Usage Page (Consumer)
@@ -233,6 +244,9 @@ const uint8_t  MyHIDReportDesc[ ] =
     0xC0,                           //   End Collection
     0xC0,                           // End Collection
 };
+
+typedef char usbfs_hid_report_desc_size_check[
+    (sizeof(MyHIDReportDesc) == DEF_USBD_REPORT_DESC_LEN) ? 1 : -1];
 
 /* Language Descriptor */
 const uint8_t  USBFS_MyLangDescr[] =
