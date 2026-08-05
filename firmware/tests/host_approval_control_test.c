@@ -83,7 +83,9 @@ static void test_right_state_context_flags(void)
         AIK_OUTPUT_MODE_BLE,
         1U,
         0U,
-        1U);
+        1U,
+        73U,
+        AIK_SPI_POWER_FLAG_BAT_VALID);
     CHECK(aik_spi_host_cmd_valid(&cmd) == 1U);
     CHECK(cmd.cmd == AIK_SPI_CMD_PUSH_RIGHT_STATE);
     CHECK((cmd.flags & AIK_SPI_FLAG_OUTPUT_MODE_MASK) ==
@@ -92,6 +94,9 @@ static void test_right_state_context_flags(void)
     CHECK((cmd.flags & AIK_SPI_FLAG_APPROVAL_SELECTED_YES) == 0U);
     CHECK((cmd.flags & AIK_SPI_FLAG_RIGHT_STATE_VALID) != 0U);
     CHECK(memcmp(cmd.nkro16, &right, sizeof(right)) == 0);
+    CHECK(aik_spi_host_cmd_battery_percent(&cmd) == 73U);
+    CHECK((aik_spi_host_cmd_power_flags(&cmd) &
+           AIK_SPI_POWER_FLAG_BAT_VALID) != 0U);
 
     v3f_rf_report_bridge_prepare_right_state_cmd(
         &cmd,
@@ -100,16 +105,62 @@ static void test_right_state_context_flags(void)
         AIK_OUTPUT_MODE_RF24,
         1U,
         1U,
+        0U,
+        AIK_BATTERY_PERCENT_UNKNOWN,
         0U);
     CHECK(aik_spi_host_cmd_valid(&cmd) == 1U);
     CHECK((cmd.flags & AIK_SPI_FLAG_APPROVAL_SELECTED_YES) != 0U);
     CHECK((cmd.flags & AIK_SPI_FLAG_RIGHT_STATE_VALID) == 0U);
 }
 
+static void test_state_only_poll_stays_plain(void)
+{
+    aik_spi_host_cmd_v1_t cmd;
+    uint8_t nkro[AIK_NKRO_REPORT_BYTES];
+
+    v3f_rf_report_bridge_prepare_cmd(
+        &cmd, 11U, 0, AIK_OUTPUT_MODE_RF24);
+    CHECK(aik_spi_host_cmd_valid(&cmd) == 1U);
+    CHECK(cmd.cmd == AIK_SPI_CMD_POLL);
+    CHECK((cmd.flags & AIK_SPI_FLAG_OUTPUT_MODE_MASK) ==
+          AIK_OUTPUT_MODE_RF24);
+
+    v3f_rf_report_bridge_prepare_cmd(
+        &cmd, 12U, 0, AIK_OUTPUT_MODE_BLE);
+    CHECK(aik_spi_host_cmd_valid(&cmd) == 1U);
+    CHECK(cmd.cmd == AIK_SPI_CMD_POLL);
+    CHECK((cmd.flags & AIK_SPI_FLAG_OUTPUT_MODE_MASK) ==
+          AIK_OUTPUT_MODE_BLE);
+
+    memset(nkro, 0, sizeof(nkro));
+    nkro[2] = 1U;
+    v3f_rf_report_bridge_prepare_cmd(
+        &cmd, 13U, nkro, AIK_OUTPUT_MODE_RF24);
+    CHECK(aik_spi_host_cmd_valid(&cmd) == 1U);
+    CHECK(cmd.cmd == AIK_SPI_CMD_POLL_WITH_RF);
+    CHECK(memcmp(cmd.nkro16, nkro, sizeof(nkro)) == 0);
+}
+
+static void test_battery_piggyback(void)
+{
+    uint16_t half_seq;
+
+    half_seq = aik_spi_half_seq_pack_battery(0x5AU, 68U, 1U);
+    CHECK((uint8_t)half_seq == 0x5AU);
+    CHECK(aik_spi_half_seq_battery_valid(half_seq) == 1U);
+    CHECK(aik_spi_half_seq_battery_percent(half_seq) == 68U);
+
+    half_seq = aik_spi_half_seq_pack_battery(0xA5U, 101U, 1U);
+    CHECK((uint8_t)half_seq == 0xA5U);
+    CHECK(aik_spi_half_seq_battery_valid(half_seq) == 0U);
+}
+
 int main(void)
 {
     test_control_actions();
     test_right_state_context_flags();
+    test_state_only_poll_stays_plain();
+    test_battery_piggyback();
     if(s_failures == 0)
     {
         printf("host_approval_control_test: all checks passed\n");

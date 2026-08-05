@@ -11,6 +11,19 @@
 #include "ch585_half_report.h"
 #include "ch585_profile.h"
 
+#ifndef CH585_BATTERY_ENABLE
+#define CH585_BATTERY_ENABLE 0
+#endif
+#ifndef CH585_BATTERY_TRANSPORT_ENABLE
+#define CH585_BATTERY_TRANSPORT_ENABLE CH585_BATTERY_ENABLE
+#endif
+#if CH585_BATTERY_ENABLE
+#include "ch585_i2c_bus.h"
+#include "ch585_power_status.h"
+#include "ch585_soft_i2c_bus.h"
+#include "max17048.h"
+#endif
+
 #ifndef CH585_BLE_PAIRING_EXT_EEPROM
 #define CH585_BLE_PAIRING_EXT_EEPROM 0
 #endif
@@ -106,6 +119,18 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_WIRELESS_MODE_SWITCH_DEBOUNCE_FRAMES 160U
 #endif
 
+#ifndef CH585_BATTERY_SAMPLE_FRAMES
+#define CH585_BATTERY_SAMPLE_FRAMES 4096U
+#endif
+
+/* Software I2C is synchronous. Polling it in the scan loop can make the
+ * SPI-slave side miss an H417 transaction, so production defaults to one
+ * sample before SPI is started. A coordinated pause/ack protocol is required
+ * before runtime refresh can be enabled safely. */
+#ifndef CH585_BATTERY_RUNTIME_POLL_ENABLE
+#define CH585_BATTERY_RUNTIME_POLL_ENABLE 0
+#endif
+
 #ifndef BLE_HID_KBD_REPORT_LEN
 #define BLE_HID_KBD_REPORT_LEN 8U
 #endif
@@ -148,6 +173,14 @@ static int s_last_spi_result;
 static uint8_t s_profile_status_pending;
 static uint8_t s_profile_xfer_pending;
 static uint8_t s_right_frame_valid;
+#if CH585_BATTERY_ENABLE
+static ch585_i2c_bus_t s_battery_bus;
+static max17048_t s_battery_gauge;
+static ch585_power_status_config_t s_battery_cfg;
+static ch585_power_status_t s_battery_status;
+static uint16_t s_battery_sample_countdown;
+static uint8_t s_battery_read_failures;
+#endif
 static uint8_t s_local_rotary_last_ab;
 static int8_t s_local_rotary_accum;
 static uint8_t s_local_rotary_cw_frames;
@@ -193,6 +226,98 @@ static ch585_ads7948_mux_side_t half_scan_side(void)
         CH585_ADS7948_MUX_SIDE_RIGHT :
         CH585_ADS7948_MUX_SIDE_LEFT;
 }
+
+#if CH585_BATTERY_ENABLE
+static void half_scan_battery_sample(void)
+{
+    max17048_sample_t sample;
+    uint8_t alert_low =
+        (GPIOB_ReadPortPin(GPIO_Pin_5) == 0U) ? 1U : 0U;
+
+    if(max17048_read_sample(&s_battery_gauge,
+                            alert_low,
+                            &sample) == MAX17048_STATUS_OK)
+    {
+        ch585_power_status_from_sample(
+            &s_battery_cfg,
+            &sample,
+            (uint8_t)(GPIOB_ReadPortPin(GPIO_Pin_6) != 0U),
+            (uint8_t)(GPIOB_ReadPortPin(GPIO_Pin_7) != 0U),
+            &s_battery_status);
+        s_battery_read_failures = 0U;
+        return;
+    }
+
+    if(s_battery_read_failures < 3U)
+    {
+        s_battery_read_failures++;
+    }
+    if(s_battery_read_failures >= 3U)
+    {
+        ch585_power_status_from_sample(
+            &s_battery_cfg,
+            0,
+            (uint8_t)(GPIOB_ReadPortPin(GPIO_Pin_6) != 0U),
+            (uint8_t)(GPIOB_ReadPortPin(GPIO_Pin_7) != 0U),
+            &s_battery_status);
+    }
+}
+
+static void half_scan_battery_init(void)
+{
+    max17048_config_t gauge_cfg;
+
+    memset(&s_battery_status, 0, sizeof(s_battery_status));
+    ch585_power_status_default_config(&s_battery_cfg);
+    GPIOBDigitalCfg(ENABLE,
+                    GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7 |
+                    GPIO_Pin_20 | GPIO_Pin_21);
+    GPIOB_ModeCfg(GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7, GPIO_ModeIN_PU);
+
+    (void)ch585_soft_i2c_bus_init(&s_battery_bus);
+    max17048_default_config(&gauge_cfg);
+    gauge_cfg.bus = &s_battery_bus;
+    (void)max17048_init(&s_battery_gauge, &gauge_cfg);
+    s_battery_read_failures = 0U;
+    s_battery_sample_countdown = CH585_BATTERY_SAMPLE_FRAMES;
+    half_scan_battery_sample();
+}
+
+static void half_scan_battery_poll(void)
+{
+#if CH585_BATTERY_RUNTIME_POLL_ENABLE
+    if(s_battery_sample_countdown != 0U)
+    {
+        s_battery_sample_countdown--;
+        return;
+    }
+
+    s_battery_sample_countdown = CH585_BATTERY_SAMPLE_FRAMES;
+    half_scan_battery_sample();
+#endif
+}
+
+static uint8_t half_scan_battery_percent(void)
+{
+    uint16_t percent;
+
+    if((s_battery_status.flags & CH585_POWER_FLAG_BAT_VALID) == 0U)
+    {
+        return AIK_BATTERY_PERCENT_UNKNOWN;
+    }
+
+    percent = (uint16_t)((s_battery_status.soc_q8_percent + 128U) >> 8U);
+    return (percent > 100U) ? 100U : (uint8_t)percent;
+}
+#else
+static void half_scan_battery_init(void)
+{
+}
+
+static void half_scan_battery_poll(void)
+{
+}
+#endif
 
 static void half_scan_build_down_bits(void)
 {
@@ -759,7 +884,18 @@ static void half_scan_compact_raw(const ch585_ads7948_mux_acq_t *acq,
 
 static void half_scan_build_frame(void)
 {
+#if CH585_BATTERY_ENABLE && CH585_BATTERY_TRANSPORT_ENABLE
+    uint8_t frame_counter = (uint8_t)(s_tx_frame.half_seq + 1U);
+    uint8_t battery_valid = (uint8_t)(
+        (s_battery_status.flags & CH585_POWER_FLAG_BAT_VALID) != 0U);
+
+    s_tx_frame.half_seq = aik_spi_half_seq_pack_battery(
+        frame_counter,
+        half_scan_battery_percent(),
+        battery_valid);
+#else
     s_tx_frame.half_seq++;
+#endif
     half_scan_build_down_bits();
     half_scan_apply_local_inputs();
     aik_spi_half_state_finish(&s_tx_frame,
@@ -1103,6 +1239,17 @@ static void half_scan_apply_host_cmd(void)
 
 #if CH585_SPI_ACCEPT_HOST_CMD
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
+#if CH585_BLE_HID_ENABLE
+    if(((s_rx_cmd.cmd == AIK_SPI_CMD_POLL) ||
+        (s_rx_cmd.cmd == AIK_SPI_CMD_POLL_WITH_RF) ||
+        (s_rx_cmd.cmd == AIK_SPI_CMD_PUSH_RIGHT_STATE)) &&
+       ((aik_spi_host_cmd_power_flags(&s_rx_cmd) &
+         AIK_SPI_POWER_FLAG_BAT_VALID) != 0U))
+    {
+        (void)BLE_HID_SetBatteryLevel(
+            aik_spi_host_cmd_battery_percent(&s_rx_cmd));
+    }
+#endif
     if(s_rx_cmd.cmd == AIK_SPI_CMD_POLL)
     {
         uint8_t output_mode = half_scan_host_output_mode(s_rx_cmd.cmd,
@@ -1323,6 +1470,30 @@ static void half_scan_debug_poll(uint8_t key_count)
           (unsigned int)s_ble_boot8[6],
           (unsigned int)s_ble_boot8[7]);
 #endif
+#if CH585_SPI_ACCEPT_HOST_CMD
+    PRINT("bridge flags=%02x rvalid=%u rseq=%u rdown=%02x%02x%02x%02x%02x%02x batcmd=%u/%02x\r\n",
+          (unsigned int)s_rx_cmd.flags,
+          (unsigned int)s_right_frame_valid,
+          (unsigned int)s_right_frame.half_seq,
+          (unsigned int)s_right_frame.down_bits[0],
+          (unsigned int)s_right_frame.down_bits[1],
+          (unsigned int)s_right_frame.down_bits[2],
+          (unsigned int)s_right_frame.down_bits[3],
+          (unsigned int)s_right_frame.down_bits[4],
+          (unsigned int)s_right_frame.down_bits[5],
+          (unsigned int)aik_spi_host_cmd_battery_percent(&s_rx_cmd),
+          (unsigned int)aik_spi_host_cmd_power_flags(&s_rx_cmd));
+#endif
+#if CH585_BATTERY_ENABLE
+    PRINT("bat valid=%u pct=%u mv=%u charge=%u flags=%02x fail=%u\r\n",
+          (unsigned int)(
+              (s_battery_status.flags & CH585_POWER_FLAG_BAT_VALID) != 0U),
+          (unsigned int)half_scan_battery_percent(),
+          (unsigned int)s_battery_status.vbat_mv,
+          (unsigned int)s_battery_status.charge_state,
+          (unsigned int)s_battery_status.flags,
+          (unsigned int)s_battery_read_failures);
+#endif
 }
 #else
 static void half_scan_debug_uart_init(void)
@@ -1384,6 +1555,7 @@ static void half_scan_init(void)
 
     ch585_ads7948_mux_gpio_init();
     half_scan_local_gpio_init();
+    half_scan_battery_init();
     (void)ch585_ads7948_mux_acq_init(&s_acq, profile);
 
     mag_key_default_config(&cfg);
@@ -1480,6 +1652,7 @@ int main(void)
         half_scan_compact_raw(&s_acq, s_compact_raw, key_count);
         (void)mag_key_engine_update(&s_engine, s_compact_raw);
         half_scan_build_frame();
+        half_scan_battery_poll();
         half_scan_debug_poll(key_count);
 #if CH585_RF_TX_ENABLE
         ch585_rf_nkro_tx_poll();
