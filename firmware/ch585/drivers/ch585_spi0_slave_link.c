@@ -14,10 +14,12 @@
 
 #if CH585_SPI0_SLAVE_LINK_TMOS_HOOK
 #include "HAL.h"
+#define CH585_SPI0_SLAVE_LINK_WAIT_TICKS MS1_TO_SYSTEM_TIME(4U)
 #endif
 
 static uint32_t s_ch585_spi0_slave_link_frames;
 static uint32_t s_ch585_spi0_slave_link_aborts;
+static uint32_t s_ch585_spi0_slave_link_timeouts;
 static uint16_t s_ch585_spi0_slave_link_last_rx_count;
 static uint8_t s_ch585_spi0_slave_link_last_rx_head[4];
 
@@ -27,10 +29,31 @@ static void ch585_spi0_slave_link_wait_hook(void)
     static uint16_t hook_div;
 
     hook_div++;
-    if((hook_div & 0x03FFU) == 0U)
+    if((hook_div & 0x007FU) == 0U)
     {
         TMOS_SystemProcess();
     }
+#endif
+}
+
+static uint32_t ch585_spi0_slave_link_wait_start(void)
+{
+#if CH585_SPI0_SLAVE_LINK_TMOS_HOOK
+    return TMOS_GetSystemClock();
+#else
+    return 0U;
+#endif
+}
+
+static uint8_t ch585_spi0_slave_link_wait_expired(uint32_t start)
+{
+#if CH585_SPI0_SLAVE_LINK_TMOS_HOOK
+    /* Bound a missing-master transaction so BLE scheduling cannot starve. */
+    return (uint8_t)((uint32_t)(TMOS_GetSystemClock() - start) >=
+                     CH585_SPI0_SLAVE_LINK_WAIT_TICKS);
+#else
+    (void)start;
+    return 0U;
 #endif
 }
 
@@ -102,10 +125,17 @@ static int ch585_spi0_slave_link_wait_tx_done(uint8_t *rx, uint16_t len)
 {
     uint8_t saw_select = 0U;
     uint16_t rx_index = 0U;
+    uint32_t wait_start = ch585_spi0_slave_link_wait_start();
 
     while((R8_SPI0_INT_FLAG & RB_SPI_IF_CNT_END) == 0U)
     {
         ch585_spi0_slave_link_wait_hook();
+
+        if(ch585_spi0_slave_link_wait_expired(wait_start) != 0U)
+        {
+            ch585_spi0_slave_link_abort_dma();
+            return CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT;
+        }
 
         if((R8_SPI0_RUN_FLAG & RB_SPI_SLV_SELECT) != 0U)
         {
@@ -163,10 +193,17 @@ static int ch585_spi0_slave_link_wait_tx_done(uint8_t *rx, uint16_t len)
 static int ch585_spi0_slave_link_wait_tx_only_done(void)
 {
     uint8_t saw_select = 0U;
+    uint32_t wait_start = ch585_spi0_slave_link_wait_start();
 
     while((R8_SPI0_INT_FLAG & RB_SPI_IF_CNT_END) == 0U)
     {
         ch585_spi0_slave_link_wait_hook();
+
+        if(ch585_spi0_slave_link_wait_expired(wait_start) != 0U)
+        {
+            ch585_spi0_slave_link_abort_dma();
+            return CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT;
+        }
 
         if((R8_SPI0_RUN_FLAG & RB_SPI_SLV_SELECT) != 0U)
         {
@@ -186,10 +223,17 @@ static int ch585_spi0_slave_link_wait_tx_only_done(void)
 static int ch585_spi0_slave_link_wait_rx_done(uint8_t *rx, uint16_t len)
 {
     uint8_t saw_select = 0U;
+    uint32_t wait_start = ch585_spi0_slave_link_wait_start();
 
     while((R8_SPI0_INT_FLAG & RB_SPI_IF_CNT_END) == 0U)
     {
         ch585_spi0_slave_link_wait_hook();
+
+        if(ch585_spi0_slave_link_wait_expired(wait_start) != 0U)
+        {
+            ch585_spi0_slave_link_abort_dma();
+            return CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT;
+        }
 
         if((R8_SPI0_RUN_FLAG & RB_SPI_SLV_SELECT) != 0U)
         {
@@ -223,6 +267,7 @@ void ch585_spi0_slave_link_init(void)
 {
     s_ch585_spi0_slave_link_frames = 0U;
     s_ch585_spi0_slave_link_aborts = 0U;
+    s_ch585_spi0_slave_link_timeouts = 0U;
     s_ch585_spi0_slave_link_last_rx_count = 0U;
     memset(s_ch585_spi0_slave_link_last_rx_head, 0, sizeof(s_ch585_spi0_slave_link_last_rx_head));
     ch585_spi0_slave_link_pins_init();
@@ -256,6 +301,10 @@ int ch585_spi0_slave_link_serve_frame(const uint8_t *tx, uint8_t *rx, uint16_t l
     {
         s_ch585_spi0_slave_link_aborts++;
     }
+    else if(result == CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT)
+    {
+        s_ch585_spi0_slave_link_timeouts++;
+    }
 
     return result;
 }
@@ -285,6 +334,10 @@ int ch585_spi0_slave_link_receive_frame(uint8_t *rx, uint16_t len)
     else if(result == CH585_SPI0_SLAVE_LINK_ERR_ABORT)
     {
         s_ch585_spi0_slave_link_aborts++;
+    }
+    else if(result == CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT)
+    {
+        s_ch585_spi0_slave_link_timeouts++;
     }
 
     return result;
@@ -316,6 +369,10 @@ int ch585_spi0_slave_link_serve_tx_frame(const uint8_t *tx, uint16_t len)
     {
         s_ch585_spi0_slave_link_aborts++;
     }
+    else if(result == CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT)
+    {
+        s_ch585_spi0_slave_link_timeouts++;
+    }
 
     return result;
 }
@@ -329,6 +386,7 @@ void ch585_spi0_slave_link_get_stats(ch585_spi0_slave_link_stats_t *stats)
 
     stats->frames = s_ch585_spi0_slave_link_frames;
     stats->aborts = s_ch585_spi0_slave_link_aborts;
+    stats->timeouts = s_ch585_spi0_slave_link_timeouts;
     stats->last_rx_count = s_ch585_spi0_slave_link_last_rx_count;
     memcpy(stats->last_rx_head, s_ch585_spi0_slave_link_last_rx_head, sizeof(stats->last_rx_head));
     stats->flags = R8_SPI0_INT_FLAG;

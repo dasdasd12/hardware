@@ -6,11 +6,13 @@
 #define CH585_SPI0_SLAVE_LINK_OK         0
 #define CH585_SPI0_SLAVE_LINK_ERR_PARAM -1
 #define CH585_SPI0_SLAVE_LINK_ERR_ABORT -2
+#define CH585_SPI0_SLAVE_LINK_ERR_TIMEOUT -3
 
 typedef struct
 {
     uint32_t frames;
     uint32_t aborts;
+    uint32_t timeouts;
     uint16_t last_rx_count;
     uint8_t last_rx_head[4];
     uint8_t flags;

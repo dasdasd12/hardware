@@ -74,11 +74,10 @@ class FirmwareMainMvpContract(unittest.TestCase):
         assert_re(self, makefile, r"^all:\s*half_scan_left half_scan_right$")
         assert_re(self, makefile, r"half_scan_left:\n\t@.*CH585_RF_TX_ENABLE=1")
         assert_re(self, makefile, r"half_scan_left:\n\t@.*CH585_BLE_HID_ENABLE=1")
-        assert_re(
-            self,
-            makefile,
-            r"half_scan_left:\n\t@.*CH585_BLE_PAIRING_EXT_EEPROM=1",
-        )
+        half_scan_left_target = re.search(
+            r"half_scan_left:\n(?P<body>\t@.*)", makefile
+        ).group("body")
+        self.assertNotIn("CH585_BLE_PAIRING_EXT_EEPROM=1", half_scan_left_target)
         assert_re(self, makefile, r"half_scan_right:\n\t@.*CH585_RF_TX_ENABLE=0")
         self.assertIn("rf_keyboard_tx is disabled", makefile)
         self.assertNotIn("APP=rf_keyboard_tx", makefile)

@@ -585,6 +585,42 @@ static void test_wireless_approval_controls(void)
     ch585_half_report_build_nkro16(&left, &right, nkro);
 }
 
+static void test_wireless_mode_shortcut_consumption(void)
+{
+    aik_spi_half_state_v1_t left;
+    aik_spi_half_state_v1_t right;
+    uint8_t base_pairs[AIK_KEY_COUNT_TOTAL * 2U];
+    uint8_t nkro[AIK_NKRO_REPORT_BYTES];
+
+    memset(&left, 0, sizeof(left));
+    memset(&right, 0, sizeof(right));
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+
+    memset(base_pairs, 0, sizeof(base_pairs));
+    base_pairs[38U * 2U] = 0x04U; /* Fn physical key -> A */
+    base_pairs[43U * 2U] = 0x3CU; /* mode key -> F3 */
+    ch585_half_report_set_key_outputs(base_pairs);
+    ch585_half_report_clear_fn_overlay();
+
+    /* Fn+F3 is reserved for BLE mode and must not reach the host. */
+    set_half_global_key(&left, &right, 38U);
+    set_half_global_key(&left, &right, 43U);
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+    CHECK(nkro_usage_set(nkro, 0x04U) == 0U);
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
+
+    /* Releasing Fn first still keeps F3 consumed until F3 is released. */
+    memset(&right, 0, sizeof(right));
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
+
+    memset(&left, 0, sizeof(left));
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+    set_half_global_key(&left, &right, 43U);
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
+}
+
 static void test_wireless_profile_shortcut_consumption(void)
 {
     aik_spi_half_state_v1_t left;
@@ -922,6 +958,7 @@ int main(void)
     test_approval_control_state_machine();
     test_wireless_claude_shortcut();
     test_wireless_approval_controls();
+    test_wireless_mode_shortcut_consumption();
     test_wireless_profile_shortcut_consumption();
     test_wireless_composition_matches_v3f();
     test_wireless_profile_mapping();
