@@ -100,7 +100,7 @@ static int display_registers_valid(void)
        (snapshot.layer_whpcr != 0x032f0010u) ||
        (snapshot.layer_wvpcr != 0x01f70018u) ||
        (snapshot.layer_cfbar != (uint32_t)s_framebuffer) ||
-       (snapshot.layer_cfblr != 0x03200323u) ||
+       (snapshot.layer_cfblr != 0x0320033Fu) ||
        (snapshot.layer_cfblnr != V5F_DISPLAY_HEIGHT) ||
        ((LTDC_Layer1->PFCR & LTDC_PFCR_PF) != LTDC_Pixelformat_L8) ||
        ((snapshot.gcr & LTDC_GCR_LTDCEN) == 0u) ||

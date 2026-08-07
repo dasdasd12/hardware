@@ -109,7 +109,8 @@
 #endif
 
 #ifndef APP_CH585_CONFIG_TEST_ENABLE
-#define APP_CH585_CONFIG_TEST_ENABLE 1
+/* Legacy V5F-owned CH585 diagnostic; current product ownership is on V3F. */
+#define APP_CH585_CONFIG_TEST_ENABLE 0
 #endif
 
 #ifndef APP_CH585_CONFIG_TEST_LOOP
@@ -129,7 +130,8 @@
 #endif
 
 #ifndef APP_CH585_CALIBRATE_TEST_ENABLE
-#define APP_CH585_CALIBRATE_TEST_ENABLE 1
+/* Legacy V5F-owned CH585 diagnostic; current product ownership is on V3F. */
+#define APP_CH585_CALIBRATE_TEST_ENABLE 0
 #endif
 
 #ifndef APP_CH585_CALIBRATE_TEST_LOOP

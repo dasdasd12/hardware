@@ -1,0 +1,17 @@
+#ifndef V5F_LTDC_ARGB8888_PROBE_H
+#define V5F_LTDC_ARGB8888_PROBE_H
+
+#include <stdint.h>
+
+#define V5F_LTDC_ARGB8888_PROBE_WIDTH   320u
+#define V5F_LTDC_ARGB8888_PROBE_HEIGHT  192u
+#define V5F_LTDC_ARGB8888_PROBE_BPP     4u
+#define V5F_LTDC_ARGB8888_PROBE_BYTES   \
+    (V5F_LTDC_ARGB8888_PROBE_WIDTH * V5F_LTDC_ARGB8888_PROBE_HEIGHT * \
+     V5F_LTDC_ARGB8888_PROBE_BPP)
+#define V5F_LTDC_ARGB8888_PROBE_CRC32   0x8B822072u
+
+extern const uint8_t v5f_ltdc_argb8888_probe_320x192[];
+extern const uint8_t v5f_ltdc_argb8888_probe_320x192_end[];
+
+#endif

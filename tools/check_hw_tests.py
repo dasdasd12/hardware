@@ -18,11 +18,12 @@ H417_FLASH_NAND_ROOT = os.path.join(H417_V3F_DRIVER_ROOT, "gd5f1g_spi_nand")
 H417_LTDC_RGB_ROOT = os.path.join(H417_V5F_DRIVER_ROOT, "ltdc_rgb")
 H417_GPHA_2D_ROOT = os.path.join(H417_V5F_DRIVER_ROOT, "gpha_2d")
 H417_SDRAM_DRIVER_ROOT = os.path.join(H417_V5F_DRIVER_ROOT, "sdram")
-H417_V3F_TEST_ROOT = os.path.join(H417_ROOT, "passed", "v3f_standalone")
+H417_V3F_TEST_ROOT = os.path.join(H417_ROOT, "cases", "v3f_standalone")
 H417_V3F_TEST_SRC_ROOT = os.path.join(H417_V3F_TEST_ROOT, "src")
-H417_V5F_TEST_ROOT = os.path.join(H417_ROOT, "passed", "v5f_rtthread")
+H417_V5F_TEST_ROOT = os.path.join(H417_ROOT, "cases", "v5f_rtthread")
 H417_V5F_TEST_SRC = os.path.join(H417_V5F_TEST_ROOT, "src", "v5f_hw_test.c")
 H417_USB_CDC_SOURCE = os.path.join(H417_FIRMWARE_ROOT, "v5f_rtthread", "applications", "usb_cdc_dual.c")
+H417_SDRAM_RESULT_READER = os.path.join(H417_ROOT, "tools", "read_sdram_result.ps1")
 
 
 def fail(message):
@@ -119,7 +120,7 @@ def main():
     assert_contains(h417_makefile, r"RGB1W_PIOC_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/rgb1w_pioc", "V3F RGB1W PIOC driver tree")
     assert_contains(h417_makefile, r"FLASH_NAND_ROOT\s*:=\s*\$\(V3F_DRIVER_ROOT\)/gd5f1g_spi_nand", "V3F GD5F1G driver tree")
     assert_contains(h417_makefile, r"LTDC_RGB_ROOT\s*:=\s*\$\(V5F_DRIVER_ROOT\)/ltdc_rgb", "V5F LTDC RGB driver tree")
-    assert_contains(h417_makefile, r"V3F_STANDALONE_ROOT\s*:=\s*passed/v3f_standalone", "H417 passed V3F standalone test root")
+    assert_contains(h417_makefile, r"V3F_STANDALONE_ROOT\s*:=\s*cases/v3f_standalone", "H417 V3F standalone test root")
     assert_contains(h417_makefile, r"H417_DUAL_CORE_TESTS\s*:=", "H417 dual-core test wrapper list")
     assert_contains(h417_makefile, r"H417_HW_TEST_BUILD_NAME\s*:=\s*\$\(HW_TEST\)", "H417 default build name")
     assert_contains(h417_makefile, r"DIRECT_V5F_BUILD_ROOT\s*:=\s*\.\./\.\./\.\./hw_tests/h417/\$\(BUILD_ROOT\)/\$\(H417_HW_TEST_BUILD_NAME\)", "direct V5F test build root")
@@ -356,8 +357,13 @@ def main():
     )
     assert_contains(
         h417_makefile,
+        r"h417_v5f_sdram_memtest[\s\S]*?APP_V5F_HW_TEST_USB_CDC\s*:=\s*1",
+        "main USBFS CDC enabled for the SDRAM full-memory test",
+    )
+    assert_contains(
+        h417_makefile,
         r"h417_v5f_sdram_dq_probe[\s\S]*?APP_V5F_HW_TEST_USB_CDC\s*:=\s*1",
-        "USBFS CDC enabled only for SDRAM DQ probe debug build",
+        "USBFS CDC enabled for the SDRAM DQ probe debug build",
     )
     assert_contains(
         h417_makefile,
@@ -383,6 +389,460 @@ def main():
         H417_V5F_TEST_SRC,
         r"sdram_usb_debug_init",
         "SDRAM DQ probe USB CDC debug initialization",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"V5F_SDRAM_MEMTEST_CDC_ONLY",
+        "CDC-only SDRAM full-memory test gate",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"H417 SDRAM CDC TEST v61 DMA2 ISOLATION",
+        "SDRAM DMA-controller isolation stress banner",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"WATCHDOG RECOVERY cause=IWDG",
+        "SDRAM hard-lock retained recovery report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"WATCHDOG ARMED timeout_approx_s=25 retain=2017ff00 checkpoint=pre-enable",
+        "SDRAM hard-lock independent watchdog arm marker",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"memcpy\(framed, line, length\)",
+        "SDRAM CDC line and CRLF coalescing",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"V5F_SDRAM_DMA_RESTART_GAP_US\s+100u",
+        "SDRAM DMA restart settling interval",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"RANGE C0000000-C1FFFFFF bytes=33554432 access=short-dma1,stress-dma2-word32",
+        "SDRAM full native-x16 address range",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"BANK_SPAN bytes=00800000 bases=C0000000/C0800000/C1000000/C1800000",
+        "SDRAM native-x16 four-bank base mapping",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"X16_DQ START patterns=0000,ffff,aaaa,5555,walking1,walking0 banks=4 samples=64",
+        "full x16 fixed and walking-pattern per-DQ diagnostic",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"X16_BIT D%u FAIL bad=%u/%u first=%08x exp=%04x got=%04x",
+        "per-DQ error count and first-failure report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"BW %s bytes=%u cycles=%u raw=%u.%02uMB/s useful=%u.%02uMB/s",
+        "measured raw and good-bit-adjusted SDRAM bandwidth report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_dma_timed",
+        "timed 32-bit and 256-bit DMA SDRAM read/write paths",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"DMA_Init\(DMA2_Channel3, &dma\)",
+        "sustained SDRAM stress isolated onto DMA2 channel 3",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"DMA_ROUTE short=DMA1_CH3 stress=DMA2_CH3 gap_us=100",
+        "short and sustained DMA controller routing report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"GEOMETRY fmc_width=16 device_width=16 row=13 col=9 banks=4",
+        "native-x16 SDRAM with native-halfword CPU accesses",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"init\.FMC_MemoryDataWidth\s*=\s*FMC_MemoryDataWidth_16",
+        "FMC SDRAM controller native x16 data width",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_x16_low8_read",
+        "native-halfword low-byte masked read helper",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_x8_full",
+        "finite x8 full-memory test entry",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_x8_bank_probe",
+        "x8 BA0/BA1 bank-alias diagnostic",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"FULL_TEST START mode=prefetch access=cpu16 compare=low8 logical=%u physical=%u banks=%s",
+        "prefetched masked-halfword all-bank full test",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"BANK_READ_SWITCH grouped_bad=%u/256 alt_bad=%u/256",
+        "grouped-versus-alternating bank read diagnostic",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"BANK_PAIR_PALL bank=%u cmd=%u",
+        "explicit precharge-all bank switch diagnostic",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"BANK_MODE START modes=normal,enhance,rburst phases=16 pipes=3",
+        "low-byte cross-bank FMC read mode, phase, and pipe scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"BANK_MODE FORCE mode=normal enh=0 rb=0",
+        "fixed vendor-reference FMC read mode after diagnostic scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"BANK_SETTLE START access=cpu16 compare=low8 discard=0,1,2,4,8,16,32",
+        "native-halfword low-byte bank-switch settling scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_bank_settle_scan\(\)",
+        "bank-switch settling diagnostic invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"BANK_SYNC START access=cpu16 compare=low8 strategies=direct,d1,fence,us1,us10,pall,d32,us10_r8191",
+        "bank-switch synchronization strategy scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_bank_sync_scan\(\)",
+        "bank-switch synchronization diagnostic invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"MAP16 START access=cpu16 compare=low8 native=c0000000 remap=60000000",
+        "native and remapped SDRAM window comparison scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_map16_report\(\"remap_read_native\"",
+        "native-write remapped-read comparison",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_map16_report\(\"native_read_remap\"",
+        "remapped-write native-read comparison",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_map16_scan\(\)",
+        "native/remapped x16 comparison invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"ACCESS_PROFILE START write=cpu32 repeated-byte compare=low8",
+        "CPU 8/16/32-bit access matrix using known 32-bit writes",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_access_profile_report\(\"wch_official\"",
+        "WCH prefetch plus remapped-window access profile",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_access_profile_scan\(\)",
+        "normal-versus-WCH access profile invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"DMA_PATH START source=sdram destination=sram channel=DMA1_CH3 modes=word,256",
+        "official-style SDRAM-to-SRAM DMA path comparison",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"DMA_SAMPLE word_ok=%u b0=%08x/%08x wide_ok=%u b1=%08x/%08x mask=00ff00ff",
+        "raw word and 256-bit DMA sample report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"DMA_BOUNDARY word=%u/3 bad=%u wide256=%u/3 bad=%u span=64 compare=00ff00ff",
+        "single DMA transfer spanning each physical Bank boundary",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"DMA_REC word direct=%u d1=%u d2=%u pall=%u pall_ar1=%u us10=%u bad=%u",
+        "32-bit DMA Bank-switch recovery strategies",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"DMA_REC wide256 direct=%u d1=%u d2=%u pall=%u pall_ar1=%u us10=%u bad=%u",
+        "256-bit DMA Bank-switch recovery strategies",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_dma_path_scan\(\)",
+        "DMA bank and boundary diagnostic invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"CAS_SCAN START modes=cl3,cl2 phases=16 pipes=3 score=cpu16/256\+dma",
+        "matched SDRAM/FMC CL3 and CL2 phase/pipe scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"CAS_SCAN END restored=cl3 phase=10 pipe=0 mode=0230",
+        "CAS scan restores the production CL3 configuration",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_cas_scan\(\)",
+        "CAS comparison invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"COLD_SCAN START order=normal_n0,prefetch_n0,normal_n15 phases=16 pipes=3",
+        "cold-init normal, prefetch, and NRFS profile comparison",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"COLD_PROFILE name=%s prefetch=%u nrfs=%u init=%d scan=%u verify=%u d32=%u dma256=%u",
+        "cold-init CPU and DMA profile report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"NRFS_SCAN START mode=normal values=0\.\.15 refreshes_per_event=value\+1",
+        "NRFS refresh-burst count scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_nrfs_scan\(\)",
+        "cold-profile and NRFS scan invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"PREFETCH_CPU direct=%u/4096 bad=%u",
+        "long alternating cross-bank CPU validation in prefetch mode",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"PREFETCH_BOUNDARY bank=%u logical=%08x score=%u/256",
+        "sequential CPU reads across all physical Bank boundaries",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"PREFETCH_DMA_RAW bank=%u ok=%u exp=%02x raw=%08x/%08x",
+        "raw prefetched 256-bit DMA samples",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_prefetch_validate\(\)",
+        "cold-prefetch validation invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_init_profile\(0u, 0u, 1u\)",
+        "normal mode used in the first reported FMC initialization",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"COHERENCE_SINGLE first=%02x after_write=%02x normal=%02x reenable=%02x",
+        "single-address write and prefetch invalidation probe",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"COHERENCE_SEQ prefetch_write=%u/2048 normal_write_then_prefetch=%u/2048",
+        "official-style sequential prefetch comparison",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_prefetch_coherence\(\)",
+        "prefetch coherency diagnostic invocation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"V5F_SDRAM_CLOCK_PERIOD_1HCLK\s+1u",
+        "WCH official SDCLK-equals-HCLK discriminator",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"V5F_SDRAM_OFFICIAL_REFRESH\s+677u",
+        "WCH official refresh-count discriminator",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"NORMAL100_BANK score=%u/4096 bad=%u",
+        "100 MHz normal-mode cross-bank CPU validation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"NORMAL100_DMA word=%u/256 wide=%u/256 bad=%u/%u",
+        "100 MHz normal-mode DMA validation",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"FULL_TEST START mode=normal100 access=cpu16 compare=low8",
+        "100 MHz normal-mode complete low-byte test",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"RECOVERY START refresh=8191 strategies=direct,us20,d32,pall1,pall2,pall_ar1,toggle",
+        "slow-refresh recovery strategy comparison",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"REFRESH_PROFILE START counts=41,80,110,160,240,480,8191",
+        "standard and A2 refresh-count cross-bank comparison",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"CPU STORAGE RESULT PASS mode=prefetch logical_bytes=16777216 compare=low8",
+        "complete prefetched CPU storage-array pass report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"FUNCTION RESULT FAIL reason=prefetch_dma_direct cpu_storage=pass",
+        "separate CPU storage health from the direct DMA path",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"TRANS START access=cpu16 compare=low8 pair=35/ca direct,fence,pall max=128",
+        "column, row, and bank transition scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_transition_report\(\"ba0_nb2\"",
+        "two-bank versus four-bank BA0 comparison",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"V5F_SDRAM_ENHANCE_READ_BIT\s+\(1u << 15\)",
+        "documented R32_SDRAM_MISC enhanced-read bit",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"PASS passes=6 rw_turnaround=separated",
+        "six-pass low-byte March result with separated directions",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"RETENTION PASS delay_ms=1000 checksum=%08x",
+        "x8 delayed full-memory retention verification",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"MAP base=%08x remap=%u nor_en=%u bcr0=%08x misc=%08x",
+        "SDRAM continuous-test FMC map report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_disable_0x60000000_remap\(\)",
+        "SDRAM continuous-test native-window selection",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"IO pwrctl=%08x pcfr1=%08x pd0rm=%u hslv=%u",
+        "SDRAM continuous-test IO configuration report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_cdc_diagnose",
+        "SDRAM automatic CDC failure diagnostics",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_memtest_cdc_wait_for_start",
+        "SDRAM continuous CDC host handshake",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"LOW8 CONFIG fmc_width=16 cpu_width=16 stride=2 compare_mask=00ff",
+        "native-x16 controller and low-byte comparison report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"SCOPE WRITE START writes_only=1",
+        "SDRAM isolated FMC write-path scope phase",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"SCOPE READ START reads_only=1.*no_writes=1",
+        "SDRAM isolated device read-path scope phase",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"READ_SCAN START phases=16 pipes=3",
+        "SDRAM read-only phase and pipe scan",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"MODE_SCAN START afr=1 reads_only=1 modes=afpp,afod,float,ipu,ipd",
+        "SDRAM PD0/PD1 input-mode matrix",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"MODE_SCAN %s cfg=%02x raw=%u/192 fuse=%u/256 map=",
+        "SDRAM raw FMC versus GPIO-fused mode report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"ROUTE_SCAN START reads_only=1 rm=0/1 hslv=0/1 af=1 mode=afpp",
+        "SDRAM PD0/PD1 remap and HSLV matrix",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"ROUTE_SCAN rm=%u hslv=%u pcfr1=%08x raw=%u/192 fuse=%u/256 map=",
+        "SDRAM remap matrix raw and GPIO-fused report",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"SCOPE PIN report=%u map=",
+        "SDRAM per-address PD0/PD1 read mapping",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"V5F_SDRAM_MAX_SDCLK_HZ\s+100000000u",
+        "SDRAM validated 1-HCLK 100 MHz clock limit",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"refresh_count << 1",
+        "SDRAM refresh count field encoding",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"RESULT PASS",
+        "SDRAM full-memory CDC PASS result",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"RESULT FAIL",
+        "SDRAM full-memory CDC FAIL result",
+    )
+    assert_exists(
+        H417_SDRAM_RESULT_READER,
+        "PowerShell SDRAM CDC result reader",
+    )
+    assert_contains(
+        H417_SDRAM_RESULT_READER,
+        r"Write\(\"start`r`n\"\)",
+        "SDRAM reader start handshake",
+    )
+    assert_contains(
+        H417_SDRAM_RESULT_READER,
+        r"CONTINUOUS START",
+        "SDRAM reader continuous streaming mode",
     )
     assert_contains(
         H417_V5F_TEST_SRC,
@@ -466,33 +926,93 @@ def main():
     )
     assert_contains(
         H417_V5F_TEST_SRC,
-        r"GPIO_Remap_VIO1V8_IO_HSLV",
-        "SDRAM VIO18 high-speed IO domain enable",
+        r"AFIO_PCFR1_VIO18_IO_HSLV",
+        "SDRAM VIO18 low-voltage high-speed control",
     )
     assert_contains(
         H417_V5F_TEST_SRC,
-        r"GPIO_Remap_VIO3V3_IO_HSLV",
-        "SDRAM VIO3V3 high-speed IO domain enable",
+        r"AFIO_PCFR1_VIO33_IO_HSLV",
+        "SDRAM VIO3V3 low-voltage high-speed control",
     )
     assert_contains(
         H417_V5F_TEST_SRC,
-        r"GPIO_Remap_VDD3V3_IO_HSLV",
-        "SDRAM VDD3V3 high-speed IO domain enable",
+        r"AFIO_PCFR1_VDD33_IO_HSLV",
+        "SDRAM VDD3V3 low-voltage high-speed control",
     )
     assert_contains(
         H417_V5F_TEST_SRC,
-        r"GPIO_Remap_PD0PD1",
-        "SDRAM PD0/PD1 XI/XO remap enable for DQ10/DQ11",
+        r"AFIO->PCFR1\s*&=\s*~AFIO_PCFR1_PD0_1_REMAP",
+        "SDRAM QEU6 dedicated PD0/PD1 routing for DQ10/DQ11",
     )
     assert_contains(
         H417_V5F_TEST_SRC,
-        r"FMC_ENHANCE_READ_MODE_Disable",
-        "official FMC SDRAM enhance-read field configuration",
+        r"GPIO_PinAFConfig\(GPIOA,\s*GPIO_PinSource9,\s*GPIO_AF15\)",
+        "PA9 GPIO-control isolation from its SDRAM DQ10 AF0 route",
     )
     assert_contains(
         H417_V5F_TEST_SRC,
-        r"FMC_BCR1_FMCEN",
-        "FMC global enable for SDRAM transactions",
+        r"GPIO_PinAFConfig\(GPIOA,\s*GPIO_PinSource10,\s*GPIO_AF15\)",
+        "PA10 GPIO-control isolation from its SDRAM DQ11 AF0 route",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_gpio_af\(GPIOD,\s*GPIO_Pin_0,\s*GPIO_PinSource0,\s*GPIO_AF1\)",
+        "SDRAM DQ10 on dedicated PD0 AF1",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"sdram_gpio_af\(GPIOD,\s*GPIO_Pin_1,\s*GPIO_PinSource1,\s*GPIO_AF1\)",
+        "SDRAM DQ11 on dedicated PD1 AF1",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"H417 SDRAM CDC TEST v71 FULL16",
+        "full-x16 SDRAM acceptance-test banner",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"x16_compare_mask\s*=\s*0xFFFFu",
+        "all sixteen SDRAM data bits in the acceptance comparison mask",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"FULL16 DMA RESULT PASS mask=ffff dma_rw=pass",
+        "full-x16 SDRAM DMA acceptance result",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"H417 SDRAM LTDC TEST v29 ARGB8888 IPC STATIC INTERNAL",
+        "ARGB8888 LTDC pixel-clock polarity diagnostic",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"PCLK CONTRACT source=internal_shared_sram no_sdram=1 no_upload=1 no_dma=1 no_frame_switch=1",
+        "internal-SRAM static-frame isolation contract",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"panel\.pixel_clock_polarity\s*=\s*LTDC_PCPolarity_IPC",
+        "test-local IPC pixel-clock polarity override",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"PCLK RESULT PASS format=argb8888 internal_crc=pass scan=pass ipc=1 fifo_underrun=0",
+        "static ARGB8888 IPC LTDC diagnostic result",
+    )
+    assert_contains(
+        H417_SDRAM_RESULT_READER,
+        r'H417 SDRAM LTDC TEST',
+        "PowerShell result reader recognizes the static LTDC diagnostic",
+    )
+    assert_contains(
+        H417_V5F_TEST_SRC,
+        r"V5F_SDRAM_NORMAL_READ_MODE",
+        "manual-defined FMC SDRAM normal-read field configuration",
+    )
+    assert_not_contains(
+        H417_V5F_TEST_SRC,
+        r"BTCR\[0\]\s*\|=\s*FMC_BCR1_FMCEN",
+        "NAND/NOR/PSRAM FMC enable in the SDRAM initialization path",
     )
     assert_not_contains(
         H417_V5F_TEST_SRC,
@@ -506,7 +1026,7 @@ def main():
     )
     assert_not_contains(
         H417_V5F_TEST_SRC,
-        r"sdram_select_clock_period[\s\S]*?return\s+1u\s*;[\s\S]*?sdram_refresh_count",
+        r"static\s+uint32_t\s+sdram_select_clock_period[\s\S]*?return\s+1u\s*;[\s\S]*?static\s+uint16_t\s+sdram_refresh_count",
         "non-official SDRAM 1HCLK clock period",
     )
     assert_contains(

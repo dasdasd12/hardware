@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "description": "PC-side tests and repository checks.",
+  "tests": [
+    {"id": "host_approval_control", "kind": "host-c", "status": "active", "path": "tests/host/host_approval_control_test.c"},
+    {"id": "host_approval_mailbox", "kind": "host-c", "status": "active", "path": "tests/host/host_approval_mailbox_test.c"},
+    {"id": "host_ch585_link", "kind": "host-c", "status": "active", "path": "tests/host/host_ch585_link_test.c"},
+    {"id": "host_pc_link", "kind": "host-c", "status": "active", "path": "tests/host/host_pc_link_test.c"},
+    {"id": "host_profile_link", "kind": "host-c", "status": "active", "path": "tests/host/host_profile_link_test.c", "variants": ["half0", "half1"]},
+    {"id": "host_profile_shortcut", "kind": "host-c", "status": "active", "path": "tests/host/host_profile_shortcut_test.c"},
+    {"id": "host_profile_runtime", "kind": "host-c", "status": "active", "path": "tests/host/host_profile_runtime_test.c"},
+
+    {"id": "pytest_32k_feasibility", "kind": "pytest", "status": "feasibility", "preserve": true, "path": "tests/python/test_32k_feasibility_hw_tests.py"},
+    {"id": "pytest_ch585_adc_key_cal_tui", "kind": "pytest", "status": "active", "path": "tests/python/test_ch585_adc_key_cal_tui.py"},
+    {"id": "pytest_ch585_adc_mux_hw", "kind": "pytest", "status": "active", "path": "tests/python/test_ch585_adc_mux_hw_test.py"},
+    {"id": "pytest_ch585_adc_mux_tui", "kind": "pytest", "status": "active", "path": "tests/python/test_ch585_adc_mux_tui.py"},
+    {"id": "pytest_h417_ch585_adc_key_cal", "kind": "pytest", "status": "active", "path": "tests/python/test_ch585_h417_adc_key_cal_hw_test.py"},
+    {"id": "pytest_h417_ch585_spi_driver", "kind": "pytest", "status": "active", "path": "tests/python/test_ch585_h417_spi_link_driver.py"},
+    {"id": "pytest_h417_ch585_spi_speed", "kind": "pytest", "status": "feasibility", "preserve": true, "path": "tests/python/test_ch585_h417_spi_speed_hw_test.py"},
+    {"id": "pytest_ch585_half_scan_tui", "kind": "pytest", "status": "active", "path": "tests/python/test_ch585_half_scan_debug_tui.py"},
+    {"id": "pytest_ch585_link_resync", "kind": "pytest", "status": "active", "path": "tests/python/test_ch585_link_resync.py"},
+    {"id": "pytest_magnetic_key_engine_rt", "kind": "pytest", "status": "active", "path": "tests/python/test_ch585_magnetic_key_engine_rt.py"},
+    {"id": "pytest_firmware_hardware_contract", "kind": "pytest", "status": "active", "path": "tests/python/test_check_firmware_hardware_contract.py"},
+    {"id": "pytest_hw_tests_policy", "kind": "pytest", "status": "active", "path": "tests/python/test_check_hw_tests_policy.py"},
+    {"id": "pytest_firmware_main_contract", "kind": "pytest", "status": "active", "path": "tests/python/test_firmware_main_mvp_contract.py"},
+    {"id": "pytest_approval_mailbox_contract", "kind": "pytest", "status": "active", "path": "tests/python/test_h417_approval_mailbox_contract.py"},
+    {"id": "pytest_profile_wireless_mapping", "kind": "pytest", "status": "active", "path": "tests/python/test_profile_wireless_mapping_contract.py"},
+    {"id": "pytest_test_catalog", "kind": "pytest", "status": "active", "path": "tests/python/test_test_catalog.py"},
+
+    {"id": "check_test_catalog", "kind": "check", "status": "active", "path": "tools/check_test_catalog.py"},
+    {"id": "check_hw_tests", "kind": "check", "status": "active", "path": "tools/check_hw_tests.py"},
+    {"id": "check_firmware_hardware_contract", "kind": "check", "status": "active", "path": "tools/check_firmware_hardware_contract.py"},
+    {"id": "check_main_clean", "kind": "check", "status": "active", "path": "firmware/h417/v5f_rtthread/tools/check_main_clean.py"},
+    {"id": "check_usbhs_regressions", "kind": "check", "status": "active", "path": "firmware/h417/v5f_rtthread/tools/check_usbhs_regressions.py"},
+    {"id": "verify_wch_skill", "kind": "check", "status": "active", "path": "skills/wch-mrs-automation/tests/verify-wch-skill.ps1"}
+  ]
+}

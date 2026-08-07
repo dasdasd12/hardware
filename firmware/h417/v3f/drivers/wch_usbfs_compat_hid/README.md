@@ -10,4 +10,4 @@ The protocol core is copied from the WCH CH32H417EVT USBFS CompatibilityHID `Com
 - `include/usbfs_desc.h`
 - `include/usbfs_compatibility_hid.h`
 
-`usb_desc.c` is adapted for the AI keyboard MVP as a USBFS HID keyboard descriptor with one 16-byte NKRO IN report. The example `main.c`, board helper, and report demo loop are intentionally not included here; product firmware wraps this driver with local report policy instead of depending on an external WCH example path.
+`usbfs_desc.c` is adapted for the AI keyboard MVP as a USBFS HID keyboard descriptor with one 16-byte NKRO IN report. The example `main.c`, board helper, and report demo loop are intentionally not included here; product firmware wraps this driver with local report policy instead of depending on an external WCH example path.

@@ -28,6 +28,16 @@
 #define USBFS_DMA_RAM_BASE      ((uintptr_t)0x20178200U)
 #define USBFS_DMA_RAM_SIZE      (USB_CH32H417_FS_EP0_MPS + (USB_CH32H417_MAX_EP_NUM * USBFS_EP_BUFFER_SIZE * 2U))
 
+#ifndef APP_USBFS_STREAM_DIAG
+#define APP_USBFS_STREAM_DIAG 0
+#endif
+
+#if APP_USBFS_STREAM_DIAG
+#define USBFS_IRQ_PRIORITY 0x00U
+#else
+#define USBFS_IRQ_PRIORITY 1U
+#endif
+
 struct usb_dc_ep_state {
     uint16_t ep_mps;
     uint8_t ep_type;
@@ -83,6 +93,104 @@ struct ch32h417_usbfs_diag {
 
 static struct ch32h417_usbfs_udc g_ch32h417_usbfs_udc;
 static struct ch32h417_usbfs_diag g_ch32h417_usbfs_diag;
+
+#if APP_USBFS_STREAM_DIAG
+extern volatile rt_atomic_t rt_interrupt_nest;
+extern void (*rt_interrupt_leave_hook)(void);
+
+static volatile struct ch32h417_usbfs_retain_trace *const usbfs_retain_trace =
+    (volatile struct ch32h417_usbfs_retain_trace *)(uintptr_t)
+        CH32H417_USBFS_RETAIN_TRACE_ADDR;
+
+static __attribute__((always_inline)) inline uint32_t usbfs_read_sp(void)
+{
+    uint32_t value;
+    __asm volatile("mv %0, sp" : "=r"(value));
+    return value;
+}
+
+static __attribute__((always_inline)) inline uint32_t usbfs_read_mscratch(void)
+{
+    uint32_t value;
+    __asm volatile("csrr %0, mscratch" : "=r"(value));
+    return value;
+}
+
+static __attribute__((always_inline)) inline uint32_t usbfs_read_mstatus(void)
+{
+    uint32_t value;
+    __asm volatile("csrr %0, mstatus" : "=r"(value));
+    return value;
+}
+
+static __attribute__((always_inline)) inline uint32_t usbfs_read_gp(void)
+{
+    uint32_t value;
+    __asm volatile("mv %0, gp" : "=r"(value));
+    return value;
+}
+
+static __attribute__((always_inline)) inline void usbfs_trace_mark(
+    uint32_t stage, uint32_t progress)
+{
+    usbfs_retain_trace->magic = CH32H417_USBFS_RETAIN_TRACE_MAGIC;
+    usbfs_retain_trace->version = CH32H417_USBFS_RETAIN_TRACE_VERSION;
+    usbfs_retain_trace->irq_state =
+        (uint32_t)USBFSD->INT_FG |
+        ((uint32_t)USBFSD->INT_ST << 8U) |
+        ((uint32_t)USBFSD->RX_LEN << 16U);
+    usbfs_retain_trace->ep_state =
+        (uint32_t)USBFSD->UEP2_RX_CTRL |
+        ((uint32_t)USBFSD->BASE_CTRL << 8U) |
+        ((uint32_t)USBFSD->INT_EN << 16U);
+    usbfs_retain_trace->progress = progress;
+    usbfs_retain_trace->sp = usbfs_read_sp();
+    usbfs_retain_trace->mscratch = usbfs_read_mscratch();
+    usbfs_retain_trace->mstatus = usbfs_read_mstatus();
+    usbfs_retain_trace->transfer_count = g_ch32h417_usbfs_diag.transfer;
+    usbfs_retain_trace->nak_count = g_ch32h417_usbfs_diag.transfer_nak;
+    usbfs_retain_trace->interrupt_nest = (uint32_t)rt_interrupt_nest;
+    usbfs_retain_trace->leave_hook =
+        (uint32_t)(uintptr_t)rt_interrupt_leave_hook;
+    usbfs_retain_trace->gp = usbfs_read_gp();
+    __asm volatile("fence rw, rw" ::: "memory");
+    /* Commit stage last so it describes a fully written snapshot. */
+    usbfs_retain_trace->stage = stage;
+    __asm volatile("fence rw, rw" ::: "memory");
+}
+
+static __attribute__((always_inline)) inline void usbfs_trace_irq_begin(void)
+{
+    if ((usbfs_retain_trace->magic != CH32H417_USBFS_RETAIN_TRACE_MAGIC) ||
+        (usbfs_retain_trace->version != CH32H417_USBFS_RETAIN_TRACE_VERSION)) {
+        usbfs_retain_trace->sequence = 0U;
+    }
+    usbfs_retain_trace->sequence++;
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_IRQ_ENTER, 0U);
+}
+
+static __attribute__((always_inline)) inline void usbfs_rt_interrupt_leave_traced(void)
+{
+    uint32_t level;
+
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_RT_LEAVE_BEGIN,
+                     (uint32_t)rt_interrupt_nest);
+    /* Inline the four operations performed by the weak RT-Thread leave. */
+    __asm volatile("csrrci %0, mstatus, 8" : "=r"(level) :: "memory");
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_RT_LEAVE_IRQ_OFF, level);
+    if (rt_interrupt_nest != 0) {
+        rt_interrupt_nest--;
+    }
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_RT_LEAVE_NEST_DEC,
+                     (uint32_t)rt_interrupt_nest);
+    __asm volatile("csrw mstatus, %0" :: "r"(level) : "memory");
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_RT_LEAVE_END,
+                     (uint32_t)rt_interrupt_nest);
+}
+#else
+#define usbfs_trace_mark(stage, progress) ((void)0)
+#define usbfs_trace_irq_begin() ((void)0)
+#endif
 
 static uint8_t *const usbfs_ep0_buffer = (uint8_t *)USBFS_DMA_RAM_BASE;
 static uint8_t (*const usbfs_ep_tx_buffer)[USBFS_EP_BUFFER_SIZE] =
@@ -392,6 +500,10 @@ static void usbfs_handle_ep_out_xfer_complete(uint8_t busid, uint8_t ep_idx)
     struct usb_dc_ep_state *ep = &g_ch32h417_usbfs_udc.out_ep[ep_idx];
     uint32_t rx_len = USBFSD->RX_LEN;
 
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_OUT_ENTER,
+                     ((uint32_t)ep_idx << 24U) |
+                     (ep->actual_xfer_len & 0x00FFFFFFU));
+
     if (ep_idx == 0U) {
         g_ch32h417_usbfs_diag.ep0_out++;
         g_ch32h417_usbfs_diag.last_rx_len = rx_len;
@@ -403,14 +515,22 @@ static void usbfs_handle_ep_out_xfer_complete(uint8_t busid, uint8_t ep_idx)
     }
 
     if ((ep->xfer_buf != RT_NULL) && (rx_len != 0U)) {
-        uint32_t room = (ep->xfer_len > ep->actual_xfer_len) ? (ep->xfer_len - ep->actual_xfer_len) : 0U;
+        /*
+         * xfer_len is already the number of bytes still outstanding.  The
+         * old expression subtracted actual_xfer_len a second time, so a
+         * multi-packet read terminated after roughly half its requested
+         * length (a 1024-byte read completed after 512 bytes).
+         */
+        uint32_t room = ep->xfer_len;
         if (rx_len > room) {
             rx_len = room;
         }
         if (rx_len != 0U) {
+            usbfs_trace_mark(CH32H417_USBFS_TRACE_OUT_COPY_BEGIN, rx_len);
             memcpy(ep->xfer_buf + ep->actual_xfer_len,
                    (ep_idx == 0U) ? usbfs_ep0_buffer : usbfs_ep_rx_buffer[ep_idx],
                    rx_len);
+            usbfs_trace_mark(CH32H417_USBFS_TRACE_OUT_COPY_END, rx_len);
         }
     }
 
@@ -431,7 +551,11 @@ static void usbfs_handle_ep_out_xfer_complete(uint8_t busid, uint8_t ep_idx)
         } else {
             *usbfs_ep_rx_ctrl_reg(ep_idx) =
                 (uint8_t)((*usbfs_ep_rx_ctrl_reg(ep_idx) & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_AUTO_TOG | USBFS_UEP_R_RES_NAK);
+            usbfs_trace_mark(CH32H417_USBFS_TRACE_OUT_CALLBACK_BEGIN,
+                             ep->actual_xfer_len);
             usbd_event_ep_out_complete_handler(busid, ep_idx, ep->actual_xfer_len);
+            usbfs_trace_mark(CH32H417_USBFS_TRACE_OUT_CALLBACK_END,
+                             ep->actual_xfer_len);
         }
     } else {
         usbfs_ep_prime_out(ep_idx);
@@ -513,7 +637,7 @@ int usb_dc_ch32h417_usbfs_init(uint8_t busid)
     USBFSD->BASE_CTRL = USBFS_UC_DEV_PU_EN | USBFS_UC_INT_BUSY | USBFS_UC_DMA_EN;
     USBFSD->UDEV_CTRL = USBFS_UD_PD_DIS | USBFS_UD_PORT_EN;
 
-    NVIC_SetPriority(USBFS_IRQn, 1);
+    NVIC_SetPriority(USBFS_IRQn, USBFS_IRQ_PRIORITY);
     NVIC_EnableIRQ(USBFS_IRQn);
 
     rt_kprintf("[USBFS] device init done bc=0x%02x uc=0x%02x ie=0x%02x fg=0x%02x ms=0x%02x otg=0x%08x/0x%08x dma=%08x/%08x rctl=0x%08x cfgr2=0x%08x pcfg=0x%08x irq=%u/%u\r\n",
@@ -767,17 +891,55 @@ static void usbfs_irq_handler(uint8_t busid)
     g_ch32h417_usbfs_diag.irq++;
     g_ch32h417_usbfs_diag.last_intflag = intflag;
     g_ch32h417_usbfs_diag.last_intst = intst;
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_HANDLER_ENTER,
+                     ((uint32_t)intflag << 8U) | intst);
 
     if ((intflag & USBFS_UIF_TRANSFER) != 0U) {
         g_ch32h417_usbfs_diag.transfer++;
         ep_idx = (uint8_t)(intst & USBFS_UIS_ENDP_MASK);
+        usbfs_trace_mark(CH32H417_USBFS_TRACE_TRANSFER,
+                         ((uint32_t)ep_idx << 24U) |
+                         ((uint32_t)(intst & USBFS_UIS_TOKEN_MASK) << 16U) |
+                         (uint32_t)USBFSD->RX_LEN);
         g_ch32h417_usbfs_diag.last_xfer_intflag = intflag;
         g_ch32h417_usbfs_diag.last_xfer_intst = intst;
         g_ch32h417_usbfs_diag.last_xfer_ep = ep_idx;
         g_ch32h417_usbfs_diag.last_xfer_token = (uint8_t)(intst & USBFS_UIS_TOKEN_MASK);
         g_ch32h417_usbfs_diag.last_xfer_rx_len = USBFSD->RX_LEN;
-        g_ch32h417_usbfs_diag.last_xfer_buf0 = usbfs_pack4(usbfs_ep0_buffer);
-        g_ch32h417_usbfs_diag.last_xfer_buf1 = usbfs_pack4(usbfs_ep0_buffer + 4);
+
+        /*
+         * Retire this completion before a class callback is allowed to arm
+         * the endpoint again.  The old ordering cleared UIF_TRANSFER after
+         * the callback.  A native-64 CDC OUT callback immediately re-arms
+         * EP2, so the host could complete the next packet while the old ISR
+         * was still running; the final write-one-to-clear then erased the
+         * new packet's interrupt.  The visible result was an ACK/armed OUT
+         * endpoint with no more callbacks until the watchdog reset V5F.
+         *
+         * NAK a non-control OUT endpoint first so its DMA buffer cannot be
+         * overwritten while the current completion is being consumed.  A
+         * continuation or callback will explicitly prime it again.
+         */
+        if (((intst & USBFS_UIS_TOKEN_MASK) == USBFS_UIS_TOKEN_OUT) &&
+            ((intst & USBFS_UIS_IS_NAK) == 0U) &&
+            (ep_idx != 0U) &&
+            (ep_idx < USB_CH32H417_MAX_EP_NUM)) {
+            volatile uint8_t *rx_ctrl = usbfs_ep_rx_ctrl_reg(ep_idx);
+            *rx_ctrl = (uint8_t)((*rx_ctrl & ~USBFS_UEP_R_RES_MASK) |
+                                 USBFS_UEP_R_AUTO_TOG |
+                                 USBFS_UEP_R_RES_NAK);
+        }
+        usbfs_trace_mark(CH32H417_USBFS_TRACE_FLAG_CLEAR_BEGIN,
+                         USBFS_UIF_TRANSFER);
+        USBFSD->INT_FG = USBFS_UIF_TRANSFER;
+        __asm volatile("fence iorw, iorw" ::: "memory");
+        usbfs_trace_mark(CH32H417_USBFS_TRACE_FLAG_CLEAR_END,
+                         USBFS_UIF_TRANSFER);
+
+        if ((intst & USBFS_UIS_TOKEN_MASK) == USBFS_UIS_TOKEN_SETUP) {
+            g_ch32h417_usbfs_diag.last_xfer_buf0 = usbfs_pack4(usbfs_ep0_buffer);
+            g_ch32h417_usbfs_diag.last_xfer_buf1 = usbfs_pack4(usbfs_ep0_buffer + 4);
+        }
         if (((intst & USBFS_UIS_TOKEN_MASK) == USBFS_UIS_TOKEN_SETUP) &&
             (usbfs_ep0_buffer_has_setup() != 0U)) {
             if (((intst & USBFS_UIS_IS_NAK) != 0U) || (ep_idx != 0U)) {
@@ -805,7 +967,6 @@ static void usbfs_irq_handler(uint8_t busid)
         } else {
             g_ch32h417_usbfs_diag.transfer_bad_ep++;
         }
-        USBFSD->INT_FG = USBFS_UIF_TRANSFER;
     } else if ((intflag & USBFS_UIF_BUS_RST) != 0U) {
         g_ch32h417_usbfs_diag.bus_reset++;
         USBFSD->DEV_ADDR = 0U;
@@ -828,6 +989,7 @@ static void usbfs_irq_handler(uint8_t busid)
     } else {
         USBFSD->INT_FG = intflag;
     }
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_HANDLER_END, intflag);
 }
 
 void usb_dc_ch32h417_usbfs_dump_diag(void)
@@ -893,13 +1055,24 @@ void usb_dc_ch32h417_usbfs_dump_diag(void)
                (unsigned int)usbfs_irq_is_active(USBFSWakeUp_IRQn));
 }
 
-void USBFS_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
+void USBFS_IRQHandler(void)
+    __attribute__((interrupt("WCH-Interrupt-fast"), aligned(16)));
 void USBFS_IRQHandler(void)
 {
     GET_INT_SP();
+    usbfs_trace_irq_begin();
     rt_interrupt_enter();
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_RT_ENTERED, 0U);
     usbfs_irq_handler(USB_CH32H417_BUS_FS);
+#if APP_USBFS_STREAM_DIAG
+    usbfs_rt_interrupt_leave_traced();
+#else
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_RT_LEAVE_BEGIN,
+                     (uint32_t)rt_interrupt_nest);
     rt_interrupt_leave();
+    usbfs_trace_mark(CH32H417_USBFS_TRACE_RT_LEAVE_END,
+                     (uint32_t)rt_interrupt_nest);
+#endif
     FREE_INT_SP();
 }
 

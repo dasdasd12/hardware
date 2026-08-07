@@ -31,10 +31,10 @@ H417_USBHS_DISABLE_SWD ?= 1
 OFFICIAL_USBSS_EXAMPLE_ROOT ?= C:/program1/hardware/WCH/CH32H417/CH32H417EVT/EVT/EXAM/USBSS/DEVICE/CH372Device
 OFFICIAL_USBSS_COMMON_ROOT := $(OFFICIAL_USBSS_EXAMPLE_ROOT)/Common
 OFFICIAL_USBSS_V3F_USER_ROOT := $(OFFICIAL_USBSS_EXAMPLE_ROOT)/V3F/User
-V3F_STANDALONE_ROOT := passed/v3f_standalone
+V3F_STANDALONE_ROOT := cases/v3f_standalone
 V3F_STANDALONE_SRC_ROOT := $(V3F_STANDALONE_ROOT)/src
 H417_V3F_WAKE_STUB_TEST := h417_v5f_wake_stub
-H417_DUAL_CORE_TESTS := h417_v5f_ltdc h417_v5f_ltdc_l8_palette_image h417_v5f_ltdc_rgb565_diag h417_v5f_ltdc_ui_frames h417_v5f_gpha_r2m_fill h417_v5f_gpha_pfc_l8_rgb565 h417_v5f_gpha_blend_rgb565 h417_v5f_gpha_l8_ltdc_fullscreen h417_v5f_flash h417_v5f_flash_l8_assets h417_v5f_tick_diag h417_v5f_sdram_memtest h417_v5f_sdram_ltdc_rgb565 h417_v5f_sdram_remap_probe h417_v5f_sdram_dq_probe h417_v5f_sdram_official_16bit h417_v5f_ch585_spi_speed h417_v5f_ch585_adc_key_cal
+H417_DUAL_CORE_TESTS := h417_v5f_ltdc h417_v5f_ltdc_l8_palette_image h417_v5f_ltdc_rgb565_diag h417_v5f_ltdc_ui_frames h417_v5f_gpha_r2m_fill h417_v5f_gpha_pfc_l8_rgb565 h417_v5f_gpha_blend_rgb565 h417_v5f_gpha_l8_ltdc_fullscreen h417_v5f_flash h417_v5f_flash_l8_assets h417_v5f_tick_diag h417_v5f_sdram_memtest h417_v5f_sdram_video h417_v5f_ch585_spi_speed h417_v5f_ch585_adc_key_cal
 IS_DUAL_CORE_TEST := $(filter $(HW_TEST),$(H417_DUAL_CORE_TESTS))
 APP_V5F_HW_TEST_ID_OVERRIDE :=
 APP_V5F_HW_TEST_USB_CDC :=
@@ -67,20 +67,12 @@ APP_V5F_HW_TEST_MODE := tick_diag
 else ifeq ($(HW_TEST),h417_v5f_sdram_memtest)
 APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
 APP_V5F_HW_TEST_ID_OVERRIDE := 11
-else ifeq ($(HW_TEST),h417_v5f_sdram_ltdc_rgb565)
-APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
-APP_V5F_HW_TEST_ID_OVERRIDE := 12
-else ifeq ($(HW_TEST),h417_v5f_sdram_remap_probe)
-APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
-APP_V5F_HW_TEST_ID_OVERRIDE := 13
-else ifeq ($(HW_TEST),h417_v5f_sdram_dq_probe)
-APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
-APP_V5F_HW_TEST_ID_OVERRIDE := 14
 APP_V5F_HW_TEST_USB_CDC := 1
-else ifeq ($(HW_TEST),h417_v5f_sdram_official_16bit)
-APP_V5F_HW_TEST_MODE := sdram_official_16bit
-APP_V5F_HW_TEST_ID_OVERRIDE := 17
+else ifeq ($(HW_TEST),h417_v5f_sdram_video)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 19
 APP_V5F_HW_TEST_USB_CDC := 1
+APP_V5F_HW_TEST_SOURCE_ARGS := DEFS_EXTRA="-DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u"
 else ifeq ($(HW_TEST),h417_v5f_ch585_spi_speed)
 APP_V5F_HW_TEST_MODE := ch585_spi_speed
 APP_V5F_HW_TEST_ID_OVERRIDE := 15
@@ -206,7 +198,7 @@ EXTRA_SDK_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_spi.c
 else ifeq ($(HW_TEST),h417_usbfs_official_hid)
 TEST_SRC := $(V3F_STANDALONE_SRC_ROOT)/h417_usbfs_official_hid.c
 TEST_SRC += $(WCH_USBFS_COMPAT_HID_SRC)/ch32h417_usbfs_device.c
-TEST_SRC += $(WCH_USBFS_COMPAT_HID_SRC)/usb_desc.c
+TEST_SRC += $(WCH_USBFS_COMPAT_HID_SRC)/usbfs_desc.c
 INC += -I$(WCH_USBFS_COMPAT_HID_INC)
 DEFS += -DHW_TEST_FUNC=h417_usbfs_official_hid_run -DHW_TEST_ID=30
 else ifeq ($(HW_TEST),h417_usbhs_official_hid)

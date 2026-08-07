@@ -40,14 +40,21 @@ hardware/
 |       |-- bsp/
 |       `-- drivers/
 |-- hw_tests/                              # 仅 hardware-test/test 分支维护
+|   |-- Makefile                           # 统一列出、检查和构建入口
+|   |-- catalog.json                       # 可烧录测试及生命周期清单
 |   |-- h417/
 |   |   |-- Makefile
-|   |   `-- passed/
-|   |       |-- v3f_standalone/
-|   |       `-- v5f_rtthread/
+|   |   |-- cases/
+|   |   |   |-- v3f_standalone/
+|   |   |   `-- v5f_rtthread/
+|   |   `-- v3f/internal_flash_cdc/
 |   `-- ch585/
 |       |-- Makefile
 |       `-- src/
+|-- tests/                                 # PC 端 C/pytest 测试
+|   |-- catalog.json
+|   |-- host/
+|   `-- python/
 |-- skills/
 |-- tools/                                 # hardware-test 中包含测试边界检查
 `-- README.md
@@ -91,7 +98,12 @@ make -B -C hw_tests/h417 HW_TEST=h417_ltdc
 make -B -C hw_tests/h417 HW_TEST=h417_flash_image
 
 # 边界检查
+make -C hw_tests check
 python tools/check_hw_tests.py
+
+# PC 端测试
+make -C tests/host run
+python -m pytest -q
 ```
 
 ## 维护规则
@@ -99,7 +111,7 @@ python tools/check_hw_tests.py
 - `main` 不保留 `hw_tests/` 和测试资产；`hardware-test` / `origin/test` 保持包含 `main`，再叠加测试工程。
 - 单项测试尽量保持一个硬件项一个 `HW_TEST`，可以共享 runner 和驱动，但不要让测试互相依赖。
 - 测试驱动要求即插即用：少依赖、不分配大块内存、头文件写清初始化顺序、内存归属和硬件限制。
-- V5F 测试资产放在 `hw_tests/h417/passed/v5f_rtthread/assets/`；不要放回 `firmware/h417/v5f_rtthread/applications/`。
+- V5F 测试资产放在 `hw_tests/h417/cases/v5f_rtthread/assets/`；不要放回 `firmware/h417/v5f_rtthread/applications/`。
 - 图片/LUT 存入外置 flash 只是当前通路验证测试，相关 manifest、LZSS、checksum 和 display flow 保留在 `hw_tests/`，不要抽象成主驱动接口。
 - 需要擦写 flash 的测试必须在测试代码和注释里明确说明擦写范围。
 - 移动文件时同步更新 README、Makefile 和自动化脚本。

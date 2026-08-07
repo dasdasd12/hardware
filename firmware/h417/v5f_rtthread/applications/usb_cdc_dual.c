@@ -57,6 +57,27 @@
 #define CDC_RX_LINE_BYTES 64U
 #define CDC_RX_LINE_COUNT 4U
 
+/*
+ * Optional high-volume binary receive path.  The video/SDRAM hardware test
+ * places this ring in shared SRAM so USB IRQ writes never touch DTCM (a DMA
+ * endpoint in DTCM was proven to lock the H417 HB fabric).  Normal firmware
+ * leaves both macros at zero and keeps the original line-oriented CDC path.
+ */
+#ifndef APP_USB_CDC_RAW_RX_BUFFER_ADDR
+#define APP_USB_CDC_RAW_RX_BUFFER_ADDR 0U
+#endif
+
+#ifndef APP_USB_CDC_RAW_RX_BUFFER_BYTES
+#define APP_USB_CDC_RAW_RX_BUFFER_BYTES 0U
+#endif
+
+#if (APP_USB_CDC_RAW_RX_BUFFER_ADDR != 0U) && \
+    (APP_USB_CDC_RAW_RX_BUFFER_BYTES >= 2U)
+#define CDC_RAW_RX_ENABLED 1
+#else
+#define CDC_RAW_RX_ENABLED 0
+#endif
+
 static const uint8_t device_descriptor_fs[] = {
     USB_DEVICE_DESCRIPTOR_INIT(USB_2_0, 0xEF, 0x02, 0x01, USBD_VID, USBD_PID, 0x0100, 0x01)
 };
@@ -297,6 +318,18 @@ static uint8_t cdc_rx_line_len[CONFIG_USBDEV_MAX_BUS][CDC_RX_LINE_COUNT];
 static volatile uint8_t cdc_rx_line_head[CONFIG_USBDEV_MAX_BUS];
 static volatile uint8_t cdc_rx_line_tail[CONFIG_USBDEV_MAX_BUS];
 static volatile uint8_t cdc_rx_line_overflow[CONFIG_USBDEV_MAX_BUS];
+#if CDC_RAW_RX_ENABLED
+static volatile uint32_t cdc_raw_rx_head;
+static volatile uint32_t cdc_raw_rx_tail;
+static volatile uint8_t cdc_raw_rx_mode;
+static volatile uint8_t cdc_raw_rx_overflow;
+#endif
+static volatile uint8_t cdc_rx_armed[CONFIG_USBDEV_MAX_BUS];
+static volatile uint32_t cdc_rx_callbacks[CONFIG_USBDEV_MAX_BUS];
+static volatile uint32_t cdc_rx_bytes[CONFIG_USBDEV_MAX_BUS];
+static volatile uint32_t cdc_rx_arm_ok[CONFIG_USBDEV_MAX_BUS];
+static volatile uint32_t cdc_rx_arm_fail[CONFIG_USBDEV_MAX_BUS];
+static volatile uint32_t cdc_rx_last_transfer_size[CONFIG_USBDEV_MAX_BUS];
 
 static const char *cdc_bus_name(uint8_t busid)
 {
@@ -323,13 +356,51 @@ static uint32_t cdc_bus_mps(uint8_t busid)
     return CDC_FS_MPS;
 }
 
-static void cdc_submit_read(uint8_t busid)
+static uint32_t cdc_read_transfer_size(uint8_t busid)
 {
+#if CDC_RAW_RX_ENABLED
+    /*
+     * Keep USBFS on its native 64-byte completion boundary.  The experimental
+     * 1 KiB coalesced request made the application callback cheaper, but long
+     * CDC uploads could stop at a random 1 KiB boundary while the application
+     * still reported the OUT endpoint armed.  Native-MPS requests use the same
+     * path as ordinary CDC traffic and make every accepted hardware packet
+     * visible to the shared-SRAM ring before the endpoint is re-armed.
+     */
+    if((busid == USB_CH32H417_BUS_FS) && (cdc_raw_rx_mode != 0U))
+    {
+        return CDC_FS_MPS;
+    }
+#endif
+    return cdc_bus_mps(busid);
+}
+
+static int cdc_submit_read(uint8_t busid)
+{
+    uint32_t transfer_size;
+    int result;
+
     if (busid >= CONFIG_USBDEV_MAX_BUS) {
-        return;
+        return -1;
     }
 
-    usbd_ep_start_read(busid, CDC_OUT_EP, cdc_rx_buffer[busid], cdc_bus_mps(busid));
+    transfer_size = cdc_read_transfer_size(busid);
+    result = usbd_ep_start_read(busid,
+                                CDC_OUT_EP,
+                                cdc_rx_buffer[busid],
+                                transfer_size);
+    cdc_rx_last_transfer_size[busid] = transfer_size;
+    if(result == 0)
+    {
+        cdc_rx_armed[busid] = 1U;
+        cdc_rx_arm_ok[busid]++;
+    }
+    else
+    {
+        cdc_rx_armed[busid] = 0U;
+        cdc_rx_arm_fail[busid]++;
+    }
+    return result;
 }
 
 static void cdc_reset_rx(uint8_t busid)
@@ -342,7 +413,66 @@ static void cdc_reset_rx(uint8_t busid)
     cdc_rx_line_head[busid] = 0U;
     cdc_rx_line_tail[busid] = 0U;
     cdc_rx_line_overflow[busid] = 0U;
+    cdc_rx_armed[busid] = 0U;
+#if CDC_RAW_RX_ENABLED
+    cdc_raw_rx_head = 0U;
+    cdc_raw_rx_tail = 0U;
+    cdc_raw_rx_mode = 0U;
+    cdc_raw_rx_overflow = 0U;
+#endif
 }
+
+#if CDC_RAW_RX_ENABLED
+static void cdc_queue_raw_block(const uint8_t *data, uint32_t length)
+{
+    volatile uint8_t *buffer =
+        (volatile uint8_t *)(uintptr_t)APP_USB_CDC_RAW_RX_BUFFER_ADDR;
+    uint32_t head = cdc_raw_rx_head;
+    uint32_t tail = cdc_raw_rx_tail;
+    uint32_t used;
+    uint32_t free_bytes;
+    uint32_t first;
+
+    if((data == RT_NULL) || (length == 0U))
+    {
+        return;
+    }
+
+    /* Acquire the consumer's published tail before reusing ring storage. */
+    __asm volatile("fence r, rw" ::: "memory");
+    used = (head >= tail) ?
+           (head - tail) :
+           (APP_USB_CDC_RAW_RX_BUFFER_BYTES - tail + head);
+    free_bytes = APP_USB_CDC_RAW_RX_BUFFER_BYTES - used - 1U;
+    if(length > free_bytes)
+    {
+        cdc_raw_rx_overflow = 1U;
+        length = free_bytes;
+    }
+    if(length == 0U)
+    {
+        return;
+    }
+
+    first = APP_USB_CDC_RAW_RX_BUFFER_BYTES - head;
+    if(first > length)
+    {
+        first = length;
+    }
+    memcpy((void *)&buffer[head], data, first);
+    if(first < length)
+    {
+        memcpy((void *)&buffer[0], &data[first], length - first);
+    }
+    head += length;
+    if(head >= APP_USB_CDC_RAW_RX_BUFFER_BYTES)
+    {
+        head -= APP_USB_CDC_RAW_RX_BUFFER_BYTES;
+    }
+    __asm volatile("fence rw, rw" ::: "memory");
+    cdc_raw_rx_head = head;
+}
+#endif
 
 static void cdc_finish_rx_line(uint8_t busid)
 {
@@ -418,17 +548,30 @@ static void cdc_acm_data_recv(uint8_t busid, uint8_t ep, uint32_t nbytes)
         return;
     }
 
+    cdc_rx_armed[busid] = 0U;
+    cdc_rx_callbacks[busid]++;
+    cdc_rx_bytes[busid] += nbytes;
+
     if (nbytes == 0U) {
         cdc_submit_read(busid);
         return;
     }
 
-    if (nbytes > cdc_bus_mps(busid)) {
-        nbytes = cdc_bus_mps(busid);
+    if (nbytes > sizeof(cdc_rx_buffer[busid])) {
+        nbytes = sizeof(cdc_rx_buffer[busid]);
     }
 
-    for (i = 0U; i < nbytes; i++) {
-        cdc_queue_rx_byte(busid, cdc_rx_buffer[busid][i]);
+#if CDC_RAW_RX_ENABLED
+    if(cdc_raw_rx_mode != 0U)
+    {
+        cdc_queue_raw_block(cdc_rx_buffer[busid], nbytes);
+    }
+    else
+#endif
+    {
+        for (i = 0U; i < nbytes; i++) {
+            cdc_queue_rx_byte(busid, cdc_rx_buffer[busid][i]);
+        }
     }
 
 #if APP_USB_CDC_RX_ECHO
@@ -458,7 +601,10 @@ static void cdc_acm_data_sent(uint8_t busid, uint8_t ep, uint32_t nbytes)
     }
 
     cdc_tx_busy[busid] = 0U;
+#if APP_USB_CDC_RX_ECHO
+    /* Echo mode deliberately holds OUT until the echoed IN transfer ends. */
     cdc_submit_read(busid);
+#endif
 }
 
 static void usb_event_handler(uint8_t busid, uint8_t event)
@@ -675,6 +821,176 @@ int ch32h417_usb_cdc_read_line(char *out, uint32_t out_len)
 #endif
 
     return ret;
+}
+
+int ch32h417_usb_cdc_raw_rx_enable(uint8_t enable)
+{
+#if CDC_RAW_RX_ENABLED
+    rt_base_t level;
+    uint8_t busid;
+
+    /*
+     * The line-mode callback already leaves CDC OUT armed.  Switching modes
+     * used to overwrite that live transfer with a second start_read() while
+     * USBFS IRQ could run concurrently.  Make the ownership transition
+     * atomic and only prime an actually idle endpoint.
+     */
+    level = rt_hw_interrupt_disable();
+    cdc_raw_rx_head = 0U;
+    cdc_raw_rx_tail = 0U;
+    cdc_raw_rx_overflow = 0U;
+    cdc_raw_rx_mode = (enable != 0U) ? 1U : 0U;
+    if(enable != 0U)
+    {
+        for(busid = 0U; busid < CONFIG_USBDEV_MAX_BUS; busid++)
+        {
+            cdc_rx_callbacks[busid] = 0U;
+            cdc_rx_bytes[busid] = 0U;
+            cdc_rx_arm_ok[busid] = 0U;
+            cdc_rx_arm_fail[busid] = 0U;
+        }
+    }
+    __asm volatile("fence rw, rw" ::: "memory");
+    for(busid = 0U; busid < CONFIG_USBDEV_MAX_BUS; busid++)
+    {
+        if((cdc_bus_configured[busid] != 0U) &&
+           (cdc_rx_armed[busid] == 0U))
+        {
+            (void)cdc_submit_read(busid);
+        }
+    }
+    rt_hw_interrupt_enable(level);
+    return 0;
+#else
+    (void)enable;
+    return -1;
+#endif
+}
+
+void ch32h417_usb_cdc_raw_rx_diag(uint32_t *callbacks,
+                                  uint32_t *bytes,
+                                  uint32_t *arm_ok,
+                                  uint32_t *arm_fail,
+                                  uint32_t *transfer_size,
+                                  uint32_t *armed)
+{
+    const uint8_t busid = USB_CH32H417_BUS_FS;
+
+    if(callbacks != RT_NULL)
+    {
+        *callbacks = cdc_rx_callbacks[busid];
+    }
+    if(bytes != RT_NULL)
+    {
+        *bytes = cdc_rx_bytes[busid];
+    }
+    if(arm_ok != RT_NULL)
+    {
+        *arm_ok = cdc_rx_arm_ok[busid];
+    }
+    if(arm_fail != RT_NULL)
+    {
+        *arm_fail = cdc_rx_arm_fail[busid];
+    }
+    if(transfer_size != RT_NULL)
+    {
+        *transfer_size = cdc_rx_last_transfer_size[busid];
+    }
+    if(armed != RT_NULL)
+    {
+        *armed = cdc_rx_armed[busid];
+    }
+}
+
+uint32_t ch32h417_usb_cdc_raw_rx_available(void)
+{
+#if CDC_RAW_RX_ENABLED
+    uint32_t head = cdc_raw_rx_head;
+    uint32_t tail = cdc_raw_rx_tail;
+
+    /* Pair with the producer's release before it publishes head. */
+    __asm volatile("fence r, rw" ::: "memory");
+
+    if(head >= tail)
+    {
+        return head - tail;
+    }
+    return APP_USB_CDC_RAW_RX_BUFFER_BYTES - tail + head;
+#else
+    return 0U;
+#endif
+}
+
+int ch32h417_usb_cdc_raw_rx_read(void *out, uint32_t out_len)
+{
+#if CDC_RAW_RX_ENABLED
+    volatile uint8_t *buffer =
+        (volatile uint8_t *)(uintptr_t)APP_USB_CDC_RAW_RX_BUFFER_ADDR;
+    uint8_t *destination = (uint8_t *)out;
+    uint32_t available;
+    uint32_t count;
+    uint32_t tail;
+    uint32_t first;
+
+    if((out == RT_NULL) || (out_len == 0U))
+    {
+        return -1;
+    }
+
+    available = ch32h417_usb_cdc_raw_rx_available();
+    count = (out_len < available) ? out_len : available;
+    if(count == 0U)
+    {
+        return 0;
+    }
+
+    tail = cdc_raw_rx_tail;
+    first = APP_USB_CDC_RAW_RX_BUFFER_BYTES - tail;
+    if(first > count)
+    {
+        first = count;
+    }
+    memcpy(destination, (const void *)&buffer[tail], first);
+    if(first < count)
+    {
+        memcpy(&destination[first], (const void *)&buffer[0], count - first);
+    }
+    tail += count;
+    if(tail >= APP_USB_CDC_RAW_RX_BUFFER_BYTES)
+    {
+        tail -= APP_USB_CDC_RAW_RX_BUFFER_BYTES;
+    }
+    /* Publish freed storage only after all ring reads have completed. */
+    __asm volatile("fence rw, rw" ::: "memory");
+    cdc_raw_rx_tail = tail;
+    return (int)count;
+#else
+    (void)out;
+    (void)out_len;
+    return -1;
+#endif
+}
+
+uint8_t ch32h417_usb_cdc_raw_rx_overflowed(void)
+{
+#if CDC_RAW_RX_ENABLED
+    return cdc_raw_rx_overflow;
+#else
+    return 0U;
+#endif
+}
+
+/*
+ * Debug hook: expose whether the CDC IN endpoint still has an unfinished
+ * transfer.  During the credit-ACK upload path a stuck tx_busy means the
+ * device cannot push the next "VIDEO ACK" line, which deadlocks the
+ * half-duplex window protocol.  Returning the raw flag lets the caller
+ * distinguish "ACK never sent" (tx_busy stuck) from "ACK sent but lost".
+ * The video/credit upload always runs on USBFS, so this is FS-only.
+ */
+uint8_t ch32h417_usb_cdc_fs_tx_busy(void)
+{
+    return cdc_tx_busy[USB_CH32H417_BUS_FS];
 }
 
 void ch32h417_dual_cdc_poll(void)

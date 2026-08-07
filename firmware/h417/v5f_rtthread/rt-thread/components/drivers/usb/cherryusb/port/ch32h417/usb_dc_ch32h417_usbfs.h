@@ -7,6 +7,7 @@
 #define USB_DC_CH32H417_USBFS_H
 
 #include "usb_dc_ch32h417.h"
+#include "usb_dc_ch32h417_usbfs_trace.h"
 
 int usb_dc_ch32h417_usbfs_init(uint8_t busid);
 int usb_dc_ch32h417_usbfs_deinit(uint8_t busid);

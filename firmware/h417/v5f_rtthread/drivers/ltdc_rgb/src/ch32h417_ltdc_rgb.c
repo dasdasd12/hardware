@@ -1,5 +1,6 @@
 #include "ch32h417_ltdc_rgb.h"
 #include "ch32h417_gpio.h"
+#include "ch32h417_pwr.h"
 
 typedef struct
 {
@@ -138,7 +139,23 @@ static void ltdc_rgb_layer1_end_clut_update(uint8_t layer_was_enabled)
 void ch32h417_ltdc_rgb_gpio_init(void)
 {
     GPIO_InitTypeDef init = {0};
+    volatile uint32_t settle;
     unsigned int i;
+
+    /*
+     * Several LTDC signals, including PF1/CLK and part of the RGB bus, are
+     * supplied by VIO18.  The board connects VIO18 to the 3.3 V panel I/O
+     * domain, so select MODE3 before those pins enter alternate-function
+     * mode.  Product board init normally does this, but the V5F test wake
+     * stub does not; keeping it here makes the LTDC driver self-contained.
+     */
+    RCC_HB1PeriphClockCmd(RCC_HB1Periph_PWR, ENABLE);
+    PWR_VIO18ModeCfg(PWR_VIO18CFGMODE_SW);
+    PWR_VIO18LevelCfg(PWR_VIO18Level_MODE3);
+    for(settle = 0u; settle < 10000u; settle++)
+    {
+        __asm volatile ("nop");
+    }
 
     RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO |
                           RCC_HB2Periph_GPIOA |
@@ -288,8 +305,14 @@ int ch32h417_ltdc_rgb_layer1_config(const ch32h417_ltdc_rgb_panel_t *panel,
     init.LTDC_BlendingFactor_2 = LTDC_BlendingFactor2_CA;
     init.LTDC_CFBStartAdress = layer->framebuffer;
     init.LTDC_CFBPitch = line_pitch;
-    /* Match WCH's LTDC_LayerSize helper: CFBLL is active line bytes plus 3. */
-    init.LTDC_CFBLineLength = line_pitch + 3u;
+    /*
+     * CH32H417RM 43.4.23 defines CFBLL as the active bytes in one line plus
+     * 31.  It is independent of CFBP when a layer uses a larger row stride.
+     * The vendor LTDC_LayerSize() helper uses +3, but that contradicts both
+     * the H417 reference manual and WCH's H417 LTDC application examples.
+     */
+    init.LTDC_CFBLineLength =
+        ((uint32_t)layer->width * bytes_per_pixel) + 31u;
     init.LTDC_CFBLineNumber = layer->height;
 
     LTDC_LayerInit(LTDC_Layer1, &init);

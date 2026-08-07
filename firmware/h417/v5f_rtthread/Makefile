@@ -32,7 +32,7 @@ LTDC_RGB_ROOT := $(V5F_DRIVER_ROOT)/ltdc_rgb
 FLASH_NAND_ROOT := $(V3F_DRIVER_ROOT)/gd5f1g_spi_nand
 GPHA_2D_ROOT := $(V5F_DRIVER_ROOT)/gpha_2d
 CH585_SPI_LINK_ROOT := $(V3F_DRIVER_ROOT)/ch585_spi_link
-V5F_HW_TEST_ROOT ?= ../../../hw_tests/h417/passed/v5f_rtthread
+V5F_HW_TEST_ROOT ?= ../../../hw_tests/h417/cases/v5f_rtthread
 V5F_HW_TEST_SRC_ROOT := $(V5F_HW_TEST_ROOT)/src
 V5F_HW_TEST_ASSET_ROOT := $(V5F_HW_TEST_ROOT)/assets
 HW_TEST_COMMON_ROOT ?= ../../../hw_tests/common
@@ -280,6 +280,9 @@ endif
 ifneq ($(APP_V5F_HW_TEST),none)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/v5f_hw_test.c
 endif
+ifeq ($(APP_V5F_HW_TEST_ID),19)
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/h4v1_video.c
+endif
 ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/hardware.c
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/h417_v5f_sdram_official_16bit_board.c
@@ -295,6 +298,9 @@ APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/ltdc/v5f_ltdc_gray_image.S
 endif
 ifeq ($(APP_V5F_HW_TEST),ltdc_l8_palette_image)
 APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/ltdc/v5f_ltdc_palette_image.S
+endif
+ifeq ($(APP_V5F_HW_TEST_ID),19)
+APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/ltdc/v5f_ltdc_argb8888_probe.S
 endif
 ifeq ($(APP_V5F_HW_TEST),flash_l8_assets)
 APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/flash/v5f_ltdc_flash_assets.S

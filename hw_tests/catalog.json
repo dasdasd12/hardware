@@ -1,0 +1,525 @@
+{
+  "schema_version": 1,
+  "description": "Flashable board-test firmware. Status is independent of build and hardware results.",
+  "tests": [
+    {
+      "id": "h417_v3f_gpio_status",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "gpio",
+      "status": "bringup",
+      "output": "status GPIOs",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_gpio_status"}
+    },
+    {
+      "id": "h417_v3f_pf13_probe",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "gpio",
+      "status": "bringup",
+      "output": "PF13 waveform",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_pf13_probe"}
+    },
+    {
+      "id": "h417_v3f_ws2812_solid",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "rgb",
+      "status": "active",
+      "output": "77-key RGB frame",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_ws2812"}
+    },
+    {
+      "id": "h417_v3f_ws2812_breath",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "rgb",
+      "status": "active",
+      "output": "77-key RGB animation",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_ws2812_breath"}
+    },
+    {
+      "id": "h417_v3f_ws2812_chase",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "rgb",
+      "status": "active",
+      "output": "77-key RGB animation",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_ws2812_chase"}
+    },
+    {
+      "id": "h417_v3f_ws2812_rainbow_band",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "rgb",
+      "status": "active",
+      "output": "77-key RGB animation",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_ws2812_rainbow_band"}
+    },
+    {
+      "id": "h417_v3f_lcd_signal",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "display",
+      "status": "bringup",
+      "output": "LCD pin waveforms",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_lcd_signal"}
+    },
+    {
+      "id": "h417_v3f_lcd_backlight",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "display",
+      "status": "bringup",
+      "output": "panel enable and backlight",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_lcd_backlight"}
+    },
+    {
+      "id": "h417_v3f_ltdc_window",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "display",
+      "status": "bringup",
+      "output": "320x160 RGB565 panel pattern",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_ltdc"}
+    },
+    {
+      "id": "h417_v3f_external_flash_mosi_probe",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "external_flash",
+      "status": "bringup",
+      "output": "SPI1 pin waveforms",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_flash_mosi_probe"}
+    },
+    {
+      "id": "h417_v3f_external_flash_image",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "external_flash",
+      "status": "active",
+      "output": "LCD status and image",
+      "destructive": true,
+      "destructive_scope": "One selected good block among the final 32 GD5F1G blocks",
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_flash_image"}
+    },
+    {
+      "id": "h417_v3f_usbfs_hid_enum",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "usb",
+      "status": "active",
+      "output": "USBFS enumeration and status GPIO",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_usbfs_official_hid"}
+    },
+    {
+      "id": "h417_v3f_usbhs_hid_enum",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "usb",
+      "status": "active",
+      "output": "USBHS enumeration and status GPIO",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_usbhs_official_hid"}
+    },
+    {
+      "id": "h417_v3f_usbss_ch372_baseline",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "usb_32k",
+      "status": "feasibility",
+      "preserve": true,
+      "output": "WCH CH372 USBSS baseline",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v3f_usbss_ch372"}
+    },
+    {
+      "id": "h417_v3f_usbss_fs_diag",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "usb_32k",
+      "status": "feasibility",
+      "preserve": true,
+      "output": "USBFS CDC diagnostic stream",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v3f_usbss_fs_diag"}
+    },
+    {
+      "id": "h417_v5f_ltdc_l8_gray",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "display",
+      "status": "active",
+      "output": "800x480 L8 grayscale panel image",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_ltdc"}
+    },
+    {
+      "id": "h417_v5f_ltdc_l8_palette",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "display",
+      "status": "active",
+      "output": "800x480 L8 palette panel image",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_ltdc_l8_palette_image"}
+    },
+    {
+      "id": "h417_v5f_ltdc_rgb565_diag",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "display",
+      "status": "bringup",
+      "output": "RGB565 diagnostic bands",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_ltdc_rgb565_diag"}
+    },
+    {
+      "id": "h417_v5f_ltdc_ui_frames",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "display",
+      "status": "active",
+      "output": "Three L8 UI frames",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_ltdc_ui_frames"}
+    },
+    {
+      "id": "h417_v5f_gpha_r2m_fill",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "gpha",
+      "status": "active",
+      "output": "Animated register-to-memory fill",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_gpha_r2m_fill"}
+    },
+    {
+      "id": "h417_v5f_gpha_pfc_l8_rgb565",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "gpha",
+      "status": "active",
+      "output": "L8-to-RGB565 conversion",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_gpha_pfc_l8_rgb565"}
+    },
+    {
+      "id": "h417_v5f_gpha_blend_rgb565",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "gpha",
+      "status": "active",
+      "output": "ARGB4444-over-RGB565 blend",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_gpha_blend_rgb565"}
+    },
+    {
+      "id": "h417_v5f_gpha_l8_ltdc_fullscreen",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "gpha",
+      "status": "active",
+      "output": "GPHA-generated fullscreen L8 framebuffer",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_gpha_l8_ltdc_fullscreen"}
+    },
+    {
+      "id": "h417_v5f_external_flash_status",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "external_flash",
+      "status": "active",
+      "output": "Read-only GD5F1G ID and status on LCD",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_flash"}
+    },
+    {
+      "id": "h417_v5f_external_flash_l8_assets",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "external_flash",
+      "status": "active",
+      "output": "L8 assets verified and displayed",
+      "destructive": true,
+      "destructive_scope": "Reserved final GD5F1G asset blocks documented by the test source",
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_flash_l8_assets"}
+    },
+    {
+      "id": "h417_v5f_tick_diag",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "timing",
+      "status": "bringup",
+      "output": "RT tick versus mcycle visual comparison",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_tick_diag"}
+    },
+    {
+      "id": "h417_v5f_sdram_memtest",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "sdram",
+      "status": "bringup",
+      "output": "USBFS CDC native-x16/even-low-byte Bank phase/pipe tuning plus full 16 MiB March, address-pattern and retention result",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_sdram_memtest"}
+    },
+    {
+      "id": "h417_v5f_sdram_ltdc_rgb565",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "sdram",
+      "status": "bringup",
+      "output": "SDRAM-backed RGB565 framebuffer",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_sdram_ltdc_rgb565"}
+    },
+    {
+      "id": "h417_v5f_sdram_remap_probe",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "sdram",
+      "status": "bringup",
+      "output": "LCD address-remap diagnostics",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_sdram_remap_probe"}
+    },
+    {
+      "id": "h417_v5f_sdram_dq_probe",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "sdram",
+      "status": "bringup",
+      "output": "LCD and USBFS CDC DQ diagnostics",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_sdram_dq_probe"}
+    },
+    {
+      "id": "h417_v5f_sdram_official_16bit",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "sdram",
+      "status": "bringup",
+      "output": "WCH reference init with LCD and USBFS CDC status",
+      "destructive": false,
+      "build": {"kind": "make-selector", "directory": "hw_tests/h417", "selector": "HW_TEST", "value": "h417_v5f_sdram_official_16bit"}
+    },
+    {
+      "id": "h417_v5f_ch585_spi_speed",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "spi_32k",
+      "status": "feasibility",
+      "preserve": true,
+      "pair_id": "h417_ch585_spi_speed",
+      "output": "USBFS CDC rate sweep",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/h417",
+        "selector": "HW_TEST",
+        "value": "h417_v5f_ch585_spi_speed",
+        "variants": [{"SPI_SOURCE": "left"}, {"SPI_SOURCE": "right"}]
+      }
+    },
+    {
+      "id": "h417_v5f_ch585_adc_key_cal",
+      "chip": "h417",
+      "core": "v5f",
+      "category": "adc_calibration",
+      "status": "active",
+      "pair_id": "h417_ch585_adc_key_cal",
+      "output": "USBFS CDC calibration protocol",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/h417",
+        "selector": "HW_TEST",
+        "value": "h417_v5f_ch585_adc_key_cal",
+        "variants": [{"SPI_SOURCE": "left"}, {"SPI_SOURCE": "right"}]
+      }
+    },
+    {
+      "id": "h417_v3f_internal_flash_cdc",
+      "chip": "h417",
+      "core": "v3f",
+      "category": "internal_flash",
+      "status": "active",
+      "output": "USBFS CDC RESULT line; PE12 held low",
+      "destructive": true,
+      "destructive_scope": "CH32H417 CodeFlash 0x080EE000-0x080EFFFF only",
+      "last_hardware_result": {
+        "status": "pass",
+        "date": "2026-07-27",
+        "evidence": "H417 INTERNAL FLASH DIAG v3 / DIAG FLASH_OK / RESULT PASS"
+      },
+      "build": {"kind": "make", "directory": "hw_tests/h417/v3f/internal_flash_cdc"}
+    },
+    {
+      "id": "ch585_eeprom_i2c",
+      "chip": "ch585",
+      "core": "single",
+      "category": "eeprom",
+      "status": "bringup",
+      "output": "UART",
+      "destructive": false,
+      "notes": "Writes only when ALLOW_EEPROM_WRITE=1",
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_left_eeprom_i2c",
+        "aliases": ["ch585_u2_eeprom_i2c"],
+        "variants": [{"HALF": "left"}]
+      }
+    },
+    {
+      "id": "ch585_controls_gpio",
+      "chip": "ch585",
+      "core": "single",
+      "category": "gpio",
+      "status": "bringup",
+      "output": "UART",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_left_controls_gpio",
+        "aliases": ["ch585_u2_controls_gpio"],
+        "variants": [{"HALF": "left"}]
+      }
+    },
+    {
+      "id": "ch585_max17048_i2c",
+      "chip": "ch585",
+      "core": "single",
+      "category": "power",
+      "status": "bringup",
+      "output": "UART",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_right_max17048_i2c",
+        "aliases": ["ch585_u3_max17048_i2c"],
+        "variants": [{"HALF": "right"}]
+      }
+    },
+    {
+      "id": "ch585_charge_gpio",
+      "chip": "ch585",
+      "core": "single",
+      "category": "power",
+      "status": "bringup",
+      "output": "UART",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_right_charge_gpio",
+        "aliases": ["ch585_u3_charge_gpio"],
+        "variants": [{"HALF": "right"}]
+      }
+    },
+    {
+      "id": "ch585_ec11_gpio",
+      "chip": "ch585",
+      "core": "single",
+      "category": "gpio",
+      "status": "bringup",
+      "output": "UART",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_right_ec11_gpio",
+        "aliases": ["ch585_u3_ec11_gpio"],
+        "variants": [{"HALF": "right"}]
+      }
+    },
+    {
+      "id": "ch585_ads7948_mux_scan",
+      "chip": "ch585",
+      "core": "single",
+      "category": "adc_mux",
+      "status": "active",
+      "output": "UART frame stream",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_ads7948_mux_probe",
+        "variants": [{"HALF": "left"}, {"HALF": "right"}]
+      }
+    },
+    {
+      "id": "ch585_ads7948_32k_pipeline",
+      "chip": "ch585",
+      "core": "single",
+      "category": "adc_32k",
+      "status": "feasibility",
+      "preserve": true,
+      "output": "UART ACQ32_RESULT",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_ads7948_32k_pipeline",
+        "variants": [{"HALF": "left"}, {"HALF": "right"}]
+      }
+    },
+    {
+      "id": "ch585_spi0_speed_slave",
+      "chip": "ch585",
+      "core": "single",
+      "category": "spi_32k",
+      "status": "feasibility",
+      "preserve": true,
+      "pair_id": "h417_ch585_spi_speed",
+      "output": "SPI slave counters and UART",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_spi0_speed_slave",
+        "variants": [{"HALF": "left"}, {"HALF": "right"}]
+      }
+    },
+    {
+      "id": "ch585_adc_key_cal_slave",
+      "chip": "ch585",
+      "core": "single",
+      "category": "adc_calibration",
+      "status": "active",
+      "pair_id": "h417_ch585_adc_key_cal",
+      "output": "SPI calibration protocol and UART",
+      "destructive": false,
+      "build": {
+        "kind": "make-selector",
+        "directory": "hw_tests/ch585",
+        "selector": "TEST",
+        "value": "ch585_adc_key_cal_slave",
+        "variants": [{"HALF": "left"}, {"HALF": "right"}]
+      }
+    }
+  ]
+}

@@ -74,8 +74,9 @@ def check_usbss_default_config():
         "APP_USBSS_SKIP_FOR_V3F_OFFICIAL=1" not in makefile,
         "V5F Makefile must not hard-code V3F official USBSS ownership",
     ) and require(
-        "USBSS CDC disabled on V5F" in dual_cdc,
-        "Dual CDC init should report the explicit USBSS-disabled default path",
+        "#if APP_ENABLE_USBSS_CDC" in dual_cdc
+        and "ret_ss = ch32h417_usbss_cdc_init();" in dual_cdc,
+        "Dual CDC init should compile USBSS initialization only when APP_ENABLE_USBSS_CDC is enabled",
     )
 
 
