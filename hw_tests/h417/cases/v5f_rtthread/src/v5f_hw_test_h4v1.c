@@ -11254,13 +11254,13 @@ static uint32_t sdram_video_crc32_update(uint32_t crc,
 
 static void sdram_video_send_config_help(void)
 {
-    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v31 STAGE5T HISTORY DIRECT");
-    sdram_usb_debug_write_line("ISOLATION base=36a7461 transport=v37_32k_dma2 readback=dma256 codec=stream64k_fast playback=live0_89_once live_dma=r256x2k_w256x2k codec_crc=sampled8 profile=3,30,31_copy_split delta=history_xor_stage32 match=forward_history32_16 usb=retire_before_rearm");
+    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v32 STAGE5U INLINE COPY");
+    sdram_usb_debug_write_line("ISOLATION base=7a7cabd transport=v37_32k_dma2 readback=dma256 codec=stream64k_fast playback=live0_89_once live_dma=r256x2k_w256x2k codec_crc=sampled8 profile=3,30,31_copy_split delta=history_xor_stage32 match=forward_history32_16 copy=always_inline usb=retire_before_rearm");
     sdram_usb_debug_write_line("VIDEO FORMAT ARGB8888=4BPP ARGB1555=2BPP resolution=800x480");
     sdram_usb_debug_write_line("VIDEO LANES full16=ffff ignored=0000 rotation=host_rot180");
     sdram_usb_debug_write_line("VIDEO PATH cdc_rx_32k_credit,shared_sram_16k,dma2,60000000,ltdc_argb,vblank_locked");
     sdram_usb_debug_write_line("VIDEO WAIT command=VIDEO_<format>_<frames>_<fps>_<bytes>_<crc32> spaces_not_underscores");
-    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage5t_history_direct");
+    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage5u_inline_copy");
 }
 
 static int sdram_video_next_token(const char **cursor,
@@ -13206,7 +13206,8 @@ static int sdram_video_h4v1_stream_flush(
     return H4V1_OK;
 }
 
-static int __attribute__((optimize("O3")))
+static inline __attribute__((always_inline, optimize(
+    "O3,no-tree-vectorize,no-tree-loop-distribute-patterns"))) int
 sdram_video_h4v1_stream_copy_literals(v5f_sdram_h4v1_stream_t *stream,
                                       const uint8_t *source,
                                       uint32_t bytes)
@@ -13265,8 +13266,8 @@ sdram_video_h4v1_stream_copy_literals(v5f_sdram_h4v1_stream_t *stream,
     return H4V1_OK;
 }
 
-static int __attribute__((optimize(
-    "O3,no-tree-vectorize,no-tree-loop-distribute-patterns")))
+static inline __attribute__((always_inline, optimize(
+    "O3,no-tree-vectorize,no-tree-loop-distribute-patterns"))) int
 sdram_video_h4v1_stream_copy_match(v5f_sdram_h4v1_stream_t *stream,
                                    uint32_t match_offset,
                                    uint32_t bytes)
@@ -13423,7 +13424,8 @@ sdram_video_h4v1_lz4_length(const uint8_t **input,
     return H4V1_OK;
 }
 
-static int __attribute__((optimize("O3,no-tree-loop-distribute-patterns")))
+static int __attribute__((optimize(
+    "O3,no-tree-vectorize,no-tree-loop-distribute-patterns")))
 sdram_video_h4v1_decode_streamed(
     const h4v1_index_entry_t *entry,
     uint32_t frame,
@@ -14439,7 +14441,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
     g_v5f_hw_test_diag.phase = V5F_HW_PHASE_PASSED;
     g_v5f_hw_test_diag.sdram_ok_count++;
     sdram_usb_debug_write_line(
-        "H4V1 ISOLATED STAGE5T PASS transport=stable full90=pass keys30,60=pass dma=r256x2k/w256x2k codec_crc=sampled8 dma_crc=sampled8 profile=copy_split delta=history_xor_stage32 match=forward_history32_16 swaps=89 fifo_underrun=0");
+        "H4V1 ISOLATED STAGE5U PASS transport=stable full90=pass keys30,60=pass dma=r256x2k/w256x2k codec_crc=sampled8 dma_crc=sampled8 profile=copy_split delta=history_xor_stage32 match=forward_history32_16 copy=always_inline swaps=89 fifo_underrun=0");
     sdram_usb_debug_write_line("RESULT PASS");
     sdram_memtest_watchdog_complete();
     while(1)
