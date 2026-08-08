@@ -16,9 +16,10 @@ static uint32_t h4v1_get_u32_le(const uint8_t *data)
            ((uint32_t)data[3] << 24);
 }
 
-uint32_t h4v1_crc32_update(uint32_t previous_crc,
-                           const void *data,
-                           size_t length)
+uint32_t __attribute__((optimize("O3")))
+h4v1_crc32_update(uint32_t previous_crc,
+                  const void *data,
+                  size_t length)
 {
     static const uint32_t table[16] =
     {
