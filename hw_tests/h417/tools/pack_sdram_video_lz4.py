@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pack and verify an H417 ARGB1555 keyframe/delta LZ4 video container."""
+"""Pack and verify H417 ARGB1555 LZ4 video containers."""
 
 from __future__ import annotations
 
@@ -28,6 +28,12 @@ HEIGHT = 480
 DECODE_WIDTH = 854
 CROP_X = (DECODE_WIDTH - WIDTH) // 2
 FRAME_BYTES = WIDTH * HEIGHT * 2
+PAYLOAD_STAGE_BYTES = 0x00048000
+ADAPTIVE_HC_LEVELS = (9, 11, 12)
+CHUNK_BYTES = 16 * 1024
+CHUNK_HEADER_BYTES = 128
+CHUNK_ALIGNMENT = 32
+CHUNK_COUNT = (FRAME_BYTES + CHUNK_BYTES - 1) // CHUNK_BYTES
 
 MAGIC = b"H4V1"
 VERSION = 1
@@ -39,6 +45,7 @@ PIXEL_FORMAT_ARGB1555 = 1
 CONTAINER_FLAG_XOR_DELTA = 1 << 0
 CONTAINER_FLAG_ROTATE_180 = 1 << 1
 CONTAINER_FLAG_LZ4_RAW_BLOCK = 1 << 2
+CONTAINER_FLAG_CHUNKED_ABSOLUTE = 1 << 3
 
 FRAME_FLAG_KEY = 1 << 0
 FRAME_FLAG_XOR_DELTA = 1 << 1
@@ -56,6 +63,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--upload-output", type=Path)
     parser.add_argument("--transfer-alignment", type=int, default=32768)
     parser.add_argument("--no-rotate-180", action="store_true")
+    parser.add_argument(
+        "--chunked-absolute",
+        action="store_true",
+        help=(
+            "compress every absolute frame as independent 16 KiB LZ4 blocks; "
+            "the MCU decodes each block directly into its DMA output stage"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -143,10 +158,52 @@ def source_frame(raw: np.ndarray, index: int, rotate_180: bool) -> np.ndarray:
     return pack_argb1555(rgb).copy()
 
 
-def lz4_hc(data: bytes) -> bytes:
-    return lz4.block.compress(
-        data, mode="high_compression", compression=12, store_size=False
+def lz4_hc(data: bytes) -> tuple[bytes, int]:
+    """Choose the fastest measured HC profile that fits MCU staging."""
+    sizes: list[tuple[int, int]] = []
+    for level in ADAPTIVE_HC_LEVELS:
+        payload = lz4.block.compress(
+            data,
+            mode="high_compression",
+            compression=level,
+            store_size=False,
+        )
+        sizes.append((level, len(payload)))
+        if len(payload) <= PAYLOAD_STAGE_BYTES:
+            return payload, level
+    raise RuntimeError(
+        f"LZ4 payload exceeds {PAYLOAD_STAGE_BYTES} byte MCU staging: "
+        f"{sizes}"
     )
+
+
+def pack_chunked_absolute_frame(frame_bytes: bytes) -> tuple[bytes, list[int]]:
+    """Build one independently decodable, DMA-aligned absolute frame."""
+    if len(frame_bytes) != FRAME_BYTES:
+        raise ValueError(f"unexpected frame size {len(frame_bytes)}")
+    payload = bytearray(CHUNK_HEADER_BYTES)
+    struct.pack_into("<HH", payload, 0, CHUNK_COUNT, CHUNK_BYTES)
+    levels: list[int] = []
+    chunks: list[bytes] = []
+    for block in range(CHUNK_COUNT):
+        start = block * CHUNK_BYTES
+        raw_block = frame_bytes[start:start + CHUNK_BYTES]
+        compressed, level = lz4_hc(raw_block)
+        if len(compressed) > CHUNK_BYTES:
+            raise RuntimeError(
+                f"frame block {block}: compressed block {len(compressed)} "
+                f"exceeds MCU input stage {CHUNK_BYTES}"
+            )
+        struct.pack_into("<H", payload, 4 + block * 2, len(compressed))
+        chunks.append(compressed)
+        levels.append(level)
+    for compressed in chunks:
+        payload.extend(compressed)
+        payload.extend(b"\x00" * (align_up(len(compressed), CHUNK_ALIGNMENT) -
+                                  len(compressed)))
+    if len(payload) % CHUNK_ALIGNMENT:
+        raise AssertionError("chunked payload is not DMA aligned")
+    return bytes(payload), levels
 
 
 def build_header(
@@ -161,8 +218,13 @@ def build_header(
     raw_crc32: int,
     index_crc32: int,
     header_crc32: int,
+    chunked_absolute: bool,
 ) -> bytes:
-    flags = CONTAINER_FLAG_XOR_DELTA | CONTAINER_FLAG_LZ4_RAW_BLOCK
+    flags = CONTAINER_FLAG_LZ4_RAW_BLOCK
+    if chunked_absolute:
+        flags |= CONTAINER_FLAG_CHUNKED_ABSOLUTE
+    else:
+        flags |= CONTAINER_FLAG_XOR_DELTA
     if rotate_180:
         flags |= CONTAINER_FLAG_ROTATE_180
     header = struct.pack(
@@ -232,6 +294,35 @@ def unpack_index_entry(data: bytes) -> dict[str, int]:
     return dict(zip(keys, values))
 
 
+def decode_chunked_absolute_payload(payload: bytes) -> bytes:
+    if len(payload) < CHUNK_HEADER_BYTES:
+        raise RuntimeError("short chunked frame header")
+    block_count, block_bytes = struct.unpack_from("<HH", payload, 0)
+    if block_count != CHUNK_COUNT or block_bytes != CHUNK_BYTES:
+        raise RuntimeError(
+            f"invalid chunk layout count={block_count} bytes={block_bytes}"
+        )
+    cursor = CHUNK_HEADER_BYTES
+    decoded = bytearray()
+    for block in range(block_count):
+        compressed_bytes = struct.unpack_from("<H", payload, 4 + block * 2)[0]
+        padded_bytes = align_up(compressed_bytes, CHUNK_ALIGNMENT)
+        if compressed_bytes == 0 or cursor + padded_bytes > len(payload):
+            raise RuntimeError(f"block {block}: invalid compressed length")
+        expected = min(CHUNK_BYTES, FRAME_BYTES - len(decoded))
+        decoded.extend(lz4.block.decompress(
+            payload[cursor:cursor + compressed_bytes],
+            uncompressed_size=expected,
+        ))
+        cursor += padded_bytes
+    if cursor != len(payload) or len(decoded) != FRAME_BYTES:
+        raise RuntimeError(
+            f"chunked frame size mismatch input={cursor}/{len(payload)} "
+            f"output={len(decoded)}/{FRAME_BYTES}"
+        )
+    return bytes(decoded)
+
+
 def verify_container(
     path: Path,
     raw: np.ndarray,
@@ -269,6 +360,9 @@ def verify_container(
             for i in range(0, len(index_bytes), INDEX_ENTRY_BYTES)
         ]
 
+        chunked_absolute = bool(
+            int(header["flags"]) & CONTAINER_FLAG_CHUNKED_ABSOLUTE
+        )
         previous: np.ndarray | None = None
         stream_crc = 0
         for index, entry in enumerate(entries):
@@ -278,11 +372,17 @@ def verify_container(
                 raise RuntimeError(f"frame {index}: short payload")
             if zlib.crc32(payload) & 0xFFFFFFFF != entry["payload_crc32"]:
                 raise RuntimeError(f"frame {index}: payload CRC mismatch")
-            decoded = lz4.block.decompress(
-                payload, uncompressed_size=entry["uncompressed_bytes"]
-            )
+            if chunked_absolute:
+                decoded = decode_chunked_absolute_payload(payload)
+            else:
+                decoded = lz4.block.decompress(
+                    payload, uncompressed_size=entry["uncompressed_bytes"]
+                )
             words = np.frombuffer(decoded, dtype="<u2").copy()
-            if entry["flags"] & FRAME_FLAG_XOR_DELTA:
+            if chunked_absolute:
+                if entry["flags"] != FRAME_FLAG_KEY:
+                    raise RuntimeError(f"frame {index}: chunked frame is not key")
+            elif entry["flags"] & FRAME_FLAG_XOR_DELTA:
                 if previous is None:
                     raise RuntimeError(f"frame {index}: delta without base")
                 words ^= previous
@@ -349,14 +449,26 @@ def main() -> int:
         keyframes = 0
         delta_frames = 0
         maximum_payload = 0
+        compression_levels = {
+            level: 0 for level in ADAPTIVE_HC_LEVELS
+        }
 
         with args.output.open("wb+") as destination:
             destination.write(b"\x00" * data_offset)
             for index in range(args.frames):
                 frame = source_frame(raw, index, rotate_180)
                 frame_bytes = frame.tobytes()
-                key = previous is None or (index % args.gop) == 0
-                if key:
+                key = (args.chunked_absolute or previous is None or
+                       (index % args.gop) == 0)
+                if args.chunked_absolute:
+                    payload, block_levels = pack_chunked_absolute_frame(
+                        frame_bytes
+                    )
+                    for compression_level in block_levels:
+                        compression_levels[compression_level] += 1
+                    frame_flags = FRAME_FLAG_KEY
+                    keyframes += 1
+                elif key:
                     encoded_input = frame_bytes
                     frame_flags = FRAME_FLAG_KEY
                     keyframes += 1
@@ -365,7 +477,9 @@ def main() -> int:
                     encoded_input = delta.astype("<u2", copy=False).tobytes()
                     frame_flags = FRAME_FLAG_XOR_DELTA
                     delta_frames += 1
-                payload = lz4_hc(encoded_input)
+                if not args.chunked_absolute:
+                    payload, compression_level = lz4_hc(encoded_input)
+                    compression_levels[compression_level] += 1
                 offset = destination.tell()
                 destination.write(payload)
                 entries.append(pack_index_entry(
@@ -388,7 +502,7 @@ def main() -> int:
             header = build_header(
                 fps=args.fps,
                 frame_count=args.frames,
-                gop=args.gop,
+                gop=1 if args.chunked_absolute else args.gop,
                 rotate_180=rotate_180,
                 index_offset=index_offset,
                 data_offset=data_offset,
@@ -396,12 +510,13 @@ def main() -> int:
                 raw_crc32=raw_stream_crc & 0xFFFFFFFF,
                 index_crc32=index_crc,
                 header_crc32=0,
+                chunked_absolute=args.chunked_absolute,
             )
             header_crc = zlib.crc32(header) & 0xFFFFFFFF
             header = build_header(
                 fps=args.fps,
                 frame_count=args.frames,
-                gop=args.gop,
+                gop=1 if args.chunked_absolute else args.gop,
                 rotate_180=rotate_180,
                 index_offset=index_offset,
                 data_offset=data_offset,
@@ -409,6 +524,7 @@ def main() -> int:
                 raw_crc32=raw_stream_crc & 0xFFFFFFFF,
                 index_crc32=index_crc,
                 header_crc32=header_crc,
+                chunked_absolute=args.chunked_absolute,
             )
             destination.seek(0)
             destination.write(header)
@@ -419,6 +535,13 @@ def main() -> int:
         print("VERIFY START", flush=True)
         verification = verify_container(args.output, raw, rotate_180)
         print("VERIFY PASS", flush=True)
+        print(
+            "PACK CODEC "
+            f"levels={compression_levels} "
+            f"payload_limit={PAYLOAD_STAGE_BYTES} "
+            f"chunked_absolute={int(args.chunked_absolute)}",
+            flush=True,
+        )
         raw._mmap.close()
         del raw
 
@@ -448,7 +571,7 @@ def main() -> int:
         "fps": args.fps,
         "frames": args.frames,
         "duration_seconds": args.frames / args.fps,
-        "gop": args.gop,
+        "gop": 1 if args.chunked_absolute else args.gop,
         "keyframes": keyframes,
         "delta_frames": delta_frames,
         "frame_bytes": FRAME_BYTES,
@@ -467,6 +590,17 @@ def main() -> int:
             args.frames * FRAME_BYTES / args.output.stat().st_size
         ),
         "maximum_payload_bytes": maximum_payload,
+        "payload_stage_bytes": PAYLOAD_STAGE_BYTES,
+        "compression": (
+            "chunked_absolute_lz4_hc_16k" if args.chunked_absolute else
+            "adaptive_lz4_hc_stage_limited"
+        ),
+        "chunk_bytes": CHUNK_BYTES if args.chunked_absolute else 0,
+        "chunks_per_frame": CHUNK_COUNT if args.chunked_absolute else 0,
+        "compression_levels": {
+            str(level): compression_levels[level]
+            for level in ADAPTIVE_HC_LEVELS
+        },
         "average_flash_mib_s": (
             container_bytes /
             (args.frames / args.fps) /

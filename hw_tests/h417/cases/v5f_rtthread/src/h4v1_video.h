@@ -15,6 +15,7 @@ extern "C" {
 #define H4V1_CONTAINER_XOR_DELTA      (1u << 0)
 #define H4V1_CONTAINER_ROTATE_180     (1u << 1)
 #define H4V1_CONTAINER_LZ4_RAW_BLOCK  (1u << 2)
+#define H4V1_CONTAINER_CHUNKED_ABSOLUTE (1u << 3)
 
 #define H4V1_FRAME_KEY                (1u << 0)
 #define H4V1_FRAME_XOR_DELTA          (1u << 1)

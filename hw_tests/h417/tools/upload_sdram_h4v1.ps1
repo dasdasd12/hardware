@@ -32,6 +32,8 @@ param(
 
     [switch]$NoRotate180,
 
+    [switch]$ChunkedAbsolute,
+
     [switch]$PrepareOnly
 )
 
@@ -96,7 +98,15 @@ if (-not ($ReusePacked -and
         if ($NoRotate180) {
             $packerArgs += "--no-rotate-180"
         }
-        Write-Host "Preparing H4V1 LZ4 keyframe/XOR-delta video..."
+        if ($ChunkedAbsolute) {
+            $packerArgs += "--chunked-absolute"
+        }
+        if ($ChunkedAbsolute) {
+            Write-Host "Preparing H4V1 LZ4 chunked-absolute video..."
+        }
+        else {
+            Write-Host "Preparing H4V1 LZ4 keyframe/XOR-delta video..."
+        }
         & $PythonPath @packerArgs
         if ($LASTEXITCODE -ne 0) {
             throw "H4V1 preparation failed with exit code $LASTEXITCODE"
