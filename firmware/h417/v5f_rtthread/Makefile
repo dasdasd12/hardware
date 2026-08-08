@@ -35,6 +35,8 @@ CH585_SPI_LINK_ROOT := $(V3F_DRIVER_ROOT)/ch585_spi_link
 V5F_HW_TEST_ROOT ?= ../../../hw_tests/h417/cases/v5f_rtthread
 V5F_HW_TEST_SRC_ROOT := $(V5F_HW_TEST_ROOT)/src
 V5F_HW_TEST_ASSET_ROOT := $(V5F_HW_TEST_ROOT)/assets
+V5F_HW_TEST_MAIN ?= v5f_hw_test.c
+V5F_HW_TEST_EXTRA_SRC ?=
 HW_TEST_COMMON_ROOT ?= ../../../hw_tests/common
 
 # RT-Thread root
@@ -278,7 +280,10 @@ APP_SRC += $(PROJECT_ROOT)/applications/usb_hs_hid_keyboard.c
 endif
 
 ifneq ($(APP_V5F_HW_TEST),none)
-APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/v5f_hw_test.c
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/$(V5F_HW_TEST_MAIN)
+ifneq ($(strip $(V5F_HW_TEST_EXTRA_SRC)),)
+APP_SRC += $(addprefix $(V5F_HW_TEST_SRC_ROOT)/,$(V5F_HW_TEST_EXTRA_SRC))
+endif
 endif
 ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/hardware.c

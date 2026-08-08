@@ -164,7 +164,7 @@ function Wait-H4V1Pattern {
     return $null
 }
 
-$windowBytes = 4 * 1024
+$windowBytes = 32 * 1024
 Write-Host ("CDC credit chunk={0} bytes gap={1}ms window={2} bytes stop_and_wait=1" -f `
     $CdcWriteChunkBytes, $CdcWriteGapMs, $windowBytes)
 $serial = [System.IO.Ports.SerialPort]::new(
@@ -266,12 +266,12 @@ try {
         -Pattern "RESULT (PASS|FAIL)" `
         -TimeoutMilliseconds ($TimeoutSeconds * 1000)
     if ($null -eq $result) {
-        throw "Timed out waiting for H4V1 decode/playback result"
+        throw "Timed out waiting for H4V1 SDRAM test result"
     }
     if ($result.Groups[1].Value -eq "FAIL") {
         exit 2
     }
-    Write-Host "H4V1 SDRAM decode test PASS; playback continues on the panel."
+    Write-Host "H4V1 SDRAM test PASS."
     exit 0
 }
 finally {
