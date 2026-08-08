@@ -11123,9 +11123,6 @@ static void V5F_MAYBE_UNUSED run_sdram_memtest_test(void)
 #define V5F_SDRAM_H4V1_PAYLOAD_STAGE_BYTES 0x00048000u
 #define V5F_SDRAM_H4V1_HISTORY_BYTES       0x00010000u
 #define V5F_SDRAM_H4V1_OUTPUT_BYTES        0x00004000u
-#define V5F_SDRAM_H4V1_MAX_FRAMES          120u
-#define V5F_SDRAM_H4V1_INDEX_STAGE_BYTES   \
-    (V5F_SDRAM_H4V1_MAX_FRAMES * H4V1_INDEX_ENTRY_BYTES)
 #define V5F_SDRAM_H4V1_OUTPUT_ADDR         0x20160000u
 #define V5F_SDRAM_H4V1_HISTORY_ADDR        0x20164000u
 
@@ -11173,8 +11170,6 @@ typedef struct
 static uint32_t s_sdram_video_block_crc[V5F_SDRAM_VIDEO_MAX_BLOCKS];
 static uint32_t s_sdram_video_block_count;
 static uint8_t s_sdram_video_readback_unstable;
-static uint8_t s_sdram_h4v1_index[V5F_SDRAM_H4V1_INDEX_STAGE_BYTES]
-    __attribute__((aligned(32)));
 
 /*
  * Upload ownership: 0x20160000..0x2016ffff is the retired CDC raw ring.
@@ -11210,13 +11205,13 @@ static uint32_t sdram_video_crc32_update(uint32_t crc,
 
 static void sdram_video_send_config_help(void)
 {
-    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v5 STAGE4A INDEX CACHE");
-    sdram_usb_debug_write_line("ISOLATION base=b7c45a5 transport=v37_32k_dma2 readback=dma256 codec=stream64k playback=stage3_pair index=all_frames usb=retire_before_rearm");
+    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v4 DELTA PAIR");
+    sdram_usb_debug_write_line("ISOLATION base=419462e transport=v37_32k_dma2 readback=dma256 codec=stream64k frames=key+delta");
     sdram_usb_debug_write_line("VIDEO FORMAT ARGB8888=4BPP ARGB1555=2BPP resolution=800x480");
     sdram_usb_debug_write_line("VIDEO LANES full16=ffff ignored=0000 rotation=host_rot180");
     sdram_usb_debug_write_line("VIDEO PATH cdc_rx_32k_credit,shared_sram_16k,dma2,60000000,ltdc_argb,vblank_locked");
     sdram_usb_debug_write_line("VIDEO WAIT command=VIDEO_<format>_<frames>_<fps>_<bytes>_<crc32> spaces_not_underscores");
-    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage4a_index_cache");
+    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=delta_pair");
 }
 
 static int sdram_video_next_token(const char **cursor,
@@ -11857,10 +11852,8 @@ static uint8_t sdram_video_h4v1_probe_container(
        (header.pixel_format != H4V1_PIXEL_FORMAT_ARGB1555) ||
        (header.frame_bytes != V5F_SDRAM_H4V1_FRAME_BYTES) ||
        (header.frame_count < 2u) ||
-       (header.frame_count > V5F_SDRAM_H4V1_MAX_FRAMES) ||
        (header.file_bytes > config->total_bytes) ||
        (header.index_offset > V5F_SDRAM_VIDEO_STAGE_BYTES) ||
-       (index_bytes > sizeof(s_sdram_h4v1_index)) ||
        (index_bytes > (V5F_SDRAM_VIDEO_STAGE_BYTES -
                        header.index_offset)))
     {
@@ -11882,9 +11875,6 @@ static uint8_t sdram_video_h4v1_probe_container(
         }
         return 0u;
     }
-    memcpy(s_sdram_h4v1_index,
-           &stage[header.index_offset],
-           index_bytes);
     status = h4v1_parse_index_entry(&stage[header.index_offset],
                                     index_bytes,
                                     &header,
@@ -11923,13 +11913,12 @@ static uint8_t sdram_video_h4v1_probe_container(
         int used = rt_snprintf(
             line,
             sizeof(line),
-            "H4V1 CONTAINER PASS frames=%u fps=%u file=%u transfer=%u gop=%u index=%u cached=%u first=%u/%u flags=%08x dma_cycles=%u",
+            "H4V1 CONTAINER PASS frames=%u fps=%u file=%u transfer=%u gop=%u index=%u first=%u/%u flags=%08x dma_cycles=%u",
             (unsigned int)header.frame_count,
             (unsigned int)header.fps,
             (unsigned int)header.file_bytes,
             (unsigned int)config->total_bytes,
             (unsigned int)header.gop,
-            (unsigned int)index_bytes,
             (unsigned int)index_bytes,
             (unsigned int)first.offset,
             (unsigned int)first.compressed_bytes,
