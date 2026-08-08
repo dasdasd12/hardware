@@ -37,6 +37,7 @@ V5F_HW_TEST_SRC_ROOT := $(V5F_HW_TEST_ROOT)/src
 V5F_HW_TEST_ASSET_ROOT := $(V5F_HW_TEST_ROOT)/assets
 V5F_HW_TEST_MAIN ?= v5f_hw_test.c
 V5F_HW_TEST_EXTRA_SRC ?=
+V5F_HW_TEST_LINK_AFTER_USB ?= 0
 HW_TEST_COMMON_ROOT ?= ../../../hw_tests/common
 
 # RT-Thread root
@@ -279,10 +280,18 @@ ifeq ($(APP_ENABLE_USB2_HS_HID),1)
 APP_SRC += $(PROJECT_ROOT)/applications/usb_hs_hid_keyboard.c
 endif
 
+V5F_HW_TEST_POST_USB_SRC :=
 ifneq ($(APP_V5F_HW_TEST),none)
+ifeq ($(V5F_HW_TEST_LINK_AFTER_USB),1)
+V5F_HW_TEST_POST_USB_SRC += $(V5F_HW_TEST_SRC_ROOT)/$(V5F_HW_TEST_MAIN)
+ifneq ($(strip $(V5F_HW_TEST_EXTRA_SRC)),)
+V5F_HW_TEST_POST_USB_SRC += $(addprefix $(V5F_HW_TEST_SRC_ROOT)/,$(V5F_HW_TEST_EXTRA_SRC))
+endif
+else
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/$(V5F_HW_TEST_MAIN)
 ifneq ($(strip $(V5F_HW_TEST_EXTRA_SRC)),)
 APP_SRC += $(addprefix $(V5F_HW_TEST_SRC_ROOT)/,$(V5F_HW_TEST_EXTRA_SRC))
+endif
 endif
 endif
 ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
@@ -331,7 +340,7 @@ STARTUP := $(PROJECT_ROOT)/bsp/startup_ch32h417_v5f.S
 LDSCRIPT := $(PROJECT_ROOT)/bsp/linker_scripts/Link_v5f.ld
 
 # All sources
-C_SOURCES := $(RTT_SRC) $(LIBCPU_SRC) $(BSP_SRC) $(DRV_SRC) $(APP_SRC) $(SDK_SRC) $(CHERRYUSB_SRC)
+C_SOURCES := $(RTT_SRC) $(LIBCPU_SRC) $(BSP_SRC) $(DRV_SRC) $(APP_SRC) $(SDK_SRC) $(CHERRYUSB_SRC) $(V5F_HW_TEST_POST_USB_SRC)
 ASM_SOURCES := $(LIBCPU_ASM) $(APP_ASM) $(STARTUP)
 
 # Build directory
