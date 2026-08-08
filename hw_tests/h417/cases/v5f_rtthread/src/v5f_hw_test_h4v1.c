@@ -11243,13 +11243,13 @@ static uint32_t sdram_video_crc32_update(uint32_t crc,
 
 static void sdram_video_send_config_help(void)
 {
-    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v16 STAGE5E SLICED4K LIVE32");
-    sdram_usb_debug_write_line("ISOLATION base=7844c09 transport=v37_32k_dma2 readback=dma256 codec=stream64k playback=live0_31 live_dma=r32_w256x4k_crc32 usb=retire_before_rearm");
+    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v17 STAGE5F VBLANK-GATED LIVE32");
+    sdram_usb_debug_write_line("ISOLATION base=d4fc5e7 transport=v37_32k_dma2 readback=dma256 codec=stream64k playback=live0_31 live_dma=vblank_r32_w256x4k_crc32 usb=retire_before_rearm");
     sdram_usb_debug_write_line("VIDEO FORMAT ARGB8888=4BPP ARGB1555=2BPP resolution=800x480");
     sdram_usb_debug_write_line("VIDEO LANES full16=ffff ignored=0000 rotation=host_rot180");
     sdram_usb_debug_write_line("VIDEO PATH cdc_rx_32k_credit,shared_sram_16k,dma2,60000000,ltdc_argb,vblank_locked");
     sdram_usb_debug_write_line("VIDEO WAIT command=VIDEO_<format>_<frames>_<fps>_<bytes>_<crc32> spaces_not_underscores");
-    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage5e_sliced4k_live32");
+    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage5f_vblank_gated_live32");
 }
 
 static int sdram_video_next_token(const char **cursor,
@@ -12929,6 +12929,8 @@ static uint8_t sdram_video_h4v1_stage_payload(
     return ok;
 }
 
+static uint8_t sdram_video_ltdc_wait_next_vblank(void);
+
 typedef struct
 {
     const h4v1_index_entry_t *entry;
@@ -12944,6 +12946,7 @@ typedef struct
     uint8_t delta;
     uint8_t read_wide256;
     uint8_t write_wide256;
+    uint8_t vblank_gate;
 } v5f_sdram_h4v1_stream_t;
 
 static int sdram_video_h4v1_stream_flush(
@@ -12960,6 +12963,11 @@ static int sdram_video_h4v1_stream_flush(
         return H4V1_OK;
     }
     output_offset = stream->produced - stream->chunk_bytes;
+    if((stream->vblank_gate != 0u) &&
+       (sdram_video_ltdc_wait_next_vblank() == 0u))
+    {
+        return H4V1_ERR_OUTPUT;
+    }
     if(stream->delta != 0u)
     {
         if(stream->previous_frame == RT_NULL)
@@ -13095,7 +13103,8 @@ static int sdram_video_h4v1_decode_streamed(
     uint32_t *decoded_crc,
     uint8_t read_wide256,
     uint8_t write_wide256,
-    uint32_t write_slice_bytes)
+    uint32_t write_slice_bytes,
+    uint8_t vblank_gate)
 {
     const uint8_t *input = s_lcd_fb;
     const uint8_t *input_end;
@@ -13141,6 +13150,7 @@ static int sdram_video_h4v1_decode_streamed(
     stream.delta = (uint8_t)(frame_kind == H4V1_FRAME_XOR_DELTA);
     stream.read_wide256 = read_wide256;
     stream.write_wide256 = write_wide256;
+    stream.vblank_gate = vblank_gate;
 
     while(input < input_end)
     {
@@ -13277,8 +13287,6 @@ static uint32_t sdram_video_h4v1_dma_frame_crc(
     *ok_out = 1u;
     return crc;
 }
-
-static uint8_t sdram_video_ltdc_wait_next_vblank(void);
 
 static void sdram_video_h4v1_live_fu_checkpoint(
     uint32_t frame,
@@ -13424,7 +13432,8 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
                                                &decoded_crc,
                                                1u,
                                                1u,
-                                               V5F_SDRAM_H4V1_OUTPUT_BYTES);
+                                               V5F_SDRAM_H4V1_OUTPUT_BYTES,
+                                               0u);
     sdram_memtest_dma_stream_finish();
     decode_cycles = sdram_video_cycle_now() - decode_start;
     if(result != H4V1_OK)
@@ -13496,7 +13505,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
         int used = rt_snprintf(
             line,
             sizeof(line),
-            "H4V1 LIVE START frame=0 cfb=%08x scan_changes=%u fu=%u decode_next=1 dma=r32/w256x4k/crc32",
+            "H4V1 LIVE START frame=0 cfb=%08x scan_changes=%u fu=%u decode_next=1 dma=vblank-r32/w256x4k/crc32",
             (unsigned int)LTDC_Layer1->CFBAR,
             (unsigned int)scan_changes,
             (unsigned int)((LTDC_GetFlagStatus(LTDC_FLAG_FU) != RESET) ?
@@ -13528,7 +13537,8 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
                                                &second_decoded_crc,
                                                V5F_SDRAM_H4V1_LIVE_READ_WIDE256,
                                                V5F_SDRAM_H4V1_LIVE_WRITE_WIDE256,
-                                               V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES);
+                                               V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES,
+                                               1u);
     second_decode_cycles = sdram_video_cycle_now() - decode_start;
     sdram_video_h4v1_live_fu_checkpoint(1u, "decode", &underruns);
     if(result != H4V1_OK)
@@ -13681,7 +13691,8 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
                                                &third_decoded_crc,
                                                V5F_SDRAM_H4V1_LIVE_READ_WIDE256,
                                                V5F_SDRAM_H4V1_LIVE_WRITE_WIDE256,
-                                               V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES);
+                                               V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES,
+                                               1u);
     third_decode_cycles = sdram_video_cycle_now() - decode_start;
     sdram_video_h4v1_live_fu_checkpoint(2u, "decode", &underruns);
     if(result != H4V1_OK)
@@ -13863,7 +13874,8 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
                                                    &batch_decoded_crc,
                                                    V5F_SDRAM_H4V1_LIVE_READ_WIDE256,
                                                    V5F_SDRAM_H4V1_LIVE_WRITE_WIDE256,
-                                                   V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES);
+                                                   V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES,
+                                                   1u);
         if(batch_frame_kind == H4V1_FRAME_KEY)
         {
             sdram_memtest_dma_stream_finish();
@@ -13965,7 +13977,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
     g_v5f_hw_test_diag.phase = V5F_HW_PHASE_PASSED;
     g_v5f_hw_test_diag.sdram_ok_count++;
     sdram_usb_debug_write_line(
-        "H4V1 ISOLATED STAGE5E PASS transport=stable live32=pass key30=pass dma=r32/w256x4k/crc32 swaps=31 fifo_underrun=0");
+        "H4V1 ISOLATED STAGE5F PASS transport=stable live32=pass key30=pass dma=vblank-r32/w256x4k/crc32 swaps=31 fifo_underrun=0");
     sdram_usb_debug_write_line("RESULT PASS");
     sdram_memtest_watchdog_complete();
     while(1)
