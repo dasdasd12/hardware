@@ -11253,13 +11253,13 @@ static uint32_t sdram_video_crc32_update(uint32_t crc,
 
 static void sdram_video_send_config_help(void)
 {
-    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v29 STAGE5R COPY PROFILE");
-    sdram_usb_debug_write_line("ISOLATION base=aa5f60f transport=v37_32k_dma2 readback=dma256 codec=stream64k_fast playback=live0_89_once live_dma=r256x2k_w256x2k codec_crc=sampled8 profile=3,30,31_copy_split delta=xor_copy32 match=forward_fanout usb=retire_before_rearm");
+    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v30 STAGE5S WIDE MATCH");
+    sdram_usb_debug_write_line("ISOLATION base=ee2419f transport=v37_32k_dma2 readback=dma256 codec=stream64k_fast playback=live0_89_once live_dma=r256x2k_w256x2k codec_crc=sampled8 profile=3,30,31_copy_split delta=xor_copy32 match=forward_fanout32_16 usb=retire_before_rearm");
     sdram_usb_debug_write_line("VIDEO FORMAT ARGB8888=4BPP ARGB1555=2BPP resolution=800x480");
     sdram_usb_debug_write_line("VIDEO LANES full16=ffff ignored=0000 rotation=host_rot180");
     sdram_usb_debug_write_line("VIDEO PATH cdc_rx_32k_credit,shared_sram_16k,dma2,60000000,ltdc_argb,vblank_locked");
     sdram_usb_debug_write_line("VIDEO WAIT command=VIDEO_<format>_<frames>_<fps>_<bytes>_<crc32> spaces_not_underscores");
-    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage5r_copy_profile");
+    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage5s_wide_match");
 }
 
 static int sdram_video_next_token(const char **cursor,
@@ -12985,6 +12985,8 @@ typedef struct
 
 typedef uint32_t v5f_sdram_h4v1_alias_u32_t
     __attribute__((may_alias));
+typedef uint16_t v5f_sdram_h4v1_alias_u16_t
+    __attribute__((may_alias));
 
 static void __attribute__((optimize("O3")))
 sdram_video_h4v1_xor_copy(uint8_t *output,
@@ -13250,7 +13252,8 @@ sdram_video_h4v1_stream_copy_literals(v5f_sdram_h4v1_stream_t *stream,
     return H4V1_OK;
 }
 
-static int __attribute__((optimize("O3,no-tree-loop-distribute-patterns")))
+static int __attribute__((optimize(
+    "O3,no-tree-vectorize,no-tree-loop-distribute-patterns")))
 sdram_video_h4v1_stream_copy_match(v5f_sdram_h4v1_stream_t *stream,
                                    uint32_t match_offset,
                                    uint32_t bytes)
@@ -13304,9 +13307,73 @@ sdram_video_h4v1_stream_copy_match(v5f_sdram_h4v1_stream_t *stream,
         }
         else
         {
-            uint32_t copy_index;
+            uint32_t copy_index = 0u;
 
-            for(copy_index = 0u; copy_index < span; ++copy_index)
+            if((match_offset & 3u) == 0u)
+            {
+                while((copy_index < span) &&
+                      (((history_write + copy_index) & 3u) != 0u))
+                {
+                    uint8_t value =
+                        stream->history[history_read + copy_index];
+
+                    stream->history[history_write + copy_index] = value;
+                    stream->output_chunk[
+                        stream->chunk_bytes + copy_index] = value;
+                    copy_index++;
+                }
+                while((span - copy_index) >= sizeof(uint32_t))
+                {
+                    v5f_sdram_h4v1_alias_u32_t *history_write32 =
+                        (v5f_sdram_h4v1_alias_u32_t *)(void *)
+                        &stream->history[history_write + copy_index];
+                    const v5f_sdram_h4v1_alias_u32_t *history_read32 =
+                        (const v5f_sdram_h4v1_alias_u32_t *)(const void *)
+                        &stream->history[history_read + copy_index];
+                    v5f_sdram_h4v1_alias_u32_t *output32 =
+                        (v5f_sdram_h4v1_alias_u32_t *)(void *)
+                        &stream->output_chunk[
+                            stream->chunk_bytes + copy_index];
+                    uint32_t value = *history_read32;
+
+                    *history_write32 = value;
+                    *output32 = value;
+                    copy_index += sizeof(uint32_t);
+                }
+            }
+            else if((match_offset & 1u) == 0u)
+            {
+                if((copy_index < span) &&
+                   (((history_write + copy_index) & 1u) != 0u))
+                {
+                    uint8_t value =
+                        stream->history[history_read + copy_index];
+
+                    stream->history[history_write + copy_index] = value;
+                    stream->output_chunk[
+                        stream->chunk_bytes + copy_index] = value;
+                    copy_index++;
+                }
+                while((span - copy_index) >= sizeof(uint16_t))
+                {
+                    v5f_sdram_h4v1_alias_u16_t *history_write16 =
+                        (v5f_sdram_h4v1_alias_u16_t *)(void *)
+                        &stream->history[history_write + copy_index];
+                    const v5f_sdram_h4v1_alias_u16_t *history_read16 =
+                        (const v5f_sdram_h4v1_alias_u16_t *)(const void *)
+                        &stream->history[history_read + copy_index];
+                    v5f_sdram_h4v1_alias_u16_t *output16 =
+                        (v5f_sdram_h4v1_alias_u16_t *)(void *)
+                        &stream->output_chunk[
+                            stream->chunk_bytes + copy_index];
+                    uint16_t value = *history_read16;
+
+                    *history_write16 = value;
+                    *output16 = value;
+                    copy_index += sizeof(uint16_t);
+                }
+            }
+            while(copy_index < span)
             {
                 uint8_t value =
                     stream->history[history_read + copy_index];
@@ -13314,6 +13381,7 @@ sdram_video_h4v1_stream_copy_match(v5f_sdram_h4v1_stream_t *stream,
                 stream->history[history_write + copy_index] = value;
                 stream->output_chunk[
                     stream->chunk_bytes + copy_index] = value;
+                copy_index++;
             }
         }
         if(stream->profile != RT_NULL)
@@ -14375,7 +14443,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
     g_v5f_hw_test_diag.phase = V5F_HW_PHASE_PASSED;
     g_v5f_hw_test_diag.sdram_ok_count++;
     sdram_usb_debug_write_line(
-        "H4V1 ISOLATED STAGE5R PASS transport=stable full90=pass keys30,60=pass dma=r256x2k/w256x2k codec_crc=sampled8 dma_crc=sampled8 profile=copy_split delta=xor_copy32 match=forward_fanout swaps=89 fifo_underrun=0");
+        "H4V1 ISOLATED STAGE5S PASS transport=stable full90=pass keys30,60=pass dma=r256x2k/w256x2k codec_crc=sampled8 dma_crc=sampled8 profile=copy_split delta=xor_copy32 match=forward_fanout32_16 swaps=89 fifo_underrun=0");
     sdram_usb_debug_write_line("RESULT PASS");
     sdram_memtest_watchdog_complete();
     while(1)
