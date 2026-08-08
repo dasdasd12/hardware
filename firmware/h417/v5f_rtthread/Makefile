@@ -280,9 +280,6 @@ endif
 ifneq ($(APP_V5F_HW_TEST),none)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/v5f_hw_test.c
 endif
-ifeq ($(APP_V5F_HW_TEST_ID),19)
-APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/h4v1_video.c
-endif
 ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/hardware.c
 APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit/h417_v5f_sdram_official_16bit_board.c

@@ -360,16 +360,13 @@ static uint32_t cdc_read_transfer_size(uint8_t busid)
 {
 #if CDC_RAW_RX_ENABLED
     /*
-     * Keep USBFS on its native 64-byte completion boundary.  The experimental
-     * 1 KiB coalesced request made the application callback cheaper, but long
-     * CDC uploads could stop at a random 1 KiB boundary while the application
-     * still reported the OUT endpoint armed.  Native-MPS requests use the same
-     * path as ordinary CDC traffic and make every accepted hardware packet
-     * visible to the shared-SRAM ring before the endpoint is re-armed.
+     * USBFS still interrupts for each 64-byte hardware packet, but its port
+     * can accumulate packets before entering the CDC/application completion
+     * callback.  Use the complete 1 KiB software buffer for binary uploads.
      */
     if((busid == USB_CH32H417_BUS_FS) && (cdc_raw_rx_mode != 0U))
     {
-        return CDC_FS_MPS;
+        return CDC_SS_MPS;
     }
 #endif
     return cdc_bus_mps(busid);
@@ -438,8 +435,6 @@ static void cdc_queue_raw_block(const uint8_t *data, uint32_t length)
         return;
     }
 
-    /* Acquire the consumer's published tail before reusing ring storage. */
-    __asm volatile("fence r, rw" ::: "memory");
     used = (head >= tail) ?
            (head - tail) :
            (APP_USB_CDC_RAW_RX_BUFFER_BYTES - tail + head);
@@ -826,22 +821,14 @@ int ch32h417_usb_cdc_read_line(char *out, uint32_t out_len)
 int ch32h417_usb_cdc_raw_rx_enable(uint8_t enable)
 {
 #if CDC_RAW_RX_ENABLED
-    rt_base_t level;
-    uint8_t busid;
-
-    /*
-     * The line-mode callback already leaves CDC OUT armed.  Switching modes
-     * used to overwrite that live transfer with a second start_read() while
-     * USBFS IRQ could run concurrently.  Make the ownership transition
-     * atomic and only prime an actually idle endpoint.
-     */
-    level = rt_hw_interrupt_disable();
     cdc_raw_rx_head = 0U;
     cdc_raw_rx_tail = 0U;
     cdc_raw_rx_overflow = 0U;
     cdc_raw_rx_mode = (enable != 0U) ? 1U : 0U;
     if(enable != 0U)
     {
+        uint8_t busid;
+
         for(busid = 0U; busid < CONFIG_USBDEV_MAX_BUS; busid++)
         {
             cdc_rx_callbacks[busid] = 0U;
@@ -850,16 +837,23 @@ int ch32h417_usb_cdc_raw_rx_enable(uint8_t enable)
             cdc_rx_arm_fail[busid] = 0U;
         }
     }
-    __asm volatile("fence rw, rw" ::: "memory");
-    for(busid = 0U; busid < CONFIG_USBDEV_MAX_BUS; busid++)
+    /*
+     * Replace the line-mode 64-byte read before VIDEO READY is sent.  Without
+     * this explicit re-prime, the first 64-byte completion offsets all later
+     * 1024-byte groups; a host window ending on 32 KiB can then leave 960
+     * bytes pending forever while the host waits for its ACK.
+     */
     {
-        if((cdc_bus_configured[busid] != 0U) &&
-           (cdc_rx_armed[busid] == 0U))
+        uint8_t busid;
+
+        for(busid = 0U; busid < CONFIG_USBDEV_MAX_BUS; busid++)
         {
-            (void)cdc_submit_read(busid);
+            if(cdc_bus_configured[busid] != 0U)
+            {
+                (void)cdc_submit_read(busid);
+            }
         }
     }
-    rt_hw_interrupt_enable(level);
     return 0;
 #else
     (void)enable;
@@ -907,9 +901,6 @@ uint32_t ch32h417_usb_cdc_raw_rx_available(void)
 #if CDC_RAW_RX_ENABLED
     uint32_t head = cdc_raw_rx_head;
     uint32_t tail = cdc_raw_rx_tail;
-
-    /* Pair with the producer's release before it publishes head. */
-    __asm volatile("fence r, rw" ::: "memory");
 
     if(head >= tail)
     {
@@ -960,8 +951,6 @@ int ch32h417_usb_cdc_raw_rx_read(void *out, uint32_t out_len)
     {
         tail -= APP_USB_CDC_RAW_RX_BUFFER_BYTES;
     }
-    /* Publish freed storage only after all ring reads have completed. */
-    __asm volatile("fence rw, rw" ::: "memory");
     cdc_raw_rx_tail = tail;
     return (int)count;
 #else

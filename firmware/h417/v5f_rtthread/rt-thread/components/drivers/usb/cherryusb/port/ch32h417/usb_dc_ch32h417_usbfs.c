@@ -906,36 +906,6 @@ static void usbfs_irq_handler(uint8_t busid)
         g_ch32h417_usbfs_diag.last_xfer_ep = ep_idx;
         g_ch32h417_usbfs_diag.last_xfer_token = (uint8_t)(intst & USBFS_UIS_TOKEN_MASK);
         g_ch32h417_usbfs_diag.last_xfer_rx_len = USBFSD->RX_LEN;
-
-        /*
-         * Retire this completion before a class callback is allowed to arm
-         * the endpoint again.  The old ordering cleared UIF_TRANSFER after
-         * the callback.  A native-64 CDC OUT callback immediately re-arms
-         * EP2, so the host could complete the next packet while the old ISR
-         * was still running; the final write-one-to-clear then erased the
-         * new packet's interrupt.  The visible result was an ACK/armed OUT
-         * endpoint with no more callbacks until the watchdog reset V5F.
-         *
-         * NAK a non-control OUT endpoint first so its DMA buffer cannot be
-         * overwritten while the current completion is being consumed.  A
-         * continuation or callback will explicitly prime it again.
-         */
-        if (((intst & USBFS_UIS_TOKEN_MASK) == USBFS_UIS_TOKEN_OUT) &&
-            ((intst & USBFS_UIS_IS_NAK) == 0U) &&
-            (ep_idx != 0U) &&
-            (ep_idx < USB_CH32H417_MAX_EP_NUM)) {
-            volatile uint8_t *rx_ctrl = usbfs_ep_rx_ctrl_reg(ep_idx);
-            *rx_ctrl = (uint8_t)((*rx_ctrl & ~USBFS_UEP_R_RES_MASK) |
-                                 USBFS_UEP_R_AUTO_TOG |
-                                 USBFS_UEP_R_RES_NAK);
-        }
-        usbfs_trace_mark(CH32H417_USBFS_TRACE_FLAG_CLEAR_BEGIN,
-                         USBFS_UIF_TRANSFER);
-        USBFSD->INT_FG = USBFS_UIF_TRANSFER;
-        __asm volatile("fence iorw, iorw" ::: "memory");
-        usbfs_trace_mark(CH32H417_USBFS_TRACE_FLAG_CLEAR_END,
-                         USBFS_UIF_TRANSFER);
-
         if ((intst & USBFS_UIS_TOKEN_MASK) == USBFS_UIS_TOKEN_SETUP) {
             g_ch32h417_usbfs_diag.last_xfer_buf0 = usbfs_pack4(usbfs_ep0_buffer);
             g_ch32h417_usbfs_diag.last_xfer_buf1 = usbfs_pack4(usbfs_ep0_buffer + 4);
@@ -967,6 +937,11 @@ static void usbfs_irq_handler(uint8_t busid)
         } else {
             g_ch32h417_usbfs_diag.transfer_bad_ep++;
         }
+        usbfs_trace_mark(CH32H417_USBFS_TRACE_FLAG_CLEAR_BEGIN,
+                         USBFS_UIF_TRANSFER);
+        USBFSD->INT_FG = USBFS_UIF_TRANSFER;
+        usbfs_trace_mark(CH32H417_USBFS_TRACE_FLAG_CLEAR_END,
+                         USBFS_UIF_TRANSFER);
     } else if ((intflag & USBFS_UIF_BUS_RST) != 0U) {
         g_ch32h417_usbfs_diag.bus_reset++;
         USBFSD->DEV_ADDR = 0U;
