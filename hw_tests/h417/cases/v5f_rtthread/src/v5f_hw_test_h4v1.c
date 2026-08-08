@@ -11123,6 +11123,7 @@ static void V5F_MAYBE_UNUSED run_sdram_memtest_test(void)
 #define V5F_SDRAM_H4V1_PAYLOAD_STAGE_BYTES 0x00048000u
 #define V5F_SDRAM_H4V1_HISTORY_BYTES       0x00010000u
 #define V5F_SDRAM_H4V1_OUTPUT_BYTES        0x00004000u
+#define V5F_SDRAM_H4V1_DMA_ALIGNMENT       32u
 #define V5F_SDRAM_H4V1_MAX_FRAMES          120u
 #define V5F_SDRAM_H4V1_OUTPUT_ADDR         0x20160000u
 #define V5F_SDRAM_H4V1_HISTORY_ADDR        0x20164000u
@@ -11206,13 +11207,13 @@ static uint32_t sdram_video_crc32_update(uint32_t crc,
 
 static void sdram_video_send_config_help(void)
 {
-    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v7 STAGE4C THIRD FRAME");
-    sdram_usb_debug_write_line("ISOLATION base=f66c59e transport=v37_32k_dma2 readback=dma256 codec=stream64k playback=frames2_1 index=sdram_dma_on_demand usb=retire_before_rearm");
+    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v8 STAGE4C ALIGNED PAYLOAD");
+    sdram_usb_debug_write_line("ISOLATION base=378ac27 transport=v37_32k_dma2 readback=dma256 codec=stream64k playback=frames2_1 index=sdram_dma_on_demand usb=retire_before_rearm");
     sdram_usb_debug_write_line("VIDEO FORMAT ARGB8888=4BPP ARGB1555=2BPP resolution=800x480");
     sdram_usb_debug_write_line("VIDEO LANES full16=ffff ignored=0000 rotation=host_rot180");
     sdram_usb_debug_write_line("VIDEO PATH cdc_rx_32k_credit,shared_sram_16k,dma2,60000000,ltdc_argb,vblank_locked");
     sdram_usb_debug_write_line("VIDEO WAIT command=VIDEO_<format>_<frames>_<fps>_<bytes>_<crc32> spaces_not_underscores");
-    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage4c_third_frame");
+    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage4c_aligned_payload");
 }
 
 static int sdram_video_next_token(const char **cursor,
@@ -12858,16 +12859,22 @@ static uint8_t sdram_video_h4v1_stage_payload(
     }
     while(done < entry->compressed_bytes)
     {
+        uintptr_t source =
+            (uintptr_t)V5F_SDRAM_BASE_ADDR + config->storage_offset +
+            entry->offset + done;
+        uintptr_t aligned_source =
+            source & ~((uintptr_t)V5F_SDRAM_H4V1_DMA_ALIGNMENT - 1u);
+        uint32_t prefix = (uint32_t)(source - aligned_source);
         uint32_t chunk = entry->compressed_bytes - done;
+        uint32_t usable = V5F_SDRAM_VIDEO_STAGE_BYTES - prefix;
         uint32_t cycles;
 
-        if(chunk > V5F_SDRAM_VIDEO_STAGE_BYTES)
+        if(chunk > usable)
         {
-            chunk = V5F_SDRAM_VIDEO_STAGE_BYTES;
+            chunk = usable;
         }
         if(sdram_memtest_dma_stream_transfer(
-               (uintptr_t)V5F_SDRAM_BASE_ADDR + config->storage_offset +
-                   entry->offset + done,
+               aligned_source,
                1u,
                &cycles,
                V5F_SDRAM_WATCHDOG_STAGE_READ,
@@ -12876,7 +12883,7 @@ static uint8_t sdram_video_h4v1_stage_payload(
             ok = 0u;
             break;
         }
-        memcpy(&s_lcd_fb[done], dma_stage, chunk);
+        memcpy(&s_lcd_fb[done], &dma_stage[prefix], chunk);
         done += chunk;
         sdram_memtest_watchdog_feed();
     }
@@ -13413,8 +13420,18 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
             sdram_usb_debug_write_line(line);
         }
     }
-    sdram_usb_debug_write_line(
-        "H4V1 THIRD DECODE START frame=2 previous=600c0000 output=60000000 dma_read_previous=1");
+    {
+        int used = rt_snprintf(
+            line,
+            sizeof(line),
+            "H4V1 THIRD DECODE START frame=2 previous=600c0000 output=60000000 dma_read_previous=1 payload_align_skip=%u",
+            (unsigned int)(third.offset &
+                           (V5F_SDRAM_H4V1_DMA_ALIGNMENT - 1u)));
+        if((used > 0) && ((rt_size_t)used < sizeof(line)))
+        {
+            sdram_usb_debug_write_line(line);
+        }
+    }
     if(sdram_video_h4v1_stage_payload(config, &third) == 0u)
     {
         sdram_video_fail("h4v1_third_payload_dma");
