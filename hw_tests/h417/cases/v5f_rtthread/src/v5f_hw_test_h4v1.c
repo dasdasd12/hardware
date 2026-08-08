@@ -9688,81 +9688,6 @@ static uint8_t sdram_memtest_dma_stream_transfer_at(
     return ok;
 }
 
-/*
- * The full transfer helper above records every cleanup operation so an IWDG
- * reset can identify a wedged DMA/FMC transaction.  A live delta frame uses
- * 768 deliberately small transfers; retaining that trace for every 2 KiB
- * slice dominates decode time and lengthens LTDC/SDRAM contention exposure.
- * Keep the identical DMA setup, polling, disable and flag-clear sequence, but
- * use one lightweight transaction in the already validated live decode path.
- */
-static uint8_t sdram_memtest_dma_stream_transfer_live_at(
-    uintptr_t sdram_address,
-    uintptr_t memory_address,
-    uint32_t bytes,
-    uint8_t write_to_sdram,
-    uint8_t wide256,
-    uint32_t *cycles)
-{
-    uint32_t transaction_bytes = (wide256 != 0u) ? 32u : 4u;
-    uint32_t timeout = V5F_SDRAM_TIMEOUT_POLLS;
-    uint32_t stop_timeout;
-    uint32_t start;
-    uint8_t ok;
-
-    if((bytes == 0u) || (bytes > V5F_SDRAM_DMA_BUFFER_BYTES) ||
-       ((bytes % transaction_bytes) != 0u))
-    {
-        *cycles = 0u;
-        return 0u;
-    }
-    if((DMA2_Channel3->CFGR & DMA_CFGR1_EN) != 0u)
-    {
-        *cycles = 0u;
-        return 0u;
-    }
-
-    if(write_to_sdram != 0u)
-    {
-        DMA2_Channel3->CFGR |= DMA_CFGR1_DIR;
-    }
-    else
-    {
-        DMA2_Channel3->CFGR &= ~DMA_CFGR1_DIR;
-    }
-    DMA2_Channel3->PADDR = (uint32_t)sdram_address;
-    DMA2_Channel3->MADDR = (uint32_t)memory_address;
-    DMA2_Channel3->CNTR = bytes / transaction_bytes;
-    DMA_ClearFlag(DMA2, DMA2_FLAG_TC3 | DMA2_FLAG_TE3);
-    ch32h417_ltdc_rgb_framebuffer_barrier();
-    start = sdram_memtest_timer_now();
-    DMA_Cmd(DMA2_Channel3, ENABLE);
-    while((DMA_GetFlagStatus(DMA2, DMA2_FLAG_TC3) == RESET) &&
-          (DMA_GetFlagStatus(DMA2, DMA2_FLAG_TE3) == RESET) &&
-          (timeout != 0u))
-    {
-        timeout--;
-    }
-    *cycles = sdram_memtest_timer_now() - start;
-    ok = (uint8_t)((timeout != 0u) &&
-                   (DMA_GetFlagStatus(DMA2, DMA2_FLAG_TC3) != RESET) &&
-                   (DMA_GetFlagStatus(DMA2, DMA2_FLAG_TE3) == RESET));
-    DMA_Cmd(DMA2_Channel3, DISABLE);
-    stop_timeout = 1024u;
-    while(((DMA2_Channel3->CFGR & DMA_CFGR1_EN) != 0u) &&
-          (stop_timeout != 0u))
-    {
-        stop_timeout--;
-    }
-    if(stop_timeout == 0u)
-    {
-        ok = 0u;
-    }
-    DMA_ClearFlag(DMA2, DMA2_FLAG_TC3 | DMA2_FLAG_TE3);
-    ch32h417_ltdc_rgb_framebuffer_barrier();
-    return ok;
-}
-
 static uint8_t sdram_memtest_dma_stream_transfer(uintptr_t sdram_address,
                                                   uint8_t wide256,
                                                   uint32_t *cycles,
@@ -11328,13 +11253,13 @@ static uint32_t sdram_video_crc32_update(uint32_t crc,
 
 static void sdram_video_send_config_help(void)
 {
-    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v23 STAGE5L ONE DMA SESSION");
-    sdram_usb_debug_write_line("ISOLATION base=5b2787a transport=v37_32k_dma2 readback=dma256 codec=stream64k_fast playback=live0_89_once live_dma=one_session_fast_r256x2k_fast_w256x2k sampled_crc usb=retire_before_rearm");
+    sdram_usb_debug_write_line("H417 SDRAM VIDEO H4V1 ISOLATED v21 STAGE5J FULL90 ONCE");
+    sdram_usb_debug_write_line("ISOLATION base=e74925b transport=v37_32k_dma2 readback=dma256 codec=stream64k_fast playback=live0_89_once live_dma=r256x2k_w256x2k sampled_crc usb=retire_before_rearm");
     sdram_usb_debug_write_line("VIDEO FORMAT ARGB8888=4BPP ARGB1555=2BPP resolution=800x480");
     sdram_usb_debug_write_line("VIDEO LANES full16=ffff ignored=0000 rotation=host_rot180");
     sdram_usb_debug_write_line("VIDEO PATH cdc_rx_32k_credit,shared_sram_16k,dma2,60000000,ltdc_argb,vblank_locked");
     sdram_usb_debug_write_line("VIDEO WAIT command=VIDEO_<format>_<frames>_<fps>_<bytes>_<crc32> spaces_not_underscores");
-    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage5l_one_dma_session");
+    sdram_usb_debug_write_line("H4V1 WAIT command=H4V1_<padded_bytes>_<transfer_crc32> storage=60200000 fb=60000000/600c0000 stage=stage5j_full90_once");
 }
 
 static int sdram_video_next_token(const char **cursor,
@@ -13033,7 +12958,6 @@ typedef struct
     uint8_t read_wide256;
     uint8_t write_wide256;
     uint8_t vblank_gate;
-    uint8_t dma_session;
 } v5f_sdram_h4v1_stream_t;
 
 static int sdram_video_h4v1_stream_flush(
@@ -13062,9 +12986,7 @@ static int sdram_video_h4v1_stream_flush(
         {
             return H4V1_ERR_FRAME_BASE;
         }
-        if((stream->dma_session == 0u) &&
-           (sdram_memtest_dma_stream_prepare(
-                0u, stream->read_wide256) == 0u))
+        if(sdram_memtest_dma_stream_prepare(0u, stream->read_wide256) == 0u)
         {
             return H4V1_ERR_INPUT;
         }
@@ -13077,27 +12999,25 @@ static int sdram_video_h4v1_stream_flush(
             {
                 read_bytes = stream->read_slice_bytes;
             }
-            if(sdram_memtest_dma_stream_transfer_live_at(
+            if(sdram_memtest_dma_stream_transfer_at(
                    (uintptr_t)&stream->previous_frame[
                        output_offset + read_offset],
                    (uintptr_t)&dma_stage[read_offset],
                    read_bytes,
-                   0u,
                    stream->read_wide256,
-                   &cycles) == 0u)
+                   &cycles,
+                   V5F_SDRAM_WATCHDOG_STAGE_READ,
+                   0x3600u + (stream->frame * 512u) +
+                       ((output_offset /
+                         V5F_SDRAM_H4V1_OUTPUT_BYTES) * 8u) +
+                       (read_offset / stream->read_slice_bytes)) == 0u)
             {
-                if(stream->dma_session == 0u)
-                {
-                    sdram_memtest_dma_stream_finish();
-                }
+                sdram_memtest_dma_stream_finish();
                 return H4V1_ERR_INPUT;
             }
             read_offset += read_bytes;
         }
-        if(stream->dma_session == 0u)
-        {
-            sdram_memtest_dma_stream_finish();
-        }
+        sdram_memtest_dma_stream_finish();
         for(i = 0u; i < stream->chunk_bytes; ++i)
         {
             stream->output_chunk[i] ^= dma_stage[i];
@@ -13114,7 +13034,7 @@ static int sdram_video_h4v1_stream_flush(
                0,
                V5F_SDRAM_H4V1_OUTPUT_BYTES - stream->chunk_bytes);
     }
-    if((stream->delta != 0u) && (stream->dma_session == 0u) &&
+    if((stream->delta != 0u) &&
        (sdram_memtest_dma_stream_prepare(1u, stream->write_wide256) == 0u))
     {
         return H4V1_ERR_OUTPUT;
@@ -13128,15 +13048,18 @@ static int sdram_video_h4v1_stream_flush(
         {
             write_bytes = stream->write_slice_bytes;
         }
-        if(sdram_memtest_dma_stream_transfer_live_at(
+        if(sdram_memtest_dma_stream_transfer_at(
                (uintptr_t)&stream->output_frame[output_offset + write_offset],
                (uintptr_t)&dma_stage[write_offset],
                write_bytes,
-               1u,
                stream->write_wide256,
-               &cycles) == 0u)
+               &cycles,
+               V5F_SDRAM_WATCHDOG_STAGE_WRITE,
+               0x3500u + (stream->frame * 512u) +
+                   ((output_offset / V5F_SDRAM_H4V1_OUTPUT_BYTES) * 8u) +
+                   (write_offset / stream->write_slice_bytes)) == 0u)
         {
-            if((stream->delta != 0u) && (stream->dma_session == 0u))
+            if(stream->delta != 0u)
             {
                 sdram_memtest_dma_stream_finish();
             }
@@ -13144,7 +13067,7 @@ static int sdram_video_h4v1_stream_flush(
         }
         write_offset += write_bytes;
     }
-    if((stream->delta != 0u) && (stream->dma_session == 0u))
+    if(stream->delta != 0u)
     {
         sdram_memtest_dma_stream_finish();
     }
@@ -13306,8 +13229,7 @@ sdram_video_h4v1_decode_streamed(
     uint8_t write_wide256,
     uint32_t read_slice_bytes,
     uint32_t write_slice_bytes,
-    uint8_t vblank_gate,
-    uint8_t dma_session)
+    uint8_t vblank_gate)
 {
     const uint8_t *input = s_lcd_fb;
     const uint8_t *input_end;
@@ -13358,7 +13280,6 @@ sdram_video_h4v1_decode_streamed(
     stream.read_wide256 = read_wide256;
     stream.write_wide256 = write_wide256;
     stream.vblank_gate = vblank_gate;
-    stream.dma_session = dma_session;
 
     while(input < input_end)
     {
@@ -13638,8 +13559,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
                                                1u,
                                                V5F_SDRAM_H4V1_OUTPUT_BYTES,
                                                V5F_SDRAM_H4V1_OUTPUT_BYTES,
-                                               0u,
-                                               1u);
+                                               0u);
     sdram_memtest_dma_stream_finish();
     decode_cycles = sdram_video_cycle_now() - decode_start;
     if(result != H4V1_OK)
@@ -13711,7 +13631,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
         int used = rt_snprintf(
             line,
             sizeof(line),
-            "H4V1 LIVE START frame=0 cfb=%08x scan_changes=%u fu=%u decode_next=1 dma=one-session-fast-r256x2k/fast-w256x2k sampled-crc payload_crc=r32 gate=off",
+            "H4V1 LIVE START frame=0 cfb=%08x scan_changes=%u fu=%u decode_next=1 dma=r256x2k/w256x2k sampled-crc payload_crc=r32 gate=off",
             (unsigned int)LTDC_Layer1->CFBAR,
             (unsigned int)scan_changes,
             (unsigned int)((LTDC_GetFlagStatus(LTDC_FLAG_FU) != RESET) ?
@@ -13735,11 +13655,6 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
         sdram_video_fail("h4v1_second_payload_dma");
     }
     sdram_video_h4v1_live_fu_checkpoint(1u, "payload", &underruns);
-    if(sdram_memtest_dma_stream_prepare(
-           0u, V5F_SDRAM_H4V1_PREVIOUS_READ_WIDE256) == 0u)
-    {
-        sdram_video_fail("h4v1_second_dma_session_prepare");
-    }
     decode_start = sdram_video_cycle_now();
     result = sdram_video_h4v1_decode_streamed(second,
                                                1u,
@@ -13750,9 +13665,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
                                                V5F_SDRAM_H4V1_LIVE_WRITE_WIDE256,
                                                V5F_SDRAM_H4V1_LIVE_READ_SLICE_BYTES,
                                                V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES,
-                                               0u,
-                                               1u);
-    sdram_memtest_dma_stream_finish();
+                                               0u);
     second_decode_cycles = sdram_video_cycle_now() - decode_start;
     sdram_video_h4v1_live_fu_checkpoint(1u, "decode", &underruns);
     if(result != H4V1_OK)
@@ -13897,11 +13810,6 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
         sdram_video_fail("h4v1_third_payload_dma");
     }
     sdram_video_h4v1_live_fu_checkpoint(2u, "payload", &underruns);
-    if(sdram_memtest_dma_stream_prepare(
-           0u, V5F_SDRAM_H4V1_PREVIOUS_READ_WIDE256) == 0u)
-    {
-        sdram_video_fail("h4v1_third_dma_session_prepare");
-    }
     decode_start = sdram_video_cycle_now();
     result = sdram_video_h4v1_decode_streamed(&third,
                                                2u,
@@ -13912,9 +13820,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
                                                V5F_SDRAM_H4V1_LIVE_WRITE_WIDE256,
                                                V5F_SDRAM_H4V1_LIVE_READ_SLICE_BYTES,
                                                V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES,
-                                               0u,
-                                               1u);
-    sdram_memtest_dma_stream_finish();
+                                               0u);
     third_decode_cycles = sdram_video_cycle_now() - decode_start;
     sdram_video_h4v1_live_fu_checkpoint(2u, "decode", &underruns);
     if(result != H4V1_OK)
@@ -14077,16 +13983,15 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
         {
             batch_key_count++;
             previous_frame = RT_NULL;
+            if(sdram_memtest_dma_stream_prepare(
+                   1u, V5F_SDRAM_H4V1_LIVE_WRITE_WIDE256) == 0u)
+            {
+                sdram_video_fail("h4v1_batch_key_output_dma_prepare");
+            }
         }
         else
         {
             batch_delta_count++;
-        }
-        if(sdram_memtest_dma_stream_prepare(
-               (uint8_t)(batch_frame_kind == H4V1_FRAME_KEY),
-               V5F_SDRAM_H4V1_LIVE_WRITE_WIDE256) == 0u)
-        {
-            sdram_video_fail("h4v1_batch_dma_session_prepare");
         }
         batch_decoded_crc = 0u;
         decode_start = sdram_video_cycle_now();
@@ -14099,9 +14004,11 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
                                                    V5F_SDRAM_H4V1_LIVE_WRITE_WIDE256,
                                                    V5F_SDRAM_H4V1_LIVE_READ_SLICE_BYTES,
                                                    V5F_SDRAM_H4V1_LIVE_WRITE_SLICE_BYTES,
-                                                   0u,
-                                                   1u);
-        sdram_memtest_dma_stream_finish();
+                                                   0u);
+        if(batch_frame_kind == H4V1_FRAME_KEY)
+        {
+            sdram_memtest_dma_stream_finish();
+        }
         batch_decode_cycles = sdram_video_cycle_now() - decode_start;
         sdram_video_h4v1_live_fu_checkpoint(
             batch_frame, "decode", &underruns);
@@ -14214,7 +14121,7 @@ sdram_video_h4v1_show_pair(v5f_sdram_video_config_t *config,
     g_v5f_hw_test_diag.phase = V5F_HW_PHASE_PASSED;
     g_v5f_hw_test_diag.sdram_ok_count++;
     sdram_usb_debug_write_line(
-        "H4V1 ISOLATED STAGE5L PASS transport=stable full90=pass keys30,60=pass dma=one-session-fast-r256x2k/fast-w256x2k sampled_crc=8 swaps=89 fifo_underrun=0");
+        "H4V1 ISOLATED STAGE5J PASS transport=stable full90=pass keys30,60=pass dma=r256x2k/w256x2k sampled_crc=8 swaps=89 fifo_underrun=0");
     sdram_usb_debug_write_line("RESULT PASS");
     sdram_memtest_watchdog_complete();
     while(1)
