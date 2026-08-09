@@ -11,6 +11,19 @@
 #include "ch585_half_report.h"
 #include "ch585_profile.h"
 
+#ifndef CH585_BATTERY_ENABLE
+#define CH585_BATTERY_ENABLE 0
+#endif
+#ifndef CH585_BATTERY_TRANSPORT_ENABLE
+#define CH585_BATTERY_TRANSPORT_ENABLE CH585_BATTERY_ENABLE
+#endif
+#if CH585_BATTERY_ENABLE
+#include "ch585_i2c_bus.h"
+#include "ch585_power_status.h"
+#include "ch585_soft_i2c_bus.h"
+#include "max17048.h"
+#endif
+
 #ifndef CH585_BLE_PAIRING_EXT_EEPROM
 #define CH585_BLE_PAIRING_EXT_EEPROM 0
 #endif
@@ -106,6 +119,18 @@ __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 #define CH585_WIRELESS_MODE_SWITCH_DEBOUNCE_FRAMES 160U
 #endif
 
+#ifndef CH585_BATTERY_SAMPLE_FRAMES
+#define CH585_BATTERY_SAMPLE_FRAMES 4096U
+#endif
+
+/* Software I2C is synchronous. Polling it in the scan loop can make the
+ * SPI-slave side miss an H417 transaction, so production defaults to one
+ * sample before SPI is started. A coordinated pause/ack protocol is required
+ * before runtime refresh can be enabled safely. */
+#ifndef CH585_BATTERY_RUNTIME_POLL_ENABLE
+#define CH585_BATTERY_RUNTIME_POLL_ENABLE 0
+#endif
+
 #ifndef BLE_HID_KBD_REPORT_LEN
 #define BLE_HID_KBD_REPORT_LEN 8U
 #endif
@@ -148,6 +173,14 @@ static int s_last_spi_result;
 static uint8_t s_profile_status_pending;
 static uint8_t s_profile_xfer_pending;
 static uint8_t s_right_frame_valid;
+#if CH585_BATTERY_ENABLE
+static ch585_i2c_bus_t s_battery_bus;
+static max17048_t s_battery_gauge;
+static ch585_power_status_config_t s_battery_cfg;
+static ch585_power_status_t s_battery_status;
+static uint16_t s_battery_sample_countdown;
+static uint8_t s_battery_read_failures;
+#endif
 static uint8_t s_local_rotary_last_ab;
 static int8_t s_local_rotary_accum;
 static uint8_t s_local_rotary_cw_frames;
@@ -185,6 +218,7 @@ static int8_t s_last_output_mouse_wheel;
 static uint8_t s_wireless_mode_switch_last_raw;
 static uint8_t s_wireless_mode_switch_raw_count;
 static uint8_t s_wireless_mode_switch_mode;
+static void half_scan_set_output_mode(uint8_t mode);
 #endif
 
 static ch585_ads7948_mux_side_t half_scan_side(void)
@@ -193,6 +227,98 @@ static ch585_ads7948_mux_side_t half_scan_side(void)
         CH585_ADS7948_MUX_SIDE_RIGHT :
         CH585_ADS7948_MUX_SIDE_LEFT;
 }
+
+#if CH585_BATTERY_ENABLE
+static void half_scan_battery_sample(void)
+{
+    max17048_sample_t sample;
+    uint8_t alert_low =
+        (GPIOB_ReadPortPin(GPIO_Pin_5) == 0U) ? 1U : 0U;
+
+    if(max17048_read_sample(&s_battery_gauge,
+                            alert_low,
+                            &sample) == MAX17048_STATUS_OK)
+    {
+        ch585_power_status_from_sample(
+            &s_battery_cfg,
+            &sample,
+            (uint8_t)(GPIOB_ReadPortPin(GPIO_Pin_6) != 0U),
+            (uint8_t)(GPIOB_ReadPortPin(GPIO_Pin_7) != 0U),
+            &s_battery_status);
+        s_battery_read_failures = 0U;
+        return;
+    }
+
+    if(s_battery_read_failures < 3U)
+    {
+        s_battery_read_failures++;
+    }
+    if(s_battery_read_failures >= 3U)
+    {
+        ch585_power_status_from_sample(
+            &s_battery_cfg,
+            0,
+            (uint8_t)(GPIOB_ReadPortPin(GPIO_Pin_6) != 0U),
+            (uint8_t)(GPIOB_ReadPortPin(GPIO_Pin_7) != 0U),
+            &s_battery_status);
+    }
+}
+
+static void half_scan_battery_init(void)
+{
+    max17048_config_t gauge_cfg;
+
+    memset(&s_battery_status, 0, sizeof(s_battery_status));
+    ch585_power_status_default_config(&s_battery_cfg);
+    GPIOBDigitalCfg(ENABLE,
+                    GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7 |
+                    GPIO_Pin_20 | GPIO_Pin_21);
+    GPIOB_ModeCfg(GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7, GPIO_ModeIN_PU);
+
+    (void)ch585_soft_i2c_bus_init(&s_battery_bus);
+    max17048_default_config(&gauge_cfg);
+    gauge_cfg.bus = &s_battery_bus;
+    (void)max17048_init(&s_battery_gauge, &gauge_cfg);
+    s_battery_read_failures = 0U;
+    s_battery_sample_countdown = CH585_BATTERY_SAMPLE_FRAMES;
+    half_scan_battery_sample();
+}
+
+static void half_scan_battery_poll(void)
+{
+#if CH585_BATTERY_RUNTIME_POLL_ENABLE
+    if(s_battery_sample_countdown != 0U)
+    {
+        s_battery_sample_countdown--;
+        return;
+    }
+
+    s_battery_sample_countdown = CH585_BATTERY_SAMPLE_FRAMES;
+    half_scan_battery_sample();
+#endif
+}
+
+static uint8_t half_scan_battery_percent(void)
+{
+    uint16_t percent;
+
+    if((s_battery_status.flags & CH585_POWER_FLAG_BAT_VALID) == 0U)
+    {
+        return AIK_BATTERY_PERCENT_UNKNOWN;
+    }
+
+    percent = (uint16_t)((s_battery_status.soc_q8_percent + 128U) >> 8U);
+    return (percent > 100U) ? 100U : (uint8_t)percent;
+}
+#else
+static void half_scan_battery_init(void)
+{
+}
+
+static void half_scan_battery_poll(void)
+{
+}
+#endif
 
 static void half_scan_build_down_bits(void)
 {
@@ -222,6 +348,24 @@ static uint8_t half_scan_gpiob_pressed(uint32_t pin)
 }
 
 #if CH585_WIRELESS_MODE_SWITCH_ENABLE
+static uint8_t half_scan_wireless_mode_switch_rf_contact_closed(void)
+{
+    uint8_t closed;
+
+    /* The four-terminal 1P3T footprint uses PB11's switch terminal as the
+     * common contact. In the RF detent PB11 is connected to PB10, rather
+     * than either input being connected directly to GND. Both external
+     * pull-ups therefore read high unless continuity is probed explicitly.
+     * Drive only low, briefly, so the probe merely sinks the two 10K pull-ups
+     * and remains safe for a later board revision that grounds PB10 directly. */
+    GPIOB_ResetBits(CH585_WIRELESS_MODE_BLE_PB11);
+    GPIOB_ModeCfg(CH585_WIRELESS_MODE_BLE_PB11, GPIO_ModeOut_PP_5mA);
+    mDelayuS(1U);
+    closed = half_scan_gpiob_pressed(CH585_WIRELESS_MODE_RF24_PB10);
+    GPIOB_ModeCfg(CH585_WIRELESS_MODE_BLE_PB11, GPIO_ModeIN_Floating);
+    return closed;
+}
+
 static uint8_t half_scan_wireless_mode_switch_read_raw(void)
 {
     uint8_t raw = 0U;
@@ -233,6 +377,11 @@ static uint8_t half_scan_wireless_mode_switch_read_raw(void)
     if(half_scan_gpiob_pressed(CH585_WIRELESS_MODE_RF24_PB10) != 0U)
     {
         raw |= CH585_WIRELESS_MODE_RF24_ACTIVE;
+    }
+    if((raw == 0U) &&
+       (half_scan_wireless_mode_switch_rf_contact_closed() != 0U))
+    {
+        raw = CH585_WIRELESS_MODE_RF24_ACTIVE;
     }
     return raw;
 }
@@ -296,7 +445,14 @@ static void half_scan_wireless_mode_switch_poll(void)
     mode = half_scan_wireless_mode_switch_decode(raw);
     if(mode != CH585_WIRELESS_MODE_INVALID)
     {
-        s_wireless_mode_switch_mode = mode;
+        if(mode != s_wireless_mode_switch_mode)
+        {
+            s_wireless_mode_switch_mode = mode;
+            /* The physical selector is authoritative on NEW. Apply it to
+             * the local radios immediately instead of waiting for H417 to
+             * echo the next mode command over SPI. */
+            half_scan_set_output_mode(mode);
+        }
     }
 }
 #endif
@@ -345,8 +501,9 @@ static void half_scan_local_gpio_init(void)
 #if CH585_WIRELESS_MODE_SWITCH_ENABLE
     /* PB10/PB11 are USBFS D-/D+ when RB_PIN_USB_EN is set. Keep that analog
      * function disabled and use floating digital inputs: R31/R50 provide the
-     * external pull-ups and SW1 grounds the selected contact. PB11 is also an
-     * optional boot pin, so production option bytes must retain default PB22. */
+     * external pull-ups. The reader also probes continuity between the two
+     * contacts for the current 1P3T wiring. PB11 is an optional boot pin, so
+     * production option bytes must retain default PB22. */
     GPIOAGPPCfg(DISABLE, RB_PIN_USB_EN);
     GPIOBDigitalCfg(ENABLE,
                     CH585_WIRELESS_MODE_BLE_PB11 |
@@ -759,7 +916,18 @@ static void half_scan_compact_raw(const ch585_ads7948_mux_acq_t *acq,
 
 static void half_scan_build_frame(void)
 {
+#if CH585_BATTERY_ENABLE && CH585_BATTERY_TRANSPORT_ENABLE
+    uint8_t frame_counter = (uint8_t)(s_tx_frame.half_seq + 1U);
+    uint8_t battery_valid = (uint8_t)(
+        (s_battery_status.flags & CH585_POWER_FLAG_BAT_VALID) != 0U);
+
+    s_tx_frame.half_seq = aik_spi_half_seq_pack_battery(
+        frame_counter,
+        half_scan_battery_percent(),
+        battery_valid);
+#else
     s_tx_frame.half_seq++;
+#endif
     half_scan_build_down_bits();
     half_scan_apply_local_inputs();
     aik_spi_half_state_finish(&s_tx_frame,
@@ -935,6 +1103,13 @@ static void half_scan_radio_handoff_delay(void)
 
 static void half_scan_set_output_mode(uint8_t mode)
 {
+    uint8_t mode_applied = 1U;
+
+#if CH585_WIRELESS_MODE_SWITCH_ENABLE
+    /* Never let a stale H417 command re-enable a radio that the physical
+     * selector has turned off. */
+    mode = s_wireless_mode_switch_mode;
+#endif
     mode = half_scan_sanitize_output_mode(mode);
     if(s_output_mode == mode)
     {
@@ -949,11 +1124,17 @@ static void half_scan_set_output_mode(uint8_t mode)
     if(mode == AIK_OUTPUT_MODE_RF24)
     {
 #if CH585_BLE_HID_ENABLE
-        BLE_HID_DisableForRadio(150U);
-        half_scan_radio_handoff_delay();
+        mode_applied = BLE_HID_DisableForRadio(150U);
+        if(mode_applied != 0U)
+        {
+            half_scan_radio_handoff_delay();
+        }
 #endif
 #if CH585_RF_TX_ENABLE
-        ch585_rf_nkro_tx_set_enabled(1U);
+        if(mode_applied != 0U)
+        {
+            mode_applied = ch585_rf_nkro_tx_set_enabled(1U);
+        }
 #endif
     }
     else if(mode == AIK_OUTPUT_MODE_BLE)
@@ -981,21 +1162,26 @@ static void half_scan_set_output_mode(uint8_t mode)
     }
 
 #if CH585_BLE_HID_ENABLE
-    if(mode != AIK_OUTPUT_MODE_USBHS)
+    if((mode_applied != 0U) && (mode == AIK_OUTPUT_MODE_BLE))
     {
-        /* Resume later; never run calibration inside this SPI command. */
+        /* BLE_RegInit() closes RF and rewrites RF registers. Only the BLE
+         * stack can tolerate that periodic calibration; leave it stopped
+         * while RF-basic owns the radio. */
         HAL_RadioCalibrationSetEnabled(1U);
     }
 #endif
 
 #if CH585_BLE_HID_ENABLE
-    if(mode != AIK_OUTPUT_MODE_BLE)
+    if((mode_applied != 0U) && (mode != AIK_OUTPUT_MODE_BLE))
     {
         memset(s_ble_boot8, 0, sizeof(s_ble_boot8));
         s_ble_last_consumer_usage = AIK_CONSUMER_USAGE_NONE;
     }
 #endif
-    s_output_mode = mode;
+    if(mode_applied != 0U)
+    {
+        s_output_mode = mode;
+    }
 }
 
 static void half_scan_output_nkro16(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
@@ -1103,6 +1289,17 @@ static void half_scan_apply_host_cmd(void)
 
 #if CH585_SPI_ACCEPT_HOST_CMD
 #if CH585_RF_TX_ENABLE || CH585_BLE_HID_ENABLE
+#if CH585_BLE_HID_ENABLE
+    if(((s_rx_cmd.cmd == AIK_SPI_CMD_POLL) ||
+        (s_rx_cmd.cmd == AIK_SPI_CMD_POLL_WITH_RF) ||
+        (s_rx_cmd.cmd == AIK_SPI_CMD_PUSH_RIGHT_STATE)) &&
+       ((aik_spi_host_cmd_power_flags(&s_rx_cmd) &
+         AIK_SPI_POWER_FLAG_BAT_VALID) != 0U))
+    {
+        (void)BLE_HID_SetBatteryLevel(
+            aik_spi_host_cmd_battery_percent(&s_rx_cmd));
+    }
+#endif
     if(s_rx_cmd.cmd == AIK_SPI_CMD_POLL)
     {
         uint8_t output_mode = half_scan_host_output_mode(s_rx_cmd.cmd,
@@ -1262,7 +1459,7 @@ static void half_scan_debug_poll(uint8_t key_count)
     mouse_wheel_now =
         ch585_half_report_mouse_wheel(&s_tx_frame,
                                       s_right_frame_valid ? &s_right_frame : 0);
-    PRINT("hs half=%u seq=%u scan=%lu raw_min=%u:%u pos_max=%u:%u down=%02x%02x%02x%02x%02x%02x first=%u out=%u spi=%lu abort=%lu last=%d host=%u cmd=%u hseq=%u rxcnt=%u rx=%02x%02x%02x%02x hcrc=%04x/%04x rawab=%u redge=%lu irq=%lu if=%04x rot=%u racc=%d cw=%u ccw=%u cwT=%lu ccwT=%lu wh=%d pend=%d lastwh=%d\r\n",
+    PRINT("hs half=%u seq=%u scan=%lu raw_min=%u:%u pos_max=%u:%u down=%02x%02x%02x%02x%02x%02x first=%u out=%u spi=%lu abort=%lu timeout=%lu last=%d host=%u cmd=%u hseq=%u rxcnt=%u rx=%02x%02x%02x%02x hcrc=%04x/%04x rawab=%u redge=%lu irq=%lu if=%04x rot=%u racc=%d cw=%u ccw=%u cwT=%lu ccwT=%lu wh=%d pend=%d lastwh=%d\r\n",
           (unsigned int)CH585_HALF_ID,
           (unsigned int)s_tx_frame.half_seq,
           (unsigned long)s_acq.frames,
@@ -1284,6 +1481,7 @@ static void half_scan_debug_poll(uint8_t key_count)
 #endif
           (unsigned long)spi_stats.frames,
           (unsigned long)spi_stats.aborts,
+          (unsigned long)spi_stats.timeouts,
           s_last_spi_result,
           (unsigned int)host_ok,
           (unsigned int)s_rx_cmd.cmd,
@@ -1321,6 +1519,30 @@ static void half_scan_debug_poll(uint8_t key_count)
           (unsigned int)s_ble_boot8[5],
           (unsigned int)s_ble_boot8[6],
           (unsigned int)s_ble_boot8[7]);
+#endif
+#if CH585_SPI_ACCEPT_HOST_CMD
+    PRINT("bridge flags=%02x rvalid=%u rseq=%u rdown=%02x%02x%02x%02x%02x%02x batcmd=%u/%02x\r\n",
+          (unsigned int)s_rx_cmd.flags,
+          (unsigned int)s_right_frame_valid,
+          (unsigned int)s_right_frame.half_seq,
+          (unsigned int)s_right_frame.down_bits[0],
+          (unsigned int)s_right_frame.down_bits[1],
+          (unsigned int)s_right_frame.down_bits[2],
+          (unsigned int)s_right_frame.down_bits[3],
+          (unsigned int)s_right_frame.down_bits[4],
+          (unsigned int)s_right_frame.down_bits[5],
+          (unsigned int)aik_spi_host_cmd_battery_percent(&s_rx_cmd),
+          (unsigned int)aik_spi_host_cmd_power_flags(&s_rx_cmd));
+#endif
+#if CH585_BATTERY_ENABLE
+    PRINT("bat valid=%u pct=%u mv=%u charge=%u flags=%02x fail=%u\r\n",
+          (unsigned int)(
+              (s_battery_status.flags & CH585_POWER_FLAG_BAT_VALID) != 0U),
+          (unsigned int)half_scan_battery_percent(),
+          (unsigned int)s_battery_status.vbat_mv,
+          (unsigned int)s_battery_status.charge_state,
+          (unsigned int)s_battery_status.flags,
+          (unsigned int)s_battery_read_failures);
 #endif
 }
 #else
@@ -1383,6 +1605,7 @@ static void half_scan_init(void)
 
     ch585_ads7948_mux_gpio_init();
     half_scan_local_gpio_init();
+    half_scan_battery_init();
     (void)ch585_ads7948_mux_acq_init(&s_acq, profile);
 
     mag_key_default_config(&cfg);
@@ -1400,6 +1623,10 @@ static void half_scan_init(void)
 #endif
 #if CH585_BLE_HID_ENABLE
     BLE_HID_Init();
+    /* HidDev_Init defers GAPRole_PeripheralStartDevice to TMOS. Finish that
+     * transition before the physical selector gives RF-basic ownership;
+     * otherwise the delayed BLE start can overwrite a just-enabled RF mode. */
+    (void)BLE_HID_WaitStarted(150U);
 #endif
 #if CH585_RF_TX_ENABLE && CH585_BLE_HID_ENABLE
     half_scan_set_output_mode(AIK_OUTPUT_MODE_USBHS);
@@ -1479,6 +1706,7 @@ int main(void)
         half_scan_compact_raw(&s_acq, s_compact_raw, key_count);
         (void)mag_key_engine_update(&s_engine, s_compact_raw);
         half_scan_build_frame();
+        half_scan_battery_poll();
         half_scan_debug_poll(key_count);
 #if CH585_RF_TX_ENABLE
         ch585_rf_nkro_tx_poll();

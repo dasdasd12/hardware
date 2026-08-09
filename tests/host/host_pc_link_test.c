@@ -149,6 +149,25 @@ const uint8_t *v3f_profile_store_slot_ptr(uint8_t slot_id)
     return s_slots[slot_id - AIK_PROFILE_USER_SLOT_FIRST];
 }
 
+uint8_t v3f_profile_store_slot_present(uint8_t slot_id)
+{
+    uint32_t index;
+    const uint8_t *slot = v3f_profile_store_slot_ptr(slot_id);
+
+    if(slot == 0)
+    {
+        return 0U;
+    }
+    for(index = 0U; index < AIK_PKG_HEADER_SIZE; index++)
+    {
+        if(slot[index] != 0xFFU)
+        {
+            return 1U;
+        }
+    }
+    return 0U;
+}
+
 const uint8_t *v3f_profile_store_staging_ptr(void)
 {
     return s_staging;
@@ -211,6 +230,22 @@ int v3f_profile_store_commit_staging_to_slot(uint8_t slot_id, uint32_t len)
     return V3F_PROFILE_STORE_OK;
 }
 
+int v3f_profile_store_delete_slot(uint8_t slot_id)
+{
+    if((slot_id < AIK_PROFILE_USER_SLOT_FIRST) ||
+       (slot_id >= AIK_PROFILE_SLOT_COUNT_TOTAL))
+    {
+        return V3F_PROFILE_STORE_ERR_PARAM;
+    }
+    memset(s_slots[slot_id - AIK_PROFILE_USER_SLOT_FIRST], 0xFF,
+           V3F_PROFILE_SLOT_SIZE);
+    if(s_active_slot == slot_id)
+    {
+        s_active_slot = AIK_PROFILE_SLOT_FACTORY;
+    }
+    return V3F_PROFILE_STORE_OK;
+}
+
 uint8_t v3f_profile_store_get_active_slot(void)
 {
     return s_active_slot;
@@ -246,6 +281,22 @@ uint8_t v3f_ch585_link_query_profile_status(uint8_t half_id,
 {
     (void)half_id; (void)host_seq; (void)out;
     return 0U;
+}
+
+void v3f_ch585_link_stats(uint8_t half_id, v3f_ch585_link_stats_t *stats)
+{
+    if(stats == 0)
+    {
+        return;
+    }
+    memset(stats, 0, sizeof(*stats));
+    stats->link_errors = (uint32_t)(10U + half_id);
+    stats->invalid_frames = (uint32_t)(20U + half_id);
+    stats->command_phase_frames = (uint32_t)(30U + half_id);
+    stats->profile_status_ok = (uint32_t)(40U + half_id);
+    stats->profile_status_invalid = (uint32_t)(50U + half_id);
+    stats->last_magic = 0xD7U;
+    stats->last_type = 0x11U;
 }
 
 /* ------------------------------------------------------------------ */
@@ -336,6 +387,19 @@ int main(void)
     send("AK INFO");
     CHECK(reply_starts("OK INFO active=0"));
     CHECK(strstr(s_reply, "slots=111") != 0);
+
+    send("AK SYNC 0");
+    CHECK(reply_starts("OK SYNC 0 s=0"));
+    send("AK SYNC 1");
+    CHECK(reply_starts("OK SYNC 1 s=0"));
+    send("AK SYNC 2");
+    CHECK(reply_starts("ERR 2 sync"));
+    send("AK LINK 0");
+    CHECK(strstr(s_reply, "e=10 i=20 c=30 p=40 q=50") != 0);
+    send("AK LINK 1");
+    CHECK(strstr(s_reply, "e=11 i=21 c=31 p=41 q=51") != 0);
+    send("AK LINK");
+    CHECK(reply_starts("ERR 2 link"));
 
     /* Erased slots use the factory profile virtually; a non-erased package
      * with a valid header but bad payload CRC is reported unavailable. */
@@ -473,11 +537,40 @@ int main(void)
 
     send("AK INFO");
     CHECK(strstr(s_reply, "slots=111") != 0);
+    CHECK(strstr(s_reply, "stored=100") != 0);
 
     send("AK ACTIVATE 1");
     CHECK(reply_starts("OK ACTIVATE 1"));
     CHECK(v3f_profile_runtime_get()->active_slot == 1U);
     CHECK(s_active_slot == 1U);
+
+    /* Delete is persisted. Deleting the active slot installs Default,
+     * while the named user slot remains selectable as a Default alias. */
+    send("AK DELETE 1");
+    CHECK(reply_starts("OK DELETE 1"));
+    CHECK(v3f_profile_runtime_get()->active_slot ==
+          AIK_PROFILE_SLOT_FACTORY);
+    CHECK(s_active_slot == AIK_PROFILE_SLOT_FACTORY);
+    send("AK INFO");
+    CHECK(strstr(s_reply, "slots=111") != 0);
+    CHECK(strstr(s_reply, "stored=000") != 0);
+    send("AK ACTIVATE 1");
+    CHECK(reply_starts("OK ACTIVATE 1"));
+    CHECK(v3f_profile_runtime_get()->active_slot == 1U);
+
+    /* Restore the package for the existing activation/replacement tests. */
+    upload_package(g_v3f_factory_profile_image,
+                   g_v3f_factory_profile_image_size, 1U, 64U);
+    CHECK(reply_starts("OK COMMIT 1"));
+    send("AK ACTIVATE 1");
+    CHECK(reply_starts("OK ACTIVATE 1"));
+
+    send("AK DELETE 0");
+    CHECK(reply_starts("ERR 2 delete"));
+    send("AK DELETE 4");
+    CHECK(reply_starts("ERR 2 delete"));
+    send("AK DELETE 1 extra");
+    CHECK(reply_starts("ERR 2 delete"));
 
     /* An unchanged package in the already-active slot is a true no-op:
      * no metadata write and no release-to-rearm event. */

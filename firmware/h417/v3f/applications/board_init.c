@@ -74,11 +74,12 @@ static void v3f_board_caps_lock_led_init(void)
 
     RCC_HB2PeriphClockCmd(RCC_HB2Periph_GPIOB, ENABLE);
     /* The LED anode is tied to VDD, so PB7 is an active-low current sink.
-     * Drive it high before enabling the output to avoid a startup flash. */
+     * Preload high, then use open-drain output: low lights the LED and high
+     * releases PB7 without enabling an internal pull-down. */
     GPIO_SetBits(V3F_CAPS_LOCK_LED_PORT, V3F_CAPS_LOCK_LED_PIN);
     gpio.GPIO_Pin = V3F_CAPS_LOCK_LED_PIN;
     gpio.GPIO_Speed = GPIO_Speed_Low;
-    gpio.GPIO_Mode = GPIO_Mode_Out_PP;
+    gpio.GPIO_Mode = GPIO_Mode_Out_OD;
     GPIO_Init(V3F_CAPS_LOCK_LED_PORT, &gpio);
     s_caps_lock_led_enabled = 0U;
 }

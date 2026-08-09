@@ -81,6 +81,8 @@ static uint8_t g_consumer_tap_queue_head = 0;
 static uint8_t g_consumer_tap_queue_tail = 0;
 static uint8_t g_consumer_tap_queue_count = 0;
 static uint8_t g_ble_enabled = FALSE;
+static uint8_t g_battery_level = 100U;
+static uint8_t g_battery_valid = FALSE;
 
 static uint8_t scanRspData[] = {
     0x0E,
@@ -148,6 +150,7 @@ static uint8_t bleHidConsumerTapQueuePush(uint16_t usage);
 static uint8_t bleHidConsumerTapQueuePop(bleHidConsumerTap_t *tap);
 static void bleHidClearConsumerTapQueue(void);
 static void bleHidResetConsumerTapState(void);
+static uint8_t bleHidBatteryCalc(uint16_t adc_value);
 
 static hidDevCB_t hidCBs = {
     hidRptCB,
@@ -198,6 +201,10 @@ void BLE_HID_Init(void)
         Batt_SetParameter(BATT_PARAM_CRITICAL_LEVEL, sizeof(uint8_t), &critical_level);
     }
 
+    /* Keep the SDK's periodic Battery Service task, but feed it the cached
+     * MAX17048 percentage instead of its built-in adc=300 demo value. */
+    Batt_Setup(0U, 0U, 4095U, NULL, NULL, bleHidBatteryCalc);
+
     bleHidUseFastAdvertising();
 
     {
@@ -238,6 +245,47 @@ void BLE_HID_Init(void)
         bStatus_t erase_status = HidDev_SetParameter(HIDDEV_ERASE_ALLBONDS, 0, NULL);
         BLE_HID_LOG("%s: erase bonds=%x\n", BLE_HID_DEVICE_NAME, erase_status);
     }
+}
+
+uint8_t BLE_HID_SetBatteryLevel(uint8_t percent)
+{
+    if(percent > 100U)
+    {
+        return INVALIDPARAMETER;
+    }
+
+    if((g_battery_valid != FALSE) && (g_battery_level == percent))
+    {
+        return SUCCESS;
+    }
+
+    g_battery_level = percent;
+    g_battery_valid = TRUE;
+    return SUCCESS;
+}
+
+uint8_t BLE_HID_WaitStarted(uint16_t wait_ms)
+{
+    while(wait_ms != 0U)
+    {
+        uint8_t gap_state = GAPROLE_INIT;
+
+        TMOS_SystemProcess();
+        if((GAPRole_GetParameter(GAPROLE_STATE, &gap_state) == SUCCESS) &&
+           ((gap_state & GAPROLE_STATE_ADV_MASK) != GAPROLE_INIT))
+        {
+            return 1U;
+        }
+        mDelaymS(1U);
+        wait_ms--;
+    }
+    return 0U;
+}
+
+static uint8_t bleHidBatteryCalc(uint16_t adc_value)
+{
+    (void)adc_value;
+    return (g_battery_valid != FALSE) ? g_battery_level : 100U;
 }
 
 uint16_t BLE_HID_ProcessEvent(uint8_t task_id, uint16_t events)
@@ -491,16 +539,34 @@ void BLE_HID_SetEnabled(uint8_t enabled)
     bleHidClearConsumerTapQueue();
 }
 
-void BLE_HID_DisableForRadio(uint16_t wait_ms)
+static uint8_t bleHidRadioBusy(void)
+{
+    uint8_t gap_state = GAPROLE_INIT;
+    uint8_t adv_state;
+
+    if(GAPRole_GetParameter(GAPROLE_STATE, &gap_state) != SUCCESS)
+    {
+        return BLE_HID_IsConnected();
+    }
+    adv_state = (uint8_t)(gap_state & GAPROLE_STATE_ADV_MASK);
+    return (uint8_t)((adv_state == GAPROLE_ADVERTISING) ||
+                     (adv_state == GAPROLE_CONNECTED) ||
+                     (adv_state == GAPROLE_CONNECTED_ADV));
+}
+
+uint8_t BLE_HID_DisableForRadio(uint16_t wait_ms)
 {
     BLE_HID_SetEnabled(0U);
-    while((wait_ms != 0U) && (BLE_HID_IsConnected() != 0U))
+    while((wait_ms != 0U) &&
+          ((BLE_HID_IsConnected() != 0U) || (bleHidRadioBusy() != 0U)))
     {
         TMOS_SystemProcess();
         mDelaymS(1);
         wait_ms--;
     }
     BLE_HID_StopAdvert();
+    return (uint8_t)((BLE_HID_IsConnected() == 0U) &&
+                     (bleHidRadioBusy() == 0U));
 }
 
 uint8_t BLE_HID_SendKeyboard(const uint8_t *report8)

@@ -6,6 +6,7 @@
 #include "aik_host_shortcut.h"
 #include "aik_profile_format.h"
 #include "aik_profile_shortcut.h"
+#include "ch585_board_config.h"
 
 #define HID_USAGE_A             0x04U
 #define HID_USAGE_B             0x05U
@@ -87,6 +88,12 @@
 #define HID_MOD_RIGHT_GUI   0x80U
 
 #define CH585_FN_LAYER_KEY       38U
+#define CH585_MODE_KEY_F1        45U
+#define CH585_MODE_KEY_F2        44U
+#define CH585_MODE_KEY_F3        43U
+#define CH585_MODE_MASK_F1       0x01U
+#define CH585_MODE_MASK_F2       0x02U
+#define CH585_MODE_MASK_F3       0x04U
 #define CH585_PROFILE_SLOT0_KEY  10U
 #define CH585_PROFILE_SLOT1_KEY  52U
 #define CH585_PROFILE_SLOT2_KEY  51U
@@ -214,6 +221,8 @@ static uint8_t s_legacy_fn_enabled;
 static uint8_t s_fn_consumed[CH585_GLOBAL_DOWN_BYTES];
 static aik_host_shortcut_state_t s_host_shortcut;
 static aik_profile_shortcut_state_t s_profile_shortcut;
+static uint8_t s_mode_shortcut_active;
+static uint8_t s_mode_shortcut_consumed_mask;
 static aik_approval_control_state_t s_approval_control;
 static uint8_t s_approval_active;
 static uint8_t s_approval_selected_yes;
@@ -232,6 +241,8 @@ void ch585_half_report_reset_factory(void)
     if(s_tables_ready == 0U)
     {
         aik_profile_shortcut_reset(&s_profile_shortcut);
+        s_mode_shortcut_active = 0U;
+        s_mode_shortcut_consumed_mask = 0U;
         aik_approval_control_reset(&s_approval_control);
     }
     memcpy(s_key_outputs, s_factory_key_outputs, sizeof(s_key_outputs));
@@ -419,6 +430,42 @@ static uint8_t profile_shortcut_slot_bit(uint8_t key_id)
     }
 }
 
+static uint8_t mode_shortcut_key_bit(uint8_t key_id)
+{
+    switch(key_id)
+    {
+        case CH585_MODE_KEY_F1:
+            return CH585_MODE_MASK_F1;
+        case CH585_MODE_KEY_F2:
+            return CH585_MODE_MASK_F2;
+        case CH585_MODE_KEY_F3:
+            return CH585_MODE_MASK_F3;
+        default:
+            return 0U;
+    }
+}
+
+static uint8_t mode_shortcut_key_mask(
+    const aik_spi_half_state_v1_t *left,
+    const aik_spi_half_state_v1_t *right)
+{
+    uint8_t mask = 0U;
+
+    if(global_key_down(left, right, CH585_MODE_KEY_F1) != 0U)
+    {
+        mask |= CH585_MODE_MASK_F1;
+    }
+    if(global_key_down(left, right, CH585_MODE_KEY_F2) != 0U)
+    {
+        mask |= CH585_MODE_MASK_F2;
+    }
+    if(global_key_down(left, right, CH585_MODE_KEY_F3) != 0U)
+    {
+        mask |= CH585_MODE_MASK_F3;
+    }
+    return mask;
+}
+
 static uint8_t profile_shortcut_slot_mask(
     const aik_spi_half_state_v1_t *left,
     const aik_spi_half_state_v1_t *right)
@@ -557,6 +604,7 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
     uint8_t host_shortcut_action;
     uint8_t profile_slot_mask;
     uint8_t profile_consumed_mask;
+    uint8_t mode_key_mask;
     uint8_t approval_nav_action;
     uint8_t approval_nav_consumed;
     uint8_t approval_confirm_action;
@@ -572,6 +620,25 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
     memset(nkro16, 0, AIK_NKRO_REPORT_BYTES);
     half_report_ensure_tables();
     fn_down = global_key_down(left, right, CH585_FN_LAYER_KEY);
+    mode_key_mask =
+        (CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH != 0U) ?
+            mode_shortcut_key_mask(left, right) :
+            0U;
+
+    /* A mode chord remains consumed until every participating F key is up. */
+    s_mode_shortcut_consumed_mask &= mode_key_mask;
+    if((fn_down != 0U) &&
+       ((mode_key_mask == CH585_MODE_MASK_F1) ||
+        (mode_key_mask == CH585_MODE_MASK_F2) ||
+        (mode_key_mask == CH585_MODE_MASK_F3)))
+    {
+        s_mode_shortcut_active = 1U;
+        s_mode_shortcut_consumed_mask |= mode_key_mask;
+    }
+    else if((fn_down == 0U) && (s_mode_shortcut_consumed_mask == 0U))
+    {
+        s_mode_shortcut_active = 0U;
+    }
     approval_nav_action = aik_approval_control_update_nav_valid(
         &s_approval_control,
         s_approval_active,
@@ -662,9 +729,18 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
         {
             continue;
         }
+        if((s_mode_shortcut_active != 0U) &&
+           ((key_id == CH585_FN_LAYER_KEY) ||
+            ((s_mode_shortcut_consumed_mask &
+              mode_shortcut_key_bit(key_id)) != 0U)))
+        {
+            continue;
+        }
 
         if((s_legacy_fn_enabled != 0U) &&
-           (fn_consumed_get(s_fn_consumed, key_id) != 0U))
+           (fn_consumed_get(s_fn_consumed, key_id) != 0U) &&
+           ((CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH != 0U) ||
+            (mode_shortcut_key_bit(key_id) == 0U)))
         {
             continue;
         }

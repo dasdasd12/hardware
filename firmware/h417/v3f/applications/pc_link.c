@@ -5,9 +5,11 @@
 
 #include "aik_profile_format.h"
 #include "approval_mailbox.h"
+#include "ch585_link.h"
 #include "profile_activate.h"
 #include "profile_runtime.h"
 #include "profile_store.h"
+#include "profile_sync.h"
 
 #ifndef V3F_ENABLE_USBFS_CDC
 #define V3F_ENABLE_USBFS_CDC 0
@@ -271,7 +273,7 @@ static uint8_t slot_is_usable(uint8_t slot_id)
 
     if(slot == 0)
     {
-        return 0U;
+        return 1U;
     }
     /*
      * An erased user slot is logically backed by the factory profile until
@@ -299,16 +301,24 @@ static uint8_t slot_is_usable(uint8_t slot_id)
 static void pc_cmd_info(void)
 {
     const v3f_profile_runtime_t *rt = v3f_profile_runtime_get();
-    char buf[96];
+    char buf[128];
 
     (void)snprintf(buf, sizeof(buf),
-                   "OK INFO active=%u id16=%04x gen=%u slots=%u%u%u\r\n",
+                   "OK INFO active=%u id16=%04x gen=%u slots=%u%u%u "
+                   "stored=%u%u%u sync=%u%u\r\n",
                    (unsigned int)rt->active_slot,
                    (unsigned int)rt->profile_id16,
                    (unsigned int)rt->generation16,
                    (unsigned int)slot_is_usable(1U),
                    (unsigned int)slot_is_usable(2U),
-                   (unsigned int)slot_is_usable(3U));
+                   (unsigned int)slot_is_usable(3U),
+                   (unsigned int)v3f_profile_store_slot_present(1U),
+                   (unsigned int)v3f_profile_store_slot_present(2U),
+                   (unsigned int)v3f_profile_store_slot_present(3U),
+                   (unsigned int)v3f_profile_sync_half_synced(
+                       AIK_HALF_ID_LEFT),
+                   (unsigned int)v3f_profile_sync_half_synced(
+                       AIK_HALF_ID_RIGHT));
     pc_reply(buf);
 }
 
@@ -483,6 +493,119 @@ static void pc_cmd_activate(const char *args)
                    (unsigned int)slot,
                    (unsigned int)v3f_profile_runtime_get()->profile_id16,
                    (unsigned int)v3f_profile_runtime_get()->generation16);
+    pc_reply(buf);
+}
+
+static int pc_parse_half_id(const char *args, uint8_t *half_id)
+{
+    uint32_t value;
+
+    if((args == 0) || (half_id == 0) || (next_token(args) != 0) ||
+       (parse_hex_u32(args, &value) != 0) ||
+       (value > AIK_HALF_ID_RIGHT))
+    {
+        return -1;
+    }
+    *half_id = (uint8_t)value;
+    return 0;
+}
+
+static void pc_cmd_sync(const char *args)
+{
+    v3f_profile_sync_diag_t diag;
+    uint8_t half_id;
+    char buf[64];
+
+    if(pc_parse_half_id(args, &half_id) != 0)
+    {
+        pc_reply_err(PC_ERR_ARGS, "sync");
+        return;
+    }
+    memset(&diag, 0, sizeof(diag));
+    if(v3f_profile_sync_get_diag(half_id, &diag) == 0U)
+    {
+        pc_reply_err(PC_ERR_STATE, "sync");
+        return;
+    }
+
+    (void)snprintf(buf, sizeof(buf),
+                   "OK SYNC %u s=%u r=%u o=%u n=%u w=%u b=%u\r\n",
+                   (unsigned int)half_id,
+                   (unsigned int)diag.state,
+                   (unsigned int)diag.retries,
+                   (unsigned int)diag.offset,
+                   (unsigned int)diag.patch_len,
+                   (unsigned int)diag.commit_waits,
+                   (unsigned int)diag.backoff);
+    pc_reply(buf);
+}
+
+static void pc_cmd_link(const char *args)
+{
+    v3f_ch585_link_stats_t stats;
+    uint8_t half_id;
+    char buf[192];
+
+    if(pc_parse_half_id(args, &half_id) != 0)
+    {
+        pc_reply_err(PC_ERR_ARGS, "link");
+        return;
+    }
+    memset(&stats, 0, sizeof(stats));
+    v3f_ch585_link_stats(half_id, &stats);
+
+    (void)snprintf(buf, sizeof(buf),
+                   "OK LINK %u e=%lu i=%lu c=%lu p=%lu q=%lu a=%u s=%u o=%u d=%u m=%02x t=%02x\r\n",
+                   (unsigned int)half_id,
+                   (unsigned long)stats.link_errors,
+                   (unsigned long)stats.invalid_frames,
+                   (unsigned long)stats.command_phase_frames,
+                   (unsigned long)stats.profile_status_ok,
+                   (unsigned long)stats.profile_status_invalid,
+                   (unsigned int)stats.last_profile_response.xfer.ack_seq,
+                   (unsigned int)stats.last_profile_response.xfer.state,
+                   (unsigned int)stats.last_profile_response.xfer.received_len,
+                   (unsigned int)stats.last_profile_response.xfer.detail,
+                   (unsigned int)stats.last_magic,
+                   (unsigned int)stats.last_type);
+    pc_reply(buf);
+}
+
+static void pc_cmd_delete(const char *args)
+{
+    uint32_t slot;
+    uint8_t was_active;
+    int status;
+    char buf[32];
+
+    if((args == 0) || (next_token(args) != 0) ||
+       (parse_hex_u32(args, &slot) != 0) ||
+       (slot < AIK_PROFILE_USER_SLOT_FIRST) ||
+       (slot >= AIK_PROFILE_SLOT_COUNT_TOTAL))
+    {
+        pc_reply_err(PC_ERR_ARGS, "delete");
+        return;
+    }
+
+    was_active = (uint8_t)(v3f_profile_runtime_get()->active_slot ==
+                           (uint8_t)slot);
+    status = v3f_profile_store_delete_slot((uint8_t)slot);
+    if(status != V3F_PROFILE_STORE_OK)
+    {
+        pc_reply_err(PC_ERR_FLASH, "delete");
+        return;
+    }
+
+    if((was_active != 0U) &&
+       (v3f_profile_activate_slot(AIK_PROFILE_SLOT_FACTORY) !=
+        V3F_PROFILE_ACTIVATE_OK))
+    {
+        pc_reply_err(PC_ERR_PACKAGE, "delete-install");
+        return;
+    }
+
+    (void)snprintf(buf, sizeof(buf), "OK DELETE %u\r\n",
+                   (unsigned int)slot);
     pc_reply(buf);
 }
 
@@ -706,6 +829,18 @@ void v3f_pc_link_handle_line(const char *line)
     {
         pc_cmd_info();
     }
+    else if((strncmp(line, "SYNC", 4U) == 0) &&
+            ((line[4] == '\0') || (line[4] == ' ')))
+    {
+        args = next_token(line);
+        pc_cmd_sync(args);
+    }
+    else if((strncmp(line, "LINK", 4U) == 0) &&
+            ((line[4] == '\0') || (line[4] == ' ')))
+    {
+        args = next_token(line);
+        pc_cmd_link(args);
+    }
     else if(strncmp(line, "BEGIN", 5U) == 0)
     {
         args = next_token(line);
@@ -734,6 +869,11 @@ void v3f_pc_link_handle_line(const char *line)
     {
         args = next_token(line);
         pc_cmd_activate(args);
+    }
+    else if(strncmp(line, "DELETE", 6U) == 0)
+    {
+        args = next_token(line);
+        pc_cmd_delete(args);
     }
     else if((strncmp(line, "APPROVAL", 8U) == 0) &&
             ((line[8] == '\0') || (line[8] == ' ')))

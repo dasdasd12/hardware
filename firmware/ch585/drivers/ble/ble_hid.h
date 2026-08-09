@@ -16,13 +16,17 @@ extern "C" {
 #define BLE_HID_CONSUMER_REPORT_LEN 1
 
 void BLE_HID_Init(void);
+/* Complete the deferred GAP role start before another radio mode takes over. */
+uint8_t BLE_HID_WaitStarted(uint16_t wait_ms);
 uint8_t BLE_HID_IsConnected(void);
 uint8_t BLE_HID_IsKeyTapBusy(void);
 uint8_t BLE_HID_GetQueuedTapCount(void);
 void BLE_HID_StartAdvert(void);
 void BLE_HID_StopAdvert(void);
 void BLE_HID_SetEnabled(uint8_t enabled);
-void BLE_HID_DisableForRadio(uint16_t wait_ms);
+/* Returns non-zero once both the BLE link and advertising radio are idle. */
+uint8_t BLE_HID_DisableForRadio(uint16_t wait_ms);
+uint8_t BLE_HID_SetBatteryLevel(uint8_t percent);
 uint8_t BLE_HID_SendKeyboard(const uint8_t *report8);
 uint8_t BLE_HID_SendConsumer(uint16_t usage);
 uint8_t BLE_HID_TriggerKeyTap(uint8_t keycode);

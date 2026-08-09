@@ -8,7 +8,13 @@ void v3f_rf_report_bridge_prepare_cmd(aik_spi_host_cmd_v1_t *cmd,
                                       uint8_t output_mode)
 {
     memset(cmd, 0, sizeof(*cmd));
-    cmd->cmd = (output_mode == AIK_OUTPUT_MODE_USBHS) ?
+    /* A state-only transaction (nkro16 == NULL) is used to poll the right
+     * CH585.  That half has no radio output to update, so keep it on the
+     * plain POLL command in every output mode.  Besides avoiding an
+     * unnecessary command, this lets ch585_link accept a pending state frame
+     * returned during the command phase instead of dropping the right-half
+     * sample that contains Fn. */
+    cmd->cmd = ((output_mode == AIK_OUTPUT_MODE_USBHS) || (nkro16 == 0)) ?
         AIK_SPI_CMD_POLL : AIK_SPI_CMD_POLL_WITH_RF;
     cmd->flags = (uint8_t)(output_mode & AIK_SPI_FLAG_OUTPUT_MODE_MASK);
     cmd->host_seq = host_seq;
@@ -26,7 +32,9 @@ void v3f_rf_report_bridge_prepare_right_state_cmd(
     uint8_t output_mode,
     uint8_t approval_active,
     uint8_t approval_selected_yes,
-    uint8_t right_state_valid)
+    uint8_t right_state_valid,
+    uint8_t battery_percent,
+    uint8_t power_flags)
 {
     memset(cmd, 0, sizeof(*cmd));
     cmd->cmd = AIK_SPI_CMD_PUSH_RIGHT_STATE;
@@ -48,5 +56,6 @@ void v3f_rf_report_bridge_prepare_right_state_cmd(
     {
         memcpy(cmd->nkro16, right_state, sizeof(*right_state));
     }
+    aik_spi_host_cmd_set_power_status(cmd, battery_percent, power_flags);
     aik_spi_host_cmd_finish(cmd);
 }

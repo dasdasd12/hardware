@@ -16,11 +16,14 @@ SIZE    := "$(PREFIX)size"
 # V3F has no FPU: rv32imac
 ARCH_FLAGS := -march=rv32imac_zba_zbb_zbc_zbs_xw -mabi=ilp32 -msmall-data-limit=8 -msave-restore
 
-COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -g -fmessage-length=0 -fsigned-char
+# LTO keeps the product image inside the 64KB zero-wait RAM_CODE window.
+# Disable linker relaxation because late GP shortening can target constants
+# outside the signed 12-bit GP range once that window is nearly full.
+COMMON_FLAGS := $(ARCH_FLAGS) -fmax-errors=20 -Os -flto -g -fmessage-length=0 -fsigned-char
 COMMON_FLAGS += -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized -std=gnu99
 
 ASFLAGS := $(ARCH_FLAGS) -Wall -fmessage-length=0
-LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs --specs=nosys.specs
+LDFLAGS := $(ARCH_FLAGS) -flto -nostartfiles -Xlinker --gc-sections -Xlinker --no-relax --specs=nano.specs --specs=nosys.specs
 
 # H417-local WCH EVT hardware library root
 WCH_H417_ROOT ?= ../basic/wch
@@ -38,6 +41,7 @@ V3F_USB_REPORT_INTERVAL_US ?= 125
 V3F_ENABLE_RGB_STATUS ?= 1
 V3F_RGB_LED_COUNT ?= 77
 V3F_RGB_MAX_BRIGHTNESS ?= 255
+V3F_RGB_DEFAULT_ENABLED ?= 0
 V3F_ENABLE_RF_BRIDGE ?= 1
 V3F_ENABLE_SPI_HOST_CMD ?= 1
 V3F_ENABLE_USBFS_CDC_DEBUG ?= 0
@@ -45,15 +49,23 @@ V3F_ENABLE_USBFS_CDC_DEBUG ?= 0
 # keeps the 8K HID path. Only meaningful with V3F_ENABLE_USBHS_8K=1.
 V3F_ENABLE_USBFS_CDC ?= 1
 ifeq ($(H417_BOARD_MODEL),NEW)
-H417_BOARD_DEFS := -DH417_BOARD_MODEL=H417_BOARD_MODEL_NEW
+H417_BOARD_DEFS := -DH417_BOARD_MODEL=H417_BOARD_MODEL_NEW -DH417_GPIO_IPD_PRESERVE_PB7=1
+# NEW keeps wired USB HID active. The physical three-position switch selects
+# only the optional wireless overlay: centre=off, 2.4G=RF, BLE=BLE.
+V3F_ENABLE_USB_RF_COEXIST ?= 1
+V3F_ENABLE_USB_BLE_COEXIST ?= 1
 V3F_OUTPUT_MODE_DEFAULT ?= 0
 else ifeq ($(H417_BOARD_MODEL),OLD)
-H417_BOARD_DEFS := -DH417_BOARD_MODEL=H417_BOARD_MODEL_OLD
+H417_BOARD_DEFS := -DH417_BOARD_MODEL=H417_BOARD_MODEL_OLD -DH417_GPIO_IPD_PRESERVE_PB7=0
+# OLD retains the legacy exclusive Fn+F1/F2/F3 output-mode behaviour.
+V3F_ENABLE_USB_RF_COEXIST ?= 0
+V3F_ENABLE_USB_BLE_COEXIST ?= 0
 V3F_OUTPUT_MODE_DEFAULT ?= 1
 else
 $(error Unsupported H417_BOARD_MODEL '$(H417_BOARD_MODEL)'; expected NEW or OLD)
 endif
-# NEW and OLD share output directories; use -B or clean when switching models.
+# NEW and OLD intentionally share the V3F output directory. A model stamp below
+# makes every object rebuild automatically only when this selection changes.
 ifeq ($(V3F_ENABLE_USBFS_CDC),1)
 V3F_ENABLE_USBFS_CDC_DEBUG := 1
 endif
@@ -68,8 +80,11 @@ DEFS += -DV3F_USB_REPORT_INTERVAL_US=$(V3F_USB_REPORT_INTERVAL_US)
 DEFS += -DV3F_ENABLE_RGB_STATUS=$(V3F_ENABLE_RGB_STATUS)
 DEFS += -DV3F_RGB_LED_COUNT=$(V3F_RGB_LED_COUNT)
 DEFS += -DV3F_RGB_MAX_BRIGHTNESS=$(V3F_RGB_MAX_BRIGHTNESS)
+DEFS += -DV3F_RGB_DEFAULT_ENABLED=$(V3F_RGB_DEFAULT_ENABLED)
 DEFS += -DV3F_ENABLE_RF_BRIDGE=$(V3F_ENABLE_RF_BRIDGE)
 DEFS += -DV3F_ENABLE_SPI_HOST_CMD=$(V3F_ENABLE_SPI_HOST_CMD)
+DEFS += -DV3F_ENABLE_USB_RF_COEXIST=$(V3F_ENABLE_USB_RF_COEXIST)
+DEFS += -DV3F_ENABLE_USB_BLE_COEXIST=$(V3F_ENABLE_USB_BLE_COEXIST)
 DEFS += -DV3F_ENABLE_USBFS_CDC_DEBUG=$(V3F_ENABLE_USBFS_CDC_DEBUG)
 DEFS += -DV3F_OUTPUT_MODE_DEFAULT=$(V3F_OUTPUT_MODE_DEFAULT)
 DEFS += -DV3F_ENABLE_USBFS_CDC=$(V3F_ENABLE_USBFS_CDC)
@@ -160,6 +175,7 @@ ASM_SOURCES := $(STARTUP)
 # Build directory
 BUILD := $(BUILD_ROOT)
 ELF := $(BUILD)/$(PROJECT_NAME).elf
+BOARD_MODEL_STAMP := $(BUILD)/.h417-board-model
 
 # Object file generation
 OBJS := $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SOURCES)))
@@ -171,18 +187,30 @@ VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 # Dependency files
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean size flash
+.PHONY: all clean size flash FORCE
 
 all: $(ELF) $(BUILD)/$(PROJECT_NAME).hex $(BUILD)/$(PROJECT_NAME).bin $(BUILD)/$(PROJECT_NAME).lst
 	@$(SIZE) "$(ELF)"
 
-$(BUILD)/%.o: %.c | $(BUILD)
+$(BUILD)/%.o: %.c $(BOARD_MODEL_STAMP) | $(BUILD)
 	@echo "CC  $(notdir $<)"
 	@$(CC) -c $(COMMON_FLAGS) $(DEFS) $(INC) -MMD -MP -MF"$(@:.o=.d)" $< -o $@
 
-$(BUILD)/%.o: %.S | $(BUILD)
+$(BUILD)/%.o: %.S $(BOARD_MODEL_STAMP) | $(BUILD)
 	@echo "AS  $(notdir $<)"
 	@$(AS) -c $(ASFLAGS) $(DEFS) $(INC) $< -o $@
+
+# FORCE runs the comparison on each invocation, but the stamp timestamp changes
+# only when the selected model changes. This keeps one V3F directory without
+# recompiling an unchanged model or reusing objects from the other model.
+$(BOARD_MODEL_STAMP): FORCE | $(BUILD)
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "if (!(Test-Path -LiteralPath '$@') -or [IO.File]::ReadAllText('$@') -cne 'H417_BOARD_MODEL=$(H417_BOARD_MODEL)') { [IO.File]::WriteAllText('$@', 'H417_BOARD_MODEL=$(H417_BOARD_MODEL)') }"
+else
+	@expected='H417_BOARD_MODEL=$(H417_BOARD_MODEL)'; current="$$(cat '$@' 2>/dev/null || true)"; if test "$$current" != "$$expected"; then printf '%s' "$$expected" > '$@.tmp' && mv -f '$@.tmp' '$@'; fi
+endif
+
+FORCE:
 
 $(ELF): $(OBJS) $(LDSCRIPT)
 	@echo "LD  $(notdir $@)"

@@ -79,6 +79,14 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_ENABLE_SPI_HOST_CMD 0
 #endif
 
+#ifndef V3F_ENABLE_USB_RF_COEXIST
+#define V3F_ENABLE_USB_RF_COEXIST 0
+#endif
+
+#ifndef V3F_ENABLE_USB_BLE_COEXIST
+#define V3F_ENABLE_USB_BLE_COEXIST 0
+#endif
+
 #ifndef V3F_ENABLE_USBFS_CDC_DEBUG
 #define V3F_ENABLE_USBFS_CDC_DEBUG 0
 #endif
@@ -116,9 +124,14 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_SWITCH_KEY_F1  45U
 #define V3F_SWITCH_KEY_F2  44U
 #define V3F_SWITCH_KEY_F3  43U
+#define V3F_MODE_MASK_F1   0x01U
+#define V3F_MODE_MASK_F2   0x02U
+#define V3F_MODE_MASK_F3   0x04U
+#endif
+#if H417_BOARD_HAS_FN_LIGHT_TOGGLE
+#define V3F_SWITCH_KEY_F5  41U
 #endif
 #if H417_BOARD_HAS_LEGACY_FN_LIGHTING
-#define V3F_SWITCH_KEY_F5  41U
 #define V3F_SWITCH_KEY_F6  6U
 #endif
 #define V3F_PROFILE_KEY_0   10U
@@ -126,7 +139,7 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_PROFILE_KEY_2   51U
 #define V3F_PROFILE_KEY_3   50U
 
-#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
+#if H417_BOARD_HAS_FN_LIGHT_TOGGLE
 #ifndef V3F_LIGHTING_COMBO_PRESS_FRAMES
 #define V3F_LIGHTING_COMBO_PRESS_FRAMES 4U
 #endif
@@ -137,7 +150,9 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 
 #define V3F_LIGHTING_COMBO_NONE   0U
 #define V3F_LIGHTING_COMBO_TOGGLE 1U
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
 #define V3F_LIGHTING_COMBO_EFFECT 2U
+#endif
 #endif
 
 #define V3F_HID_USAGE_A           0x04U
@@ -193,6 +208,9 @@ enum
     V3F_TRACE_RGB_LAST_RESULT = 45,
     V3F_TRACE_RGB_EFFECT = 46,
 };
+
+static void v3f_global_key_clear_one(v3f_global_key_state_t *keys,
+                                     uint8_t key_id);
 
 typedef struct
 {
@@ -279,6 +297,32 @@ static uint8_t v3f_output_mode_is_wireless(uint8_t mode)
 {
     return (uint8_t)((mode == AIK_OUTPUT_MODE_RF24) ||
                      (mode == AIK_OUTPUT_MODE_BLE));
+}
+
+static uint8_t v3f_output_mode_usb_enabled(uint8_t mode)
+{
+    if(mode == AIK_OUTPUT_MODE_USBHS)
+    {
+        return 1U;
+    }
+
+#if V3F_ENABLE_USB_RF_COEXIST
+    /* USBHS is an independent H417 peripheral. A wireless selection adds the
+     * matching CH585 radio path instead of taking USBHS away. */
+    if(mode == AIK_OUTPUT_MODE_RF24)
+    {
+        return 1U;
+    }
+#endif
+
+#if V3F_ENABLE_USB_BLE_COEXIST
+    if(mode == AIK_OUTPUT_MODE_BLE)
+    {
+        return 1U;
+    }
+#endif
+
+    return 0U;
 }
 
 static void v3f_nkro_set_usage(uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
@@ -510,25 +554,67 @@ static int8_t v3f_mouse_wheel_from_local_controls(
 }
 
 #if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
-static uint8_t v3f_output_mode_update_from_keys(v3f_global_key_state_t *keys,
-                                                uint8_t current_mode)
+static uint8_t v3f_output_mode_update_from_keys(
+    v3f_global_key_state_t *keys,
+    uint8_t current_mode)
 {
+    static uint8_t consumed_mask;
+    uint8_t pressed_mask = 0U;
     uint8_t next_mode = current_mode;
 
-    if((keys != 0) &&
-       (v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) != 0U))
+    if(keys == 0)
     {
-        if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F1) != 0U)
+        return v3f_output_mode_sanitize(next_mode);
+    }
+
+    if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F1) != 0U)
+    {
+        pressed_mask |= V3F_MODE_MASK_F1;
+    }
+    if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F2) != 0U)
+    {
+        pressed_mask |= V3F_MODE_MASK_F2;
+    }
+    if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F3) != 0U)
+    {
+        pressed_mask |= V3F_MODE_MASK_F3;
+    }
+
+    /* Keep the selected F key hidden even when Fn is released first. */
+    consumed_mask &= pressed_mask;
+    if(v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) != 0U)
+    {
+        if(pressed_mask == V3F_MODE_MASK_F1)
         {
             next_mode = AIK_OUTPUT_MODE_USBHS;
+            consumed_mask |= V3F_MODE_MASK_F1;
         }
-        else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F2) != 0U)
+        else if(pressed_mask == V3F_MODE_MASK_F2)
         {
             next_mode = AIK_OUTPUT_MODE_RF24;
+            consumed_mask |= V3F_MODE_MASK_F2;
         }
-        else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F3) != 0U)
+        else if(pressed_mask == V3F_MODE_MASK_F3)
         {
             next_mode = AIK_OUTPUT_MODE_BLE;
+            consumed_mask |= V3F_MODE_MASK_F3;
+        }
+    }
+
+    if(consumed_mask != 0U)
+    {
+        v3f_global_key_clear_one(keys, V3F_FN_LAYER_KEY);
+        if((consumed_mask & V3F_MODE_MASK_F1) != 0U)
+        {
+            v3f_global_key_clear_one(keys, V3F_SWITCH_KEY_F1);
+        }
+        if((consumed_mask & V3F_MODE_MASK_F2) != 0U)
+        {
+            v3f_global_key_clear_one(keys, V3F_SWITCH_KEY_F2);
+        }
+        if((consumed_mask & V3F_MODE_MASK_F3) != 0U)
+        {
+            v3f_global_key_clear_one(keys, V3F_SWITCH_KEY_F3);
         }
     }
 
@@ -554,8 +640,9 @@ static uint8_t v3f_output_mode_update(
         return current_mode;
     }
 
-    /* NEW uses the physical selector exclusively. Retain the last valid mode
-     * across startup or brief SPI link gaps instead of falling back to Fn. */
+    /* NEW uses the physical selector exclusively. USBHS means that the
+     * wireless overlay is off; wired USB remains active independently.
+     * Retain the last valid switch state across brief SPI link gaps. */
     return current_mode;
 #else
     (void)left;
@@ -563,11 +650,13 @@ static uint8_t v3f_output_mode_update(
 #endif
 }
 
-#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
+#if H417_BOARD_HAS_FN_LIGHT_TOGGLE
 static uint8_t v3f_lighting_combo_from_keys(v3f_global_key_state_t *keys)
 {
     uint8_t f5_down;
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
     uint8_t f6_down;
+#endif
 
     if((keys == 0) ||
        (v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) == 0U))
@@ -576,6 +665,7 @@ static uint8_t v3f_lighting_combo_from_keys(v3f_global_key_state_t *keys)
     }
 
     f5_down = v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F5);
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
     f6_down = v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F6);
 
     if((f5_down != 0U) && (f6_down == 0U))
@@ -586,6 +676,12 @@ static uint8_t v3f_lighting_combo_from_keys(v3f_global_key_state_t *keys)
     {
         return V3F_LIGHTING_COMBO_EFFECT;
     }
+#else
+    if(f5_down != 0U)
+    {
+        return V3F_LIGHTING_COMBO_TOGGLE;
+    }
+#endif
     return V3F_LIGHTING_COMBO_NONE;
 }
 
@@ -628,10 +724,12 @@ static void v3f_lighting_update_from_keys(v3f_global_key_state_t *keys)
     {
         v3f_rgb_status_toggle_enabled();
     }
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
     else if(combo == V3F_LIGHTING_COMBO_EFFECT)
     {
         v3f_rgb_status_next_effect();
     }
+#endif
     armed = 0U;
 }
 #endif
@@ -847,7 +945,9 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
                                          uint8_t approval_active,
                                          uint8_t approval_selected_yes,
                                          uint16_t consumer_usage,
-                                         int8_t consumer_delta)
+                                         int8_t consumer_delta,
+                                         uint8_t battery_percent,
+                                         uint8_t power_flags)
 {
 #if V3F_ENABLE_SPI_HOST_CMD && V3F_ENABLE_RF_BRIDGE
     aik_spi_half_state_v1_t empty_right;
@@ -860,7 +960,9 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
                                                      output_mode,
                                                      approval_active,
                                                      approval_selected_yes,
-                                                     1U);
+                                                     1U,
+                                                     battery_percent,
+                                                     power_flags);
         aik_spi_host_cmd_set_consumer_usage(cmd, consumer_usage);
         aik_spi_host_cmd_set_consumer_delta(cmd, consumer_delta);
         aik_spi_host_cmd_finish(cmd);
@@ -877,7 +979,9 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
                                                  output_mode,
                                                  approval_active,
                                                  approval_selected_yes,
-                                                 0U);
+                                                 0U,
+                                                 battery_percent,
+                                                 power_flags);
     aik_spi_host_cmd_set_consumer_usage(cmd, consumer_usage);
     aik_spi_host_cmd_set_consumer_delta(cmd, consumer_delta);
     aik_spi_host_cmd_finish(cmd);
@@ -888,6 +992,8 @@ static void v3f_prepare_right_state_push(aik_spi_host_cmd_v1_t *cmd,
     (void)approval_selected_yes;
     (void)consumer_usage;
     (void)consumer_delta;
+    (void)battery_percent;
+    (void)power_flags;
 #endif
 }
 
@@ -1074,11 +1180,15 @@ int main(void)
     aik_host_shortcut_state_t host_shortcut;
     aik_profile_shortcut_state_t profile_shortcut;
     aik_approval_control_state_t approval_control;
+    uint8_t right_battery_percent;
+    uint8_t right_power_flags;
 
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
     memset(nkro16, 0, sizeof(nkro16));
     memset(zero_nkro16, 0, sizeof(zero_nkro16));
+    right_battery_percent = AIK_BATTERY_PERCENT_UNKNOWN;
+    right_power_flags = 0U;
     aik_host_shortcut_reset(&host_shortcut);
     aik_profile_shortcut_reset(&profile_shortcut);
     aik_approval_control_reset(&approval_control);
@@ -1094,7 +1204,9 @@ int main(void)
 #endif
     (void)v3f_profile_runtime_init();
     v3f_profile_sync_init();
-    v3f_profile_sync_mark_all_dirty();
+    /* On boot, periodic status queries first compare the profile identity
+     * restored by each CH585.  Matching halves need no flash rewrite;
+     * mismatches are marked dirty by v3f_profile_sync_status_poll(). */
     v3f_ch585_link_init();
     v3f_rgb_status_init();
     v3f_rgb_status_set_enabled(0U);
@@ -1147,6 +1259,13 @@ int main(void)
                     v3f_ch585_link_poll(AIK_HALF_ID_RIGHT, &right_cmd, &rx) :
                     0U;
         update_half_cache(&right, got_right, &rx);
+        if((got_right != 0U) &&
+           (aik_spi_half_seq_battery_valid(rx.half_seq) != 0U))
+        {
+            right_battery_percent =
+                aik_spi_half_seq_battery_percent(rx.half_seq);
+            right_power_flags = AIK_SPI_POWER_FLAG_BAT_VALID;
+        }
         age_half_cache_on_usb_report(&right, got_right);
         approval_confirm_action =
             aik_approval_control_update_confirm_valid(
@@ -1200,7 +1319,9 @@ int main(void)
                                          approval_active,
                                          approval_selected_yes,
                                          left_push_consumer_usage,
-                                         left_push_consumer_delta);
+                                         left_push_consumer_delta,
+                                         right_battery_percent,
+                                         right_power_flags);
             last_wireless_right_consumer_usage = right_consumer_usage;
         }
         else
@@ -1277,6 +1398,15 @@ int main(void)
         v3f_half_state_merge(left.valid ? &left.frame : 0,
                              right.valid ? &right.frame : 0,
                              &keys);
+        output_mode = v3f_output_mode_update(
+            left.valid ? &left.frame : 0,
+            &keys,
+            output_mode);
+#if H417_BOARD_HAS_CAPS_LOCK_LED
+        /* Wired USB stays active on NEW in every switch position, so the
+         * indicator always follows the USB host's LED output report. */
+        v3f_board_caps_lock_led_set(v3f_usb_hid_caps_lock_on());
+#endif
         approval_nav_action = aik_approval_control_update_nav_valid(
             &approval_control,
             approval_active,
@@ -1343,22 +1473,13 @@ int main(void)
         {
             v3f_profile_shortcut_consume_keys(&keys);
         }
-        output_mode = v3f_output_mode_update(
-            left.valid ? &left.frame : 0,
-            &keys,
-            output_mode);
-#if H417_BOARD_HAS_CAPS_LOCK_LED
-        v3f_board_caps_lock_led_set(
-            (uint8_t)((output_mode == AIK_OUTPUT_MODE_USBHS) &&
-                      (v3f_usb_hid_caps_lock_on() != 0U)));
-#endif
         if(v3f_output_mode_is_wireless(output_mode) == 0U)
         {
             wireless_consumer_delta_pending = 0;
             wireless_consumer_usage_pending = AIK_CONSUMER_USAGE_NONE;
             last_wireless_right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
         }
-#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
+#if H417_BOARD_HAS_FN_LIGHT_TOGGLE
         v3f_lighting_update_from_keys(&keys);
 #endif
         if((host_shortcut_consumed != 0U) ||
@@ -1398,12 +1519,12 @@ int main(void)
         aik_host_shortcut_apply(host_shortcut_action, nkro16);
         aik_approval_control_apply_confirm(
             approval_confirm_action, nkro16);
-        if(output_mode == AIK_OUTPUT_MODE_USBHS)
+        if(v3f_output_mode_usb_enabled(output_mode) != 0U)
         {
             v3f_consumer_delta_accumulate(&usb_consumer_delta_pending,
                                           consumer_delta);
         }
-        if((output_mode == AIK_OUTPUT_MODE_USBHS) &&
+        if((v3f_output_mode_usb_enabled(output_mode) != 0U) &&
            (mouse_wheel != 0) &&
            (last_usb_mouse_wheel == 0))
         {
@@ -1416,8 +1537,8 @@ int main(void)
                 usb_mouse_wheel_pending--;
             }
         }
-        if((previous_output_mode == AIK_OUTPUT_MODE_USBHS) &&
-           (output_mode != AIK_OUTPUT_MODE_USBHS))
+        if((v3f_output_mode_usb_enabled(previous_output_mode) != 0U) &&
+           (v3f_output_mode_usb_enabled(output_mode) == 0U))
         {
             usb_nkro_release_pending = 1U;
             usb_consumer_release_pending = 1U;
@@ -1445,7 +1566,7 @@ int main(void)
                     usb_consumer_release_pending = 0U;
                 }
             }
-            else if(output_mode == AIK_OUTPUT_MODE_USBHS)
+            else if(v3f_output_mode_usb_enabled(output_mode) != 0U)
             {
                 if((consumer_usage != AIK_CONSUMER_USAGE_NONE) &&
                    (last_usb_consumer_usage == AIK_CONSUMER_USAGE_NONE))
@@ -1498,7 +1619,7 @@ int main(void)
                 }
             }
         }
-        if(output_mode == AIK_OUTPUT_MODE_USBHS)
+        if(v3f_output_mode_usb_enabled(output_mode) != 0U)
         {
             last_usb_consumer_usage = consumer_usage;
             last_usb_mouse_wheel = mouse_wheel;

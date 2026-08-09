@@ -65,9 +65,11 @@ extern "C" {
 #define AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN 42U
 /* Center-only gesture after direction classification, held until release. */
 #define AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED 43U
-/* NEW left-half firmware reports the physical USB/2.4G/BLE selector in the
- * formerly unused tail bits. The valid bit keeps older CH585 firmware (which
- * leaves these bits zero) compatible with newer H417 firmware. */
+/* NEW left-half firmware reports the physical wireless selector in the
+ * formerly unused tail bits. AIK_OUTPUT_MODE_USBHS represents the centre
+ * position (wireless off); H417 wired USB remains active independently. The
+ * valid bit keeps older CH585 firmware (which leaves these bits zero)
+ * compatible with newer H417 firmware. */
 #define AIK_LEFT_LOCAL_OUTPUT_MODE_SHIFT     44U
 #define AIK_LEFT_LOCAL_BIT_OUTPUT_MODE_VALID 46U
 #define AIK_HALF_FRAME_BITS_LEFT             47U
@@ -84,6 +86,21 @@ extern "C" {
 #define AIK_CONSUMER_USAGE_MUTE        0x00E2U
 #define AIK_CONSUMER_USAGE_VOLUME_UP   0x00E9U
 #define AIK_CONSUMER_USAGE_VOLUME_DOWN 0x00EAU
+
+#define AIK_BATTERY_PERCENT_UNKNOWN 0xFFU
+#define AIK_SPI_POWER_FLAG_BAT_VALID       0x01U
+#define AIK_SPI_POWER_FLAG_BAT_ALERT       0x02U
+#define AIK_SPI_POWER_FLAG_CHARGING        0x04U
+#define AIK_SPI_POWER_FLAG_STANDBY_FULL    0x08U
+
+/* The right half does not use half_seq for acknowledgement. Keep the low
+ * byte as its diagnostic sequence and use the high byte for low-rate battery
+ * telemetry. This preserves the existing 12-byte state transaction and does
+ * not insert a second SPI request/response into the keyboard scan loop. */
+#define AIK_SPI_HALF_SEQ_BAT_VALID_MASK 0x8000U
+#define AIK_SPI_HALF_SEQ_BAT_VALUE_MASK 0x7F00U
+#define AIK_SPI_HALF_SEQ_BAT_SHIFT      8U
+#define AIK_SPI_HALF_SEQ_COUNTER_MASK   0x00FFU
 
 #define AIK_PROFILE_DEBUG_ID16 0xA117U
 #define AIK_PROFILE_DEBUG_GENERATION16 1U
@@ -402,6 +419,60 @@ static inline void aik_spi_host_cmd_set_consumer_delta(
     {
         cmd->reserved[2] = (uint8_t)delta;
     }
+}
+
+/* Normal POLL/PUSH commands reserve bytes 3 and 4 for the latest battery
+ * snapshot. Profile-transfer commands own the whole payload and do not use
+ * these helpers. */
+static inline uint8_t aik_spi_host_cmd_battery_percent(
+    const aik_spi_host_cmd_v1_t *cmd)
+{
+    return (cmd != 0) ? cmd->reserved[3] : AIK_BATTERY_PERCENT_UNKNOWN;
+}
+
+static inline uint8_t aik_spi_host_cmd_power_flags(
+    const aik_spi_host_cmd_v1_t *cmd)
+{
+    return (cmd != 0) ? cmd->reserved[4] : 0U;
+}
+
+static inline void aik_spi_host_cmd_set_power_status(
+    aik_spi_host_cmd_v1_t *cmd,
+    uint8_t battery_percent,
+    uint8_t flags)
+{
+    if(cmd != 0)
+    {
+        cmd->reserved[3] = battery_percent;
+        cmd->reserved[4] = flags;
+    }
+}
+
+static inline uint16_t aik_spi_half_seq_pack_battery(
+    uint8_t counter,
+    uint8_t battery_percent,
+    uint8_t valid)
+{
+    uint16_t packed = counter;
+
+    if((valid != 0U) && (battery_percent <= 100U))
+    {
+        packed |= AIK_SPI_HALF_SEQ_BAT_VALID_MASK;
+        packed |= (uint16_t)((uint16_t)battery_percent <<
+                             AIK_SPI_HALF_SEQ_BAT_SHIFT);
+    }
+    return packed;
+}
+
+static inline uint8_t aik_spi_half_seq_battery_valid(uint16_t half_seq)
+{
+    return (uint8_t)((half_seq & AIK_SPI_HALF_SEQ_BAT_VALID_MASK) != 0U);
+}
+
+static inline uint8_t aik_spi_half_seq_battery_percent(uint16_t half_seq)
+{
+    return (uint8_t)((half_seq & AIK_SPI_HALF_SEQ_BAT_VALUE_MASK) >>
+                     AIK_SPI_HALF_SEQ_BAT_SHIFT);
 }
 
 static inline uint8_t aik_spi_half_down_last_mask(uint8_t key_count)

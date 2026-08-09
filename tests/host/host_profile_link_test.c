@@ -17,6 +17,7 @@
 #include "aik_profile_format.h"
 #include "aik_profile_shortcut.h"
 #include "ISP585.h"
+#include "ch585_board_config.h"
 #include "ch585_profile.h"
 #include "ch585_half_report.h"
 #include "magnetic_key_engine.h"
@@ -573,6 +574,67 @@ static void test_wireless_approval_controls(void)
     ch585_half_report_build_nkro16(&left, &right, nkro);
 }
 
+static void test_wireless_mode_shortcut_board_behavior(void)
+{
+    aik_spi_half_state_v1_t left;
+    aik_spi_half_state_v1_t right;
+    uint8_t base_pairs[AIK_KEY_COUNT_TOTAL * 2U];
+    uint8_t nkro[AIK_NKRO_REPORT_BYTES];
+
+    memset(&left, 0, sizeof(left));
+    memset(&right, 0, sizeof(right));
+    ch585_half_report_reset_factory();
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+
+    /* NEW uses the physical switch, so the factory Fn+F3 chord must retain
+     * its ordinary F3 output. OLD reserves the same chord for BLE mode. */
+    set_half_global_key(&left, &right, 38U);
+    set_half_global_key(&left, &right, 43U);
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
+#else
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
+#endif
+
+    memset(&left, 0, sizeof(left));
+    memset(&right, 0, sizeof(right));
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+
+    memset(base_pairs, 0, sizeof(base_pairs));
+    base_pairs[38U * 2U] = 0x04U; /* Fn physical key -> A */
+    base_pairs[43U * 2U] = 0x3CU; /* mode key -> F3 */
+    ch585_half_report_set_key_outputs(base_pairs);
+    ch585_half_report_clear_fn_overlay();
+
+    /* A configurable Fn mapping follows the same board-specific policy. */
+    set_half_global_key(&left, &right, 38U);
+    set_half_global_key(&left, &right, 43U);
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+    CHECK(nkro_usage_set(nkro, 0x04U) == 0U);
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
+#else
+    CHECK(nkro_usage_set(nkro, 0x04U) == 1U);
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
+#endif
+
+    /* Releasing Fn first keeps OLD consumed; NEW keeps F3 visible. */
+    memset(&right, 0, sizeof(right));
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
+#else
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
+#endif
+
+    memset(&left, 0, sizeof(left));
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+    set_half_global_key(&left, &right, 43U);
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
+}
+
 static void test_wireless_profile_shortcut_consumption(void)
 {
     aik_spi_half_state_v1_t left;
@@ -819,6 +881,7 @@ static void test_lossy_link(void)
 static void test_user_slot_persistence(void)
 {
     const ch585_profile_state_t *state;
+    uint32_t link_cmds_before_boot_check;
 
     /* Install the same package as user slot 2 on the V3F side; the
      * push must persist the patch into the fake Data-Flash. */
@@ -840,6 +903,16 @@ static void test_user_slot_persistence(void)
     CHECK(state->active_slot == 2U);
     CHECK(state->patch_applied == 1U);
     CHECK(s_engine.cfg[0].press_pm == 400U); /* patch, not 450 default */
+
+    /* A normal H417 boot must first compare the identity loaded by the
+     * CH585.  A matching persistent profile reaches SYNCED without sending
+     * BEGIN/CHUNK/COMMIT or rewriting Data-Flash. */
+    link_cmds_before_boot_check = s_link_cmd_count;
+    v3f_profile_sync_init();
+    v3f_profile_sync_status_poll(0U);
+    v3f_profile_sync_status_poll(1U);
+    CHECK(v3f_profile_sync_half_synced((uint8_t)CH585_HALF_ID) == 1U);
+    CHECK(s_link_cmd_count == link_cmds_before_boot_check);
 }
 
 static void test_status_reconciliation(void)
@@ -910,6 +983,7 @@ int main(void)
     test_approval_control_state_machine();
     test_wireless_claude_shortcut();
     test_wireless_approval_controls();
+    test_wireless_mode_shortcut_board_behavior();
     test_wireless_profile_shortcut_consumption();
     test_wireless_composition_matches_v3f();
     test_wireless_profile_mapping();

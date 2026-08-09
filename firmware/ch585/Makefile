@@ -16,7 +16,8 @@ HALF_SCAN_BOARD_DEFS := -DCH585_BOARD_MODEL=CH585_BOARD_MODEL_OLD
 else
 $(error Unsupported CH585_BOARD_MODEL '$(CH585_BOARD_MODEL)'; expected NEW or OLD)
 endif
-# NEW and OLD share output directories; force a rebuild when switching models.
+# NEW and OLD intentionally share output directories. A model stamp below makes
+# every object rebuild automatically only when this selection changes.
 
 CC      := "$(PREFIX)gcc"
 AS      := "$(PREFIX)gcc" -x assembler-with-cpp
@@ -75,6 +76,12 @@ ifneq (,$(findstring -DCH585_BLE_PAIRING_EXT_EEPROM=1,$(DEFS_EXTRA)))
 APP_C_SOURCES += drivers/eeprom_i2c/ch585_eeprom_i2c.c
 INC += -I"drivers/eeprom_i2c"
 endif
+ifneq (,$(findstring -DCH585_BATTERY_ENABLE=1,$(DEFS_EXTRA)))
+APP_C_SOURCES += drivers/ch585_i2c_bus.c
+APP_C_SOURCES += drivers/ch585_soft_i2c_bus.c
+APP_C_SOURCES += drivers/max17048.c
+APP_C_SOURCES += drivers/ch585_power_status.c
+endif
 else ifeq ($(APP),rf_basic)
 APP_C_SOURCES += applications/rf_basic/main.c
 APP_C_SOURCES += drivers/rf/RF_basic.c
@@ -113,6 +120,7 @@ LDSCRIPT := $(SDK_ROOT)/Ld/Link.ld
 
 BUILD := $(BUILD_ROOT)/$(BUILD_VARIANT)
 ELF := $(BUILD)/$(PROJECT_NAME).elf
+BOARD_MODEL_STAMP := $(BUILD)/.ch585-board-model
 
 OBJS := $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SOURCES)))
 OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
@@ -120,7 +128,7 @@ OBJS += $(patsubst %.S,$(BUILD)/%.o,$(notdir $(ASM_SOURCES)))
 VPATH := $(sort $(dir $(C_SOURCES)) $(dir $(ASM_SOURCES)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_rf half_scan_left_rf_debug_uart half_scan_left_ble_debug_uart half_scan_left_output_switch_debug_uart half_scan_left_debug_uart half_scan_right_debug_uart rf_basic rf_receiver_usbhs rf_keyboard_tx clean size
+.PHONY: all firmware half_scan half_scan_left half_scan_right half_scan_left_rf half_scan_left_rf_debug_uart half_scan_left_ble_debug_uart half_scan_left_output_switch_debug_uart half_scan_left_debug_uart half_scan_right_debug_uart rf_basic rf_receiver_usbhs rf_keyboard_tx clean size FORCE
 
 all: half_scan_left half_scan_right
 
@@ -130,11 +138,12 @@ firmware: $(ELF) $(BUILD)/$(PROJECT_NAME).hex $(BUILD)/$(PROJECT_NAME).bin $(BUI
 half_scan:
 	@$(MAKE) APP=$@ firmware
 
+# Persist BLE bonds in the left-half external EEPROM (PB20/PB21).
 half_scan_left:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left BUILD_VARIANT=half_scan_left DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1 -DCH585_BLE_HID_ENABLE=1 -DCH585_BLE_PAIRING_EXT_EEPROM=1 -DCH585_SPI0_SLAVE_LINK_TMOS_HOOK=1 -DCH585_ADS7948_MUX_TMOS_HOOK=1" firmware
 
 half_scan_right:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right BUILD_VARIANT=half_scan_right DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right BUILD_VARIANT=half_scan_right DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0 -DCH585_BATTERY_ENABLE=1" firmware
 
 half_scan_left_rf:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_rf BUILD_VARIANT=half_scan_left_rf DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=1" firmware
@@ -152,7 +161,7 @@ half_scan_left_debug_uart:
 	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_left_debug_uart BUILD_VARIANT=half_scan_left_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=0 -DCH585_RF_TX_ENABLE=0" firmware
 
 half_scan_right_debug_uart:
-	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right_debug_uart BUILD_VARIANT=half_scan_right_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0" firmware
+	@$(MAKE) APP=half_scan PROJECT_NAME=ch585_half_scan_right_debug_uart BUILD_VARIANT=half_scan_right_debug_uart DEFS_EXTRA="$(DEFS_EXTRA) $(HALF_SCAN_CLOCK_DEFS) $(HALF_SCAN_DEBUG_UART_DEFS) -DCH585_HALF_ID=1 -DCH585_RF_TX_ENABLE=0 -DCH585_BATTERY_ENABLE=1" firmware
 
 rf_basic rf_receiver_usbhs:
 	@$(MAKE) APP=$@ firmware
@@ -160,13 +169,25 @@ rf_basic rf_receiver_usbhs:
 rf_keyboard_tx:
 	$(error rf_keyboard_tx is disabled; RF TX is integrated into half_scan_left)
 
-$(BUILD)/%.o: %.c | $(BUILD)
+$(BUILD)/%.o: %.c $(BOARD_MODEL_STAMP) | $(BUILD)
 	@echo "CC  $(notdir $<)"
 	@$(CC) -c $(COMMON_FLAGS) $(INC) -MMD -MP -MF"$(@:.o=.d)" $< -o $@
 
-$(BUILD)/%.o: %.S | $(BUILD)
+$(BUILD)/%.o: %.S $(BOARD_MODEL_STAMP) | $(BUILD)
 	@echo "AS  $(notdir $<)"
 	@$(AS) -c $(ASFLAGS) $(INC) $< -o $@
+
+# FORCE runs the comparison on each invocation, but the stamp timestamp changes
+# only when the selected model changes. This keeps one build directory without
+# recompiling an unchanged model or reusing objects from the other model.
+$(BOARD_MODEL_STAMP): FORCE | $(BUILD)
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "if (!(Test-Path -LiteralPath '$@') -or [IO.File]::ReadAllText('$@') -cne 'CH585_BOARD_MODEL=$(CH585_BOARD_MODEL)') { [IO.File]::WriteAllText('$@', 'CH585_BOARD_MODEL=$(CH585_BOARD_MODEL)') }"
+else
+	@expected='CH585_BOARD_MODEL=$(CH585_BOARD_MODEL)'; current="$$(cat '$@' 2>/dev/null || true)"; if test "$$current" != "$$expected"; then printf '%s' "$$expected" > '$@.tmp' && mv -f '$@.tmp' '$@'; fi
+endif
+
+FORCE:
 
 $(ELF): $(OBJS) $(LDSCRIPT)
 	@echo "LD  $(notdir $@)"
