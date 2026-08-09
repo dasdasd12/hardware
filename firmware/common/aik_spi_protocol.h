@@ -65,9 +65,11 @@ extern "C" {
 #define AIK_LEFT_LOCAL_BIT_SCR_WHEEL_DOWN 42U
 /* Center-only gesture after direction classification, held until release. */
 #define AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED 43U
-/* NEW left-half firmware reports the physical USB/2.4G/BLE selector in the
- * formerly unused tail bits. The valid bit keeps older CH585 firmware (which
- * leaves these bits zero) compatible with newer H417 firmware. */
+/* NEW left-half firmware reports the physical wireless selector in the
+ * formerly unused tail bits. AIK_OUTPUT_MODE_USBHS represents the centre
+ * position (wireless off); H417 wired USB remains active independently. The
+ * valid bit keeps older CH585 firmware (which leaves these bits zero)
+ * compatible with newer H417 firmware. */
 #define AIK_LEFT_LOCAL_OUTPUT_MODE_SHIFT     44U
 #define AIK_LEFT_LOCAL_BIT_OUTPUT_MODE_VALID 46U
 #define AIK_HALF_FRAME_BITS_LEFT             47U

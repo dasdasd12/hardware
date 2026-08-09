@@ -29,6 +29,7 @@
 #include "aik_profile_format.h"
 #include "aik_profile_shortcut.h"
 #include "ISP585.h"
+#include "ch585_board_config.h"
 #include "ch585_profile.h"
 #include "ch585_half_report.h"
 #include "magnetic_key_engine.h"
@@ -585,12 +586,28 @@ static void test_wireless_approval_controls(void)
     ch585_half_report_build_nkro16(&left, &right, nkro);
 }
 
-static void test_wireless_mode_shortcut_consumption(void)
+static void test_wireless_mode_shortcut_board_behavior(void)
 {
     aik_spi_half_state_v1_t left;
     aik_spi_half_state_v1_t right;
     uint8_t base_pairs[AIK_KEY_COUNT_TOTAL * 2U];
     uint8_t nkro[AIK_NKRO_REPORT_BYTES];
+
+    memset(&left, 0, sizeof(left));
+    memset(&right, 0, sizeof(right));
+    ch585_half_report_reset_factory();
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+
+    /* NEW uses the physical switch, so the factory Fn+F3 chord must retain
+     * its ordinary F3 output. OLD reserves the same chord for BLE mode. */
+    set_half_global_key(&left, &right, 38U);
+    set_half_global_key(&left, &right, 43U);
+    ch585_half_report_build_nkro16(&left, &right, nkro);
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
+#else
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
+#endif
 
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
@@ -602,17 +619,26 @@ static void test_wireless_mode_shortcut_consumption(void)
     ch585_half_report_set_key_outputs(base_pairs);
     ch585_half_report_clear_fn_overlay();
 
-    /* Fn+F3 is reserved for BLE mode and must not reach the host. */
+    /* A configurable Fn mapping follows the same board-specific policy. */
     set_half_global_key(&left, &right, 38U);
     set_half_global_key(&left, &right, 43U);
     ch585_half_report_build_nkro16(&left, &right, nkro);
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
     CHECK(nkro_usage_set(nkro, 0x04U) == 0U);
     CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
+#else
+    CHECK(nkro_usage_set(nkro, 0x04U) == 1U);
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
+#endif
 
-    /* Releasing Fn first still keeps F3 consumed until F3 is released. */
+    /* Releasing Fn first keeps OLD consumed; NEW keeps F3 visible. */
     memset(&right, 0, sizeof(right));
     ch585_half_report_build_nkro16(&left, &right, nkro);
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
     CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
+#else
+    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
+#endif
 
     memset(&left, 0, sizeof(left));
     ch585_half_report_build_nkro16(&left, &right, nkro);
@@ -969,7 +995,7 @@ int main(void)
     test_approval_control_state_machine();
     test_wireless_claude_shortcut();
     test_wireless_approval_controls();
-    test_wireless_mode_shortcut_consumption();
+    test_wireless_mode_shortcut_board_behavior();
     test_wireless_profile_shortcut_consumption();
     test_wireless_composition_matches_v3f();
     test_wireless_profile_mapping();

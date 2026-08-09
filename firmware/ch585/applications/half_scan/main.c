@@ -218,6 +218,7 @@ static int8_t s_last_output_mouse_wheel;
 static uint8_t s_wireless_mode_switch_last_raw;
 static uint8_t s_wireless_mode_switch_raw_count;
 static uint8_t s_wireless_mode_switch_mode;
+static void half_scan_set_output_mode(uint8_t mode);
 #endif
 
 static ch585_ads7948_mux_side_t half_scan_side(void)
@@ -347,6 +348,24 @@ static uint8_t half_scan_gpiob_pressed(uint32_t pin)
 }
 
 #if CH585_WIRELESS_MODE_SWITCH_ENABLE
+static uint8_t half_scan_wireless_mode_switch_rf_contact_closed(void)
+{
+    uint8_t closed;
+
+    /* The four-terminal 1P3T footprint uses PB11's switch terminal as the
+     * common contact. In the RF detent PB11 is connected to PB10, rather
+     * than either input being connected directly to GND. Both external
+     * pull-ups therefore read high unless continuity is probed explicitly.
+     * Drive only low, briefly, so the probe merely sinks the two 10K pull-ups
+     * and remains safe for a later board revision that grounds PB10 directly. */
+    GPIOB_ResetBits(CH585_WIRELESS_MODE_BLE_PB11);
+    GPIOB_ModeCfg(CH585_WIRELESS_MODE_BLE_PB11, GPIO_ModeOut_PP_5mA);
+    mDelayuS(1U);
+    closed = half_scan_gpiob_pressed(CH585_WIRELESS_MODE_RF24_PB10);
+    GPIOB_ModeCfg(CH585_WIRELESS_MODE_BLE_PB11, GPIO_ModeIN_Floating);
+    return closed;
+}
+
 static uint8_t half_scan_wireless_mode_switch_read_raw(void)
 {
     uint8_t raw = 0U;
@@ -358,6 +377,11 @@ static uint8_t half_scan_wireless_mode_switch_read_raw(void)
     if(half_scan_gpiob_pressed(CH585_WIRELESS_MODE_RF24_PB10) != 0U)
     {
         raw |= CH585_WIRELESS_MODE_RF24_ACTIVE;
+    }
+    if((raw == 0U) &&
+       (half_scan_wireless_mode_switch_rf_contact_closed() != 0U))
+    {
+        raw = CH585_WIRELESS_MODE_RF24_ACTIVE;
     }
     return raw;
 }
@@ -421,7 +445,14 @@ static void half_scan_wireless_mode_switch_poll(void)
     mode = half_scan_wireless_mode_switch_decode(raw);
     if(mode != CH585_WIRELESS_MODE_INVALID)
     {
-        s_wireless_mode_switch_mode = mode;
+        if(mode != s_wireless_mode_switch_mode)
+        {
+            s_wireless_mode_switch_mode = mode;
+            /* The physical selector is authoritative on NEW. Apply it to
+             * the local radios immediately instead of waiting for H417 to
+             * echo the next mode command over SPI. */
+            half_scan_set_output_mode(mode);
+        }
     }
 }
 #endif
@@ -470,8 +501,9 @@ static void half_scan_local_gpio_init(void)
 #if CH585_WIRELESS_MODE_SWITCH_ENABLE
     /* PB10/PB11 are USBFS D-/D+ when RB_PIN_USB_EN is set. Keep that analog
      * function disabled and use floating digital inputs: R31/R50 provide the
-     * external pull-ups and SW1 grounds the selected contact. PB11 is also an
-     * optional boot pin, so production option bytes must retain default PB22. */
+     * external pull-ups. The reader also probes continuity between the two
+     * contacts for the current 1P3T wiring. PB11 is an optional boot pin, so
+     * production option bytes must retain default PB22. */
     GPIOAGPPCfg(DISABLE, RB_PIN_USB_EN);
     GPIOBDigitalCfg(ENABLE,
                     CH585_WIRELESS_MODE_BLE_PB11 |
@@ -1071,6 +1103,13 @@ static void half_scan_radio_handoff_delay(void)
 
 static void half_scan_set_output_mode(uint8_t mode)
 {
+    uint8_t mode_applied = 1U;
+
+#if CH585_WIRELESS_MODE_SWITCH_ENABLE
+    /* Never let a stale H417 command re-enable a radio that the physical
+     * selector has turned off. */
+    mode = s_wireless_mode_switch_mode;
+#endif
     mode = half_scan_sanitize_output_mode(mode);
     if(s_output_mode == mode)
     {
@@ -1085,11 +1124,17 @@ static void half_scan_set_output_mode(uint8_t mode)
     if(mode == AIK_OUTPUT_MODE_RF24)
     {
 #if CH585_BLE_HID_ENABLE
-        BLE_HID_DisableForRadio(150U);
-        half_scan_radio_handoff_delay();
+        mode_applied = BLE_HID_DisableForRadio(150U);
+        if(mode_applied != 0U)
+        {
+            half_scan_radio_handoff_delay();
+        }
 #endif
 #if CH585_RF_TX_ENABLE
-        ch585_rf_nkro_tx_set_enabled(1U);
+        if(mode_applied != 0U)
+        {
+            mode_applied = ch585_rf_nkro_tx_set_enabled(1U);
+        }
 #endif
     }
     else if(mode == AIK_OUTPUT_MODE_BLE)
@@ -1117,21 +1162,26 @@ static void half_scan_set_output_mode(uint8_t mode)
     }
 
 #if CH585_BLE_HID_ENABLE
-    if(mode != AIK_OUTPUT_MODE_USBHS)
+    if((mode_applied != 0U) && (mode == AIK_OUTPUT_MODE_BLE))
     {
-        /* Resume later; never run calibration inside this SPI command. */
+        /* BLE_RegInit() closes RF and rewrites RF registers. Only the BLE
+         * stack can tolerate that periodic calibration; leave it stopped
+         * while RF-basic owns the radio. */
         HAL_RadioCalibrationSetEnabled(1U);
     }
 #endif
 
 #if CH585_BLE_HID_ENABLE
-    if(mode != AIK_OUTPUT_MODE_BLE)
+    if((mode_applied != 0U) && (mode != AIK_OUTPUT_MODE_BLE))
     {
         memset(s_ble_boot8, 0, sizeof(s_ble_boot8));
         s_ble_last_consumer_usage = AIK_CONSUMER_USAGE_NONE;
     }
 #endif
-    s_output_mode = mode;
+    if(mode_applied != 0U)
+    {
+        s_output_mode = mode;
+    }
 }
 
 static void half_scan_output_nkro16(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES],
@@ -1573,6 +1623,10 @@ static void half_scan_init(void)
 #endif
 #if CH585_BLE_HID_ENABLE
     BLE_HID_Init();
+    /* HidDev_Init defers GAPRole_PeripheralStartDevice to TMOS. Finish that
+     * transition before the physical selector gives RF-basic ownership;
+     * otherwise the delayed BLE start can overwrite a just-enabled RF mode. */
+    (void)BLE_HID_WaitStarted(150U);
 #endif
 #if CH585_RF_TX_ENABLE && CH585_BLE_HID_ENABLE
     half_scan_set_output_mode(AIK_OUTPUT_MODE_USBHS);

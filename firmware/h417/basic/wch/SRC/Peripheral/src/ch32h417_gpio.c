@@ -21,6 +21,17 @@
 #define DBGAFR_LOCATION_MASK      ((uint32_t)0x00200000)
 #define DBGAFR_NUMBITS_MASK       ((uint32_t)0x00100000)
 
+/* NEW reserves PB7 for the active-low Caps Lock LED. Leave it at the reset
+ * high-impedance state until board_init configures the pin as open drain. */
+#ifndef H417_GPIO_IPD_PRESERVE_PB7
+#define H417_GPIO_IPD_PRESERVE_PB7 0
+#endif
+#if H417_GPIO_IPD_PRESERVE_PB7
+#define H417_GPIO_IPD_UNUSED_PB7 0U
+#else
+#define H417_GPIO_IPD_UNUSED_PB7 GPIO_Pin_7
+#endif
+
 /*********************************************************************
  * @fn      GPIO_DeInit
  *
@@ -613,7 +624,7 @@ void GPIO_IPD_Unused(void)
             GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPD;
             GPIO_Init(GPIOA, &GPIO_InitStructure);
             GPIO_InitStructure.GPIO_Pin = GPIO_Pin_2|GPIO_Pin_5|GPIO_Pin_6\
-                                          |GPIO_Pin_7|GPIO_Pin_15;
+                                          |H417_GPIO_IPD_UNUSED_PB7|GPIO_Pin_15;
             GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPD;
             GPIO_Init(GPIOB, &GPIO_InitStructure);
             GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4|GPIO_Pin_5|GPIO_Pin_13\
@@ -643,7 +654,8 @@ void GPIO_IPD_Unused(void)
             GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPD;
             GPIO_Init(GPIOA, &GPIO_InitStructure);
             GPIO_InitStructure.GPIO_Pin = GPIO_Pin_2|GPIO_Pin_3|GPIO_Pin_4\
-                                          |GPIO_Pin_5|GPIO_Pin_6|GPIO_Pin_7\
+                                          |GPIO_Pin_5|GPIO_Pin_6\
+                                          |H417_GPIO_IPD_UNUSED_PB7\
                                           |GPIO_Pin_15;
             GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPD;
             GPIO_Init(GPIOB, &GPIO_InitStructure);

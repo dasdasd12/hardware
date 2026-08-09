@@ -264,6 +264,24 @@ uint8_t BLE_HID_SetBatteryLevel(uint8_t percent)
     return SUCCESS;
 }
 
+uint8_t BLE_HID_WaitStarted(uint16_t wait_ms)
+{
+    while(wait_ms != 0U)
+    {
+        uint8_t gap_state = GAPROLE_INIT;
+
+        TMOS_SystemProcess();
+        if((GAPRole_GetParameter(GAPROLE_STATE, &gap_state) == SUCCESS) &&
+           ((gap_state & GAPROLE_STATE_ADV_MASK) != GAPROLE_INIT))
+        {
+            return 1U;
+        }
+        mDelaymS(1U);
+        wait_ms--;
+    }
+    return 0U;
+}
+
 static uint8_t bleHidBatteryCalc(uint16_t adc_value)
 {
     (void)adc_value;
@@ -521,16 +539,34 @@ void BLE_HID_SetEnabled(uint8_t enabled)
     bleHidClearConsumerTapQueue();
 }
 
-void BLE_HID_DisableForRadio(uint16_t wait_ms)
+static uint8_t bleHidRadioBusy(void)
+{
+    uint8_t gap_state = GAPROLE_INIT;
+    uint8_t adv_state;
+
+    if(GAPRole_GetParameter(GAPROLE_STATE, &gap_state) != SUCCESS)
+    {
+        return BLE_HID_IsConnected();
+    }
+    adv_state = (uint8_t)(gap_state & GAPROLE_STATE_ADV_MASK);
+    return (uint8_t)((adv_state == GAPROLE_ADVERTISING) ||
+                     (adv_state == GAPROLE_CONNECTED) ||
+                     (adv_state == GAPROLE_CONNECTED_ADV));
+}
+
+uint8_t BLE_HID_DisableForRadio(uint16_t wait_ms)
 {
     BLE_HID_SetEnabled(0U);
-    while((wait_ms != 0U) && (BLE_HID_IsConnected() != 0U))
+    while((wait_ms != 0U) &&
+          ((BLE_HID_IsConnected() != 0U) || (bleHidRadioBusy() != 0U)))
     {
         TMOS_SystemProcess();
         mDelaymS(1);
         wait_ms--;
     }
     BLE_HID_StopAdvert();
+    return (uint8_t)((BLE_HID_IsConnected() == 0U) &&
+                     (bleHidRadioBusy() == 0U));
 }
 
 uint8_t BLE_HID_SendKeyboard(const uint8_t *report8)

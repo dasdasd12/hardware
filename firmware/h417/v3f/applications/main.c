@@ -87,10 +87,6 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_ENABLE_USB_BLE_COEXIST 0
 #endif
 
-#ifndef V3F_ENABLE_FN_OUTPUT_SWITCH
-#define V3F_ENABLE_FN_OUTPUT_SWITCH 0
-#endif
-
 #ifndef V3F_ENABLE_USBFS_CDC_DEBUG
 #define V3F_ENABLE_USBFS_CDC_DEBUG 0
 #endif
@@ -124,7 +120,7 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #endif
 
 #define V3F_FN_LAYER_KEY   38U
-#if V3F_ENABLE_FN_OUTPUT_SWITCH || H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
 #define V3F_SWITCH_KEY_F1  45U
 #define V3F_SWITCH_KEY_F2  44U
 #define V3F_SWITCH_KEY_F3  43U
@@ -132,8 +128,10 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_MODE_MASK_F2   0x02U
 #define V3F_MODE_MASK_F3   0x04U
 #endif
-#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
+#if H417_BOARD_HAS_FN_LIGHT_TOGGLE
 #define V3F_SWITCH_KEY_F5  41U
+#endif
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
 #define V3F_SWITCH_KEY_F6  6U
 #endif
 #define V3F_PROFILE_KEY_0   10U
@@ -141,7 +139,7 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_PROFILE_KEY_2   51U
 #define V3F_PROFILE_KEY_3   50U
 
-#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
+#if H417_BOARD_HAS_FN_LIGHT_TOGGLE
 #ifndef V3F_LIGHTING_COMBO_PRESS_FRAMES
 #define V3F_LIGHTING_COMBO_PRESS_FRAMES 4U
 #endif
@@ -152,7 +150,9 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 
 #define V3F_LIGHTING_COMBO_NONE   0U
 #define V3F_LIGHTING_COMBO_TOGGLE 1U
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
 #define V3F_LIGHTING_COMBO_EFFECT 2U
+#endif
 #endif
 
 #define V3F_HID_USAGE_A           0x04U
@@ -553,7 +553,7 @@ static int8_t v3f_mouse_wheel_from_local_controls(
     return 0;
 }
 
-#if V3F_ENABLE_FN_OUTPUT_SWITCH || H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
 static uint8_t v3f_output_mode_update_from_keys(
     v3f_global_key_state_t *keys,
     uint8_t current_mode)
@@ -627,10 +627,7 @@ static uint8_t v3f_output_mode_update(
     v3f_global_key_state_t *keys,
     uint8_t current_mode)
 {
-#if V3F_ENABLE_FN_OUTPUT_SWITCH
-    (void)left;
-    return v3f_output_mode_update_from_keys(keys, current_mode);
-#elif H417_BOARD_HAS_PHYSICAL_MODE_SWITCH
+#if H417_BOARD_HAS_PHYSICAL_MODE_SWITCH
     (void)keys;
     if((left != 0) && (aik_spi_left_output_mode_valid(left) != 0U))
     {
@@ -643,8 +640,9 @@ static uint8_t v3f_output_mode_update(
         return current_mode;
     }
 
-    /* NEW uses the physical selector exclusively. Retain the last valid mode
-     * across startup or brief SPI link gaps instead of falling back to Fn. */
+    /* NEW uses the physical selector exclusively. USBHS means that the
+     * wireless overlay is off; wired USB remains active independently.
+     * Retain the last valid switch state across brief SPI link gaps. */
     return current_mode;
 #else
     (void)left;
@@ -652,11 +650,13 @@ static uint8_t v3f_output_mode_update(
 #endif
 }
 
-#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
+#if H417_BOARD_HAS_FN_LIGHT_TOGGLE
 static uint8_t v3f_lighting_combo_from_keys(v3f_global_key_state_t *keys)
 {
     uint8_t f5_down;
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
     uint8_t f6_down;
+#endif
 
     if((keys == 0) ||
        (v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) == 0U))
@@ -665,6 +665,7 @@ static uint8_t v3f_lighting_combo_from_keys(v3f_global_key_state_t *keys)
     }
 
     f5_down = v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F5);
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
     f6_down = v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F6);
 
     if((f5_down != 0U) && (f6_down == 0U))
@@ -675,6 +676,12 @@ static uint8_t v3f_lighting_combo_from_keys(v3f_global_key_state_t *keys)
     {
         return V3F_LIGHTING_COMBO_EFFECT;
     }
+#else
+    if(f5_down != 0U)
+    {
+        return V3F_LIGHTING_COMBO_TOGGLE;
+    }
+#endif
     return V3F_LIGHTING_COMBO_NONE;
 }
 
@@ -717,10 +724,12 @@ static void v3f_lighting_update_from_keys(v3f_global_key_state_t *keys)
     {
         v3f_rgb_status_toggle_enabled();
     }
+#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
     else if(combo == V3F_LIGHTING_COMBO_EFFECT)
     {
         v3f_rgb_status_next_effect();
     }
+#endif
     armed = 0U;
 }
 #endif
@@ -1393,6 +1402,11 @@ int main(void)
             left.valid ? &left.frame : 0,
             &keys,
             output_mode);
+#if H417_BOARD_HAS_CAPS_LOCK_LED
+        /* Wired USB stays active on NEW in every switch position, so the
+         * indicator always follows the USB host's LED output report. */
+        v3f_board_caps_lock_led_set(v3f_usb_hid_caps_lock_on());
+#endif
         approval_nav_action = aik_approval_control_update_nav_valid(
             &approval_control,
             approval_active,
@@ -1465,7 +1479,7 @@ int main(void)
             wireless_consumer_usage_pending = AIK_CONSUMER_USAGE_NONE;
             last_wireless_right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
         }
-#if H417_BOARD_HAS_LEGACY_FN_LIGHTING
+#if H417_BOARD_HAS_FN_LIGHT_TOGGLE
         v3f_lighting_update_from_keys(&keys);
 #endif
         if((host_shortcut_consumed != 0U) ||

@@ -7,7 +7,8 @@
 
 void ch585_rf_nkro_tx_init(void);
 void ch585_rf_nkro_tx_poll(void);
-void ch585_rf_nkro_tx_set_enabled(uint8_t enabled);
+/* Returns non-zero only when the requested RF state was applied. */
+uint8_t ch585_rf_nkro_tx_set_enabled(uint8_t enabled);
 /* RF -> USB handoff: queue release frames without blocking the SPI reply. */
 void ch585_rf_nkro_tx_disable_async(void);
 uint8_t ch585_rf_nkro_tx_is_enabled(void);

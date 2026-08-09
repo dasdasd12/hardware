@@ -28,6 +28,10 @@
 #define CH32H417_LCD_RGB_VFP            16u
 #define CH32H417_LCD_RGB_PIXEL_CLOCK_HZ 26666666u
 
+/* TPS61169 CTRL input: 20 kHz is inside the recommended 5-100 kHz range. */
+#define CH32H417_LCD_BACKLIGHT_PWM_HZ          20000u
+#define CH32H417_LCD_BACKLIGHT_DUTY_PERCENT       50u
+
 #define CH32H417_LTDC_RGB_OK            0
 #define CH32H417_LTDC_RGB_ERR_PARAM     (-1)
 #define CH32H417_LTDC_RGB_CLUT_ENTRIES  256u

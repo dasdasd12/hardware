@@ -214,6 +214,19 @@ static void rf_role_apply_config(void)
     RFRole_SetParam(&s_rf_param);
 }
 
+static uint8_t rf_enter_basic_mode(void)
+{
+    (void)RFRole_Stop();
+    s_last_switch_status = RFRole_SwitchMode(RFIP_MODE_RF_BASIC);
+    if(s_last_switch_status != SUCCESS)
+    {
+        return 0U;
+    }
+    /* BasicInit owns the callback/process registration and is performed once
+     * in init. A mode handoff only needs to restore the RF role parameters. */
+    return (RFRole_SetParam(&s_rf_param) == SUCCESS) ? 1U : 0U;
+}
+
 static tmosEvents rf_process_event(tmosTaskID task_id, tmosEvents events)
 {
     if((events & SYS_EVENT_MSG) != 0U)
@@ -286,13 +299,13 @@ void ch585_rf_nkro_tx_init(void)
 
     tmos_start_reload_task(s_rf_task_id, RF_TEST_TX_EVENT, MS1_TO_SYSTEM_TIME(1000));
     TMR0_TimerInit(GetSysClock() / RF_TX_TIMER_HZ);
-    TMR0_ITCfg(ENABLE, TMR0_3_IT_CYC_END);
+    TMR0_ITCfg(DISABLE, TMR0_3_IT_CYC_END);
     PFIC_SetPriority(TMR0_IRQn, 0x80);
-    PFIC_EnableIRQ(TMR0_IRQn);
+    PFIC_DisableIRQ(TMR0_IRQn);
 
     s_started = 1U;
-    s_enabled = 1U;
-    PRINT("half_scan RF 2.4G 1K legacy NKRO TX: %u-byte frame target=%u\r\n",
+    s_enabled = 0U;
+    PRINT("half_scan RF 2.4G 1K legacy NKRO TX ready: %u-byte frame target=%u\r\n",
           RF_FRAME_LEN,
           RF_TX_TARGET_ID);
 }
@@ -319,12 +332,12 @@ void ch585_rf_nkro_tx_poll(void)
     }
 }
 
-void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
+uint8_t ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
 {
     if(s_started == 0U)
     {
         s_enabled = 0U;
-        return;
+        return 0U;
     }
 
     if(enabled != 0U)
@@ -336,15 +349,22 @@ void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
         s_release_gap_ticks = 0U;
         s_release_tx_in_flight = 0U;
         s_release_done = 0U;
-        (void)RFRole_Stop();
-        s_last_switch_status = RFRole_SwitchMode(1U);
-        rf_role_apply_config();
+        s_enabled = 0U;
+        if(rf_enter_basic_mode() == 0U)
+        {
+            rf_clear_report_state();
+            PRINT("half_scan rf enable failed switch=%u status=%08lx\r\n",
+                  (unsigned int)s_last_switch_status,
+                  (unsigned long)RFRole_GetStatus(RF_TX_TARGET_ID));
+            return 0U;
+        }
         s_enabled = 1U;
         TMR0_ClearITFlag(TMR0_3_IT_CYC_END);
         TMR0_ITCfg(ENABLE, TMR0_3_IT_CYC_END);
         PFIC_EnableIRQ(TMR0_IRQn);
         PRINT("half_scan rf enable switch=%u\r\n",
               (unsigned int)s_last_switch_status);
+        return 1U;
     }
     else
     {
@@ -369,6 +389,7 @@ void ch585_rf_nkro_tx_set_enabled(uint8_t enabled)
         (void)RFRole_Stop();
         rf_clear_report_state();
         PRINT("half_scan rf disable\r\n");
+        return 1U;
     }
 }
 

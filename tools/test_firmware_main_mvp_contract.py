@@ -77,7 +77,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
         half_scan_left_target = re.search(
             r"half_scan_left:\n(?P<body>\t@.*)", makefile
         ).group("body")
-        self.assertNotIn("CH585_BLE_PAIRING_EXT_EEPROM=1", half_scan_left_target)
+        self.assertIn("CH585_BLE_PAIRING_EXT_EEPROM=1", half_scan_left_target)
         assert_re(self, makefile, r"half_scan_right:\n\t@.*CH585_RF_TX_ENABLE=0")
         self.assertIn("rf_keyboard_tx is disabled", makefile)
         self.assertNotIn("APP=rf_keyboard_tx", makefile)
@@ -123,6 +123,45 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("MAG_KEY_DEFAULT_RT_PRESS_DELTA_PM  300U", engine_c)
         self.assertIn("MAG_KEY_DEFAULT_RT_RELEASE_DELTA_PM 300U", engine_c)
         self.assertIn("MAG_KEY_DEFAULT_FILTER_SHIFT       0U", engine_c)
+
+    def test_ch585_external_ble_snv_eeprom_failures_are_safe(self):
+        mcu_c = read_text("firmware", "ch585", "bsp", "hal", "MCU.c")
+
+        read_start = mcu_c.index(
+            "uint32_t Lib_Read_Flash(uint32_t addr, uint32_t num, uint32_t *pBuf)"
+        )
+        write_start = mcu_c.index(
+            "uint32_t Lib_Write_Flash(uint32_t addr, uint32_t num, uint32_t *pBuf)",
+            read_start,
+        )
+        callbacks_end = mcu_c.index("#else", write_start)
+        read_callback = mcu_c[read_start:write_start]
+        write_callback = mcu_c[write_start:callbacks_end]
+
+        self.assertIn("ch585_eeprom_i2c_read", read_callback)
+        self.assertIn("== 0U", read_callback)
+        self.assertIn("tmos_memset(pBuf, 0xFF, byte_count);", read_callback)
+        self.assertIn("return (uint32_t)NV_OPER_FAILED;", read_callback)
+        self.assertIn("ch585_eeprom_i2c_write", write_callback)
+        self.assertIn("== 0U", write_callback)
+        self.assertIn("return (uint32_t)NV_OPER_FAILED;", write_callback)
+
+        init_start = mcu_c.index("void CH58x_BLEInit(void)")
+        cfg_zero = mcu_c.index(
+            "tmos_memset(&cfg, 0, sizeof(bleConfig_t));", init_start
+        )
+        probe_start = mcu_c.index("if(ch585_eeprom_i2c_probe() != 0U)", init_start)
+        probe_failure_start = mcu_c.index("    else\n", probe_start)
+        probe_branch_end = mcu_c.index("#else", probe_failure_start)
+        probe_success = mcu_c[probe_start:probe_failure_start]
+        probe_failure = mcu_c[probe_failure_start:probe_branch_end]
+
+        self.assertLess(cfg_zero, probe_start)
+        self.assertIn("cfg.SNVAddr = (uint32_t)BLE_SNV_ADDR;", probe_success)
+        self.assertNotIn("cfg.SNVAddr =", probe_failure)
+        self.assertNotIn("cfg.readFlashCB =", probe_failure)
+        self.assertNotIn("cfg.writeFlashCB =", probe_failure)
+        self.assertIn('ble_snv_eeprom_mark_fault("probe");', probe_failure)
 
     def test_h417_default_build_is_complete_dual_core_product(self):
         h417_makefile = read_text("firmware", "h417", "Makefile")
@@ -221,7 +260,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
             "AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED 43U",
             spi_protocol_h,
         )
-        self.assertIn("AIK_HALF_FRAME_BITS_LEFT      44U", spi_protocol_h)
+        self.assertIn("AIK_HALF_FRAME_BITS_LEFT             47U", spi_protocol_h)
         ch585_half_report = read_text(
             "firmware",
             "ch585",
@@ -314,6 +353,30 @@ class FirmwareMainMvpContract(unittest.TestCase):
             v5f_display.index("v5f_competition_ui_draw();"),
             v5f_display.index("ch32h417_lcd_rgb_backlight_enable(1u);"),
         )
+        backlight_control = read_text(
+            "firmware",
+            "h417",
+            "v5f_rtthread",
+            "drivers",
+            "ltdc_rgb",
+            "src",
+            "ch32h417_lcd_rgb_control.c",
+        )
+        backlight_header = read_text(
+            "firmware",
+            "h417",
+            "v5f_rtthread",
+            "drivers",
+            "ltdc_rgb",
+            "include",
+            "ch32h417_ltdc_rgb.h",
+        )
+        self.assertIn("CH32H417_LCD_BACKLIGHT_PWM_HZ          20000u", backlight_header)
+        self.assertIn("CH32H417_LCD_BACKLIGHT_DUTY_PERCENT       50u", backlight_header)
+        self.assertIn("GPIO_PinSource10, GPIO_AF1", backlight_control)
+        self.assertIn("TIM_OC3Init(TIM1, &output);", backlight_control)
+        self.assertIn("TIM_SetCompare3(TIM1", backlight_control)
+        self.assertIn("(enable != 0u) ? lcd_backlight_on_pulse : 0u", backlight_control)
         self.assertIn('"Welcome back!"', v5f_claude_ui)
         self.assertIn('"RUNNING"', v5f_claude_ui)
         self.assertIn('"DONE"', v5f_claude_ui)
@@ -380,7 +443,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
             "drivers",
             "wch_usbfs_compat_hid",
             "src",
-            "usb_desc.c",
+            "usbfs_desc.c",
         )
         header = read_text(
             "firmware",
@@ -396,7 +459,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
 
         self.assertIn("drivers/wch_usbfs_compat_hid/include", v3f_makefile)
         self.assertIn("drivers/wch_usbfs_compat_hid/src/ch32h417_usbfs_device.c", v3f_makefile)
-        self.assertIn("drivers/wch_usbfs_compat_hid/src/usb_desc.c", v3f_makefile)
+        self.assertIn("drivers/wch_usbfs_compat_hid/src/usbfs_desc.c", v3f_makefile)
 
         for token in (
             "USBFS_IRQHandler",
@@ -421,11 +484,11 @@ class FirmwareMainMvpContract(unittest.TestCase):
         assert_re(self, official_core, r"NVIC_EnableIRQ\(\s*USBFS_IRQn\s*\)")
 
         for token in (
-            "HID_Report_Buffer[64]",
+            "USBFS_HID_Report_Buffer[64]",
             "USBFS_Device_Init(ENABLE)",
             "USBFS_DevEnumStatus",
             "USBFS_EP2_Buf",
-            "USBFSD_UEP_TLEN(DEF_UEP2) = AIK_NKRO_REPORT_BYTES",
+            "USBFSD_UEP_TLEN(DEF_UEP2) = H417_HID_NKRO_PACKET_BYTES",
             "AIK_NKRO_REPORT_BYTES",
         ):
             self.assertIn(token, wrapper)
@@ -441,7 +504,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
             "0x29, 0x73",
             "0x95, 0x70",
             "0x82",
-            "0x10, 0x00",
+            "0x20, 0x00",
             "0x01,                           // bInterval: 1mS",
         ):
             self.assertIn(token, descriptor)
@@ -524,13 +587,13 @@ class FirmwareMainMvpContract(unittest.TestCase):
         self.assertIn("ch32h417_usbhs_hid_nkro_diag_snapshot", header)
         for token in (
             "HID_Report_Buffer[DEF_USBD_HS_PACK_SIZE + 1]",
-            "s_pending_report[AIK_NKRO_REPORT_BYTES]",
+            "s_pending_report[AIK_NKRO_REPORT_BYTES + 1U]",
             "s_pending_full",
             "s_in_flight",
             "USBHS_Device_Init(ENABLE)",
             "USBHS_DevEnumStatus",
             "USBHS_EP2_Tx_Buf",
-            "USBHSD->UEP2_TX_LEN = AIK_NKRO_REPORT_BYTES",
+            "USBHSD->UEP2_TX_LEN = s_pending_len",
             "USBHS_UEP_T_RES_ACK",
             "USBHS_UEP_T_RES_NAK",
             "ch32h417_usbhs_hid_nkro_pending_empty",
@@ -551,7 +614,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
 
         for token in (
             "DEF_USB_PID                  0xFE18",
-            "DEF_USBD_REPORT_DESC_LEN     45",
+            "DEF_USBD_REPORT_DESC_LEN     148",
         ):
             self.assertIn(token, descriptor_h)
 
@@ -566,7 +629,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
             "0x29, 0x73",
             "0x95, 0x70",
             "0x82",
-            "0x10, 0x00",
+            "0x20, 0x00",
             "0x01,                           // bInterval: 125us at high speed",
         ):
             self.assertIn(token, descriptor)
@@ -619,7 +682,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
             "drivers",
             "wch_usbfs_compat_hid",
             "src",
-            "usb_desc.c",
+            "usbfs_desc.c",
         )
         descriptor_h = read_text(
             "firmware",
@@ -628,7 +691,7 @@ class FirmwareMainMvpContract(unittest.TestCase):
             "drivers",
             "wch_usbfs_compat_hid",
             "include",
-            "usb_desc.h",
+            "usbfs_desc.h",
         )
         link_h = read_text("firmware", "h417", "v3f", "applications", "ch585_link.h")
         link_c = read_text("firmware", "h417", "v3f", "applications", "ch585_link.c")

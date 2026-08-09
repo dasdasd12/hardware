@@ -21,6 +21,7 @@
 #define H417_BOARD_HAS_RGB_POWER_ENABLE             1U
 #define H417_BOARD_HAS_CAPS_LOCK_LED                1U
 #define H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH      0U
+#define H417_BOARD_HAS_FN_LIGHT_TOGGLE              1U
 #define H417_BOARD_HAS_LEGACY_FN_LIGHTING           0U
 #else
 #define H417_BOARD_MODEL_NAME                       "OLD"
@@ -28,6 +29,7 @@
 #define H417_BOARD_HAS_RGB_POWER_ENABLE             0U
 #define H417_BOARD_HAS_CAPS_LOCK_LED                0U
 #define H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH      1U
+#define H417_BOARD_HAS_FN_LIGHT_TOGGLE              1U
 #define H417_BOARD_HAS_LEGACY_FN_LIGHTING           1U
 #endif
 

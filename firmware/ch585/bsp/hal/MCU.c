@@ -42,19 +42,99 @@ void Lib_Calibration_LSI(void)
  * EEPROM bytes are directly rewritable, so no erase step is needed. */
 #include "ch585_eeprom_i2c.h"
 
+#if ((BLE_SNV_BLOCK * BLE_SNV_NUM) > CH585_EEPROM_I2C_SIZE)
+#error "BLE SNV window does not fit in the external EEPROM"
+#endif
+
+static uint8_t s_ble_snv_eeprom_ready;
+static uint8_t s_ble_snv_eeprom_fault_reported;
+
+static void ble_snv_eeprom_mark_fault(const char *operation)
+{
+    s_ble_snv_eeprom_ready = 0U;
+    if(s_ble_snv_eeprom_fault_reported == 0U)
+    {
+        s_ble_snv_eeprom_fault_reported = 1U;
+        PRINT("BLE SNV EEPROM %s failed; persistence disabled\n", operation);
+    }
+    (void)operation;
+}
+
+static uint8_t ble_snv_eeprom_range(uint32_t addr,
+                                    uint32_t num,
+                                    uint16_t *offset,
+                                    uint16_t *byte_count)
+{
+    const uint32_t window_size = (uint32_t)BLE_SNV_BLOCK * BLE_SNV_NUM;
+    uint32_t relative;
+    uint32_t bytes;
+
+    if((offset == 0) || (byte_count == 0) ||
+       ((addr & 0x03U) != 0U) || (num > (UINT32_MAX / 4U)) ||
+       (addr < (uint32_t)BLE_SNV_ADDR))
+    {
+        return 0U;
+    }
+
+    relative = addr - (uint32_t)BLE_SNV_ADDR;
+    bytes = num * 4U;
+    if((relative > window_size) || (bytes > (window_size - relative)) ||
+       ((relative + bytes) > CH585_EEPROM_I2C_SIZE) ||
+       (relative > UINT16_MAX) || (bytes > UINT16_MAX))
+    {
+        return 0U;
+    }
+
+    *offset = (uint16_t)relative;
+    *byte_count = (uint16_t)bytes;
+    return 1U;
+}
+
 uint32_t Lib_Read_Flash(uint32_t addr, uint32_t num, uint32_t *pBuf)
 {
-    (void)ch585_eeprom_i2c_read((uint16_t)(addr - BLE_SNV_ADDR),
-                                (uint8_t *)pBuf, (uint16_t)(num * 4));
-    return 0;
+    uint16_t offset;
+    uint16_t byte_count;
+
+    if((pBuf == 0) ||
+       (ble_snv_eeprom_range(addr, num, &offset, &byte_count) == 0U))
+    {
+        ble_snv_eeprom_mark_fault("read range");
+        return (uint32_t)NV_OPER_FAILED;
+    }
+
+    if((s_ble_snv_eeprom_ready == 0U) ||
+       (ch585_eeprom_i2c_read(offset, (uint8_t *)pBuf, byte_count) == 0U))
+    {
+        /* Some WCH SNV paths ignore the callback return value. Present a
+         * deterministic erased block instead of partially read/heap data. */
+        tmos_memset(pBuf, 0xFF, byte_count);
+        ble_snv_eeprom_mark_fault("read");
+        return (uint32_t)NV_OPER_FAILED;
+    }
+    return (uint32_t)SUCCESS;
 }
 
 uint32_t Lib_Write_Flash(uint32_t addr, uint32_t num, uint32_t *pBuf)
 {
-    (void)ch585_eeprom_i2c_write((uint16_t)(addr - BLE_SNV_ADDR),
-                                 (const uint8_t *)pBuf,
-                                 (uint16_t)(num * 4));
-    return 0;
+    uint16_t offset;
+    uint16_t byte_count;
+
+    if((pBuf == 0) ||
+       (ble_snv_eeprom_range(addr, num, &offset, &byte_count) == 0U))
+    {
+        ble_snv_eeprom_mark_fault("write range");
+        return (uint32_t)NV_OPER_FAILED;
+    }
+
+    if((s_ble_snv_eeprom_ready == 0U) ||
+       (ch585_eeprom_i2c_write(offset,
+                               (const uint8_t *)pBuf,
+                               byte_count) == 0U))
+    {
+        ble_snv_eeprom_mark_fault("write");
+        return (uint32_t)NV_OPER_FAILED;
+    }
+    return (uint32_t)SUCCESS;
 }
 #else
 /*******************************************************************************
@@ -158,11 +238,31 @@ void CH58x_BLEInit(void)
         PRINT("SNV config error...\n");
         while(1);
     }
+#if CH585_BLE_PAIRING_EXT_EEPROM
+    ch585_eeprom_i2c_init();
+    if(ch585_eeprom_i2c_probe() != 0U)
+    {
+        s_ble_snv_eeprom_ready = 1U;
+        s_ble_snv_eeprom_fault_reported = 0U;
+        cfg.SNVAddr = (uint32_t)BLE_SNV_ADDR;
+        cfg.SNVBlock = (uint32_t)BLE_SNV_BLOCK;
+        cfg.SNVNum = (uint32_t)BLE_SNV_NUM;
+        cfg.readFlashCB = Lib_Read_Flash;
+        cfg.writeFlashCB = Lib_Write_Flash;
+    }
+    else
+    {
+        /* cfg was zeroed above. A zero SNVAddr is the WCH-supported mode for
+         * running BLE without claiming that bonding data is persistent. */
+        ble_snv_eeprom_mark_fault("probe");
+    }
+#else
     cfg.SNVAddr = (uint32_t)BLE_SNV_ADDR;
     cfg.SNVBlock = (uint32_t)BLE_SNV_BLOCK;
     cfg.SNVNum = (uint32_t)BLE_SNV_NUM;
     cfg.readFlashCB = Lib_Read_Flash;
     cfg.writeFlashCB = Lib_Write_Flash;
+#endif
 #endif
     cfg.ConnectNumber = (PERIPHERAL_MAX_CONNECTION & 3) | (CENTRAL_MAX_CONNECTION << 2);
     cfg.srandCB = SYS_GetSysTickCnt;

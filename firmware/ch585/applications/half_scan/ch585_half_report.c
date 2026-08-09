@@ -6,6 +6,7 @@
 #include "aik_host_shortcut.h"
 #include "aik_profile_format.h"
 #include "aik_profile_shortcut.h"
+#include "ch585_board_config.h"
 
 #define HID_USAGE_A             0x04U
 #define HID_USAGE_B             0x05U
@@ -619,7 +620,10 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
     memset(nkro16, 0, AIK_NKRO_REPORT_BYTES);
     half_report_ensure_tables();
     fn_down = global_key_down(left, right, CH585_FN_LAYER_KEY);
-    mode_key_mask = mode_shortcut_key_mask(left, right);
+    mode_key_mask =
+        (CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH != 0U) ?
+            mode_shortcut_key_mask(left, right) :
+            0U;
 
     /* A mode chord remains consumed until every participating F key is up. */
     s_mode_shortcut_consumed_mask &= mode_key_mask;
@@ -734,7 +738,9 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
         }
 
         if((s_legacy_fn_enabled != 0U) &&
-           (fn_consumed_get(s_fn_consumed, key_id) != 0U))
+           (fn_consumed_get(s_fn_consumed, key_id) != 0U) &&
+           ((CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH != 0U) ||
+            (mode_shortcut_key_bit(key_id) == 0U)))
         {
             continue;
         }
