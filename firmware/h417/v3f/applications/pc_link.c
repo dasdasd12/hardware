@@ -276,7 +276,7 @@ static uint8_t slot_is_usable(uint8_t slot_id)
         return 1U;
     }
     /*
-     * An erased user slot is logically backed by the factory profile until
+     * An erased user slot is logically backed by its built-in preset until
      * the PC writes a real package into it, so report it as usable.
      */
     for(index = 0U; index < AIK_PKG_HEADER_SIZE; index++)

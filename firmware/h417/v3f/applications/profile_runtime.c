@@ -12,6 +12,32 @@ static v3f_profile_runtime_t s_install_candidate;
 static uint8_t s_rearm_pending;
 static uint8_t s_rearm_mask[V3F_GLOBAL_DOWN_BYTES];
 
+#define V3F_PROFILE_USB_REPORT_RATE_DEFAULT_HZ      8000U
+#define V3F_PROFILE_WIRELESS_REPORT_RATE_DEFAULT_HZ 1000U
+
+static uint8_t report_rate_policy_valid(
+    const aik_pkg_report_rate_policy_t *policy)
+{
+    uint8_t usb_valid;
+    uint8_t wireless_valid;
+
+    if(policy == 0)
+    {
+        return 0U;
+    }
+
+    usb_valid = (uint8_t)((policy->usb_report_rate_hz == 1000U) ||
+                          (policy->usb_report_rate_hz == 2000U) ||
+                          (policy->usb_report_rate_hz == 4000U) ||
+                          (policy->usb_report_rate_hz == 8000U));
+    wireless_valid =
+        (uint8_t)((policy->ch585_wireless_report_rate_hz == 125U) ||
+                  (policy->ch585_wireless_report_rate_hz == 250U) ||
+                  (policy->ch585_wireless_report_rate_hz == 500U) ||
+                  (policy->ch585_wireless_report_rate_hz == 1000U));
+    return (uint8_t)(usb_valid && wireless_valid);
+}
+
 /* ------------------------------------------------------------------ */
 /* AKPK package validation                                            */
 /* ------------------------------------------------------------------ */
@@ -275,8 +301,10 @@ int v3f_profile_runtime_prepare_package(
 {
     const aik_pkg_header_t *pkg_hdr = (const aik_pkg_header_t *)pkg;
     const aik_rt_header_t *rt_hdr;
+    const aik_pkg_report_rate_policy_t *report_rate_policy;
     const uint8_t *table;
     uint32_t table_len = 0U;
+    uint32_t report_rate_policy_len = 0U;
     rt_section_t scopes, dispatch, behaviors, triggers, params;
     v3f_profile_runtime_t *next = out_candidate;
     uint16_t base_scope = AIK_RT_INVALID_INDEX;
@@ -301,6 +329,17 @@ int v3f_profile_runtime_prepare_package(
     if((table == 0) || (table_len < AIK_RT_HEADER_SIZE))
     {
         return V3F_PROFILE_ERR_TABLE;
+    }
+
+    report_rate_policy = (const aik_pkg_report_rate_policy_t *)
+        package_find_section(pkg, AIK_PKG_SECTION_REPORT_RATE_POLICY,
+                             &report_rate_policy_len);
+    if((report_rate_policy != 0) &&
+       ((report_rate_policy_len !=
+         (uint32_t)sizeof(aik_pkg_report_rate_policy_t)) ||
+        (report_rate_policy_valid(report_rate_policy) == 0U)))
+    {
+        return V3F_PROFILE_ERR_PACKAGE;
     }
 
     rt_hdr = (const aik_rt_header_t *)table;
@@ -360,6 +399,15 @@ int v3f_profile_runtime_prepare_package(
     next->revision = pkg_hdr->revision;
     next->generation16 = (uint16_t)(pkg_hdr->revision & 0xFFFFU);
     next->profile_id16 = (uint16_t)(pkg_hdr->profile_id_hash & 0xFFFFU);
+    next->usb_report_rate_hz = V3F_PROFILE_USB_REPORT_RATE_DEFAULT_HZ;
+    next->wireless_report_rate_hz =
+        V3F_PROFILE_WIRELESS_REPORT_RATE_DEFAULT_HZ;
+    if(report_rate_policy != 0)
+    {
+        next->usb_report_rate_hz = report_rate_policy->usb_report_rate_hz;
+        next->wireless_report_rate_hz =
+            report_rate_policy->ch585_wireless_report_rate_hz;
+    }
 
     for(i = 0U; i < AIK_KEY_COUNT_TOTAL; i++)
     {
@@ -561,12 +609,100 @@ static uint8_t user_slot_is_erased(const uint8_t *pkg)
     return 1U;
 }
 
+static uint8_t builtin_profile2_key_kept(uint8_t key_id)
+{
+    /* F12..F6, F5..F1/Esc, and the complete number row. */
+    if((key_id <= 13U) ||
+       ((key_id >= 41U) && (key_id <= 53U)))
+    {
+        return 1U;
+    }
+
+    /* I/O/P/[, Enter, quote, Q/W/E/R, Tab, Caps, and both thumb keys. */
+    if(((key_id >= 16U) && (key_id <= 19U)) ||
+       (key_id == 22U) || (key_id == 23U) ||
+       ((key_id >= 56U) && (key_id <= 60U)) ||
+       (key_id == 66U) || (key_id == 73U) || (key_id == 40U))
+    {
+        return 1U;
+    }
+    return 0U;
+}
+
+static void apply_empty_slot_builtin(uint8_t slot_id,
+                                     v3f_profile_runtime_t *runtime)
+{
+    uint8_t key_id;
+    static const uint16_t builtin_profile_id16[
+        AIK_PROFILE_USER_SLOT_COUNT] =
+    {
+        0xDC75U, /* low16(CRC32C("builtin_profile_1")) */
+        0x2F81U, /* low16(CRC32C("builtin_profile_2")) */
+        0xAC82U  /* low16(CRC32C("builtin_profile_3")) */
+    };
+
+    if((runtime == 0) || (slot_id < AIK_PROFILE_USER_SLOT_FIRST) ||
+       (slot_id >= AIK_PROFILE_SLOT_COUNT_TOTAL))
+    {
+        return;
+    }
+
+    runtime->profile_id16 = builtin_profile_id16[
+        slot_id - AIK_PROFILE_USER_SLOT_FIRST];
+    runtime->revision = 1U;
+    runtime->generation16 = 1U;
+
+    if(slot_id == 1U)
+    {
+        /* Profile 1 is the current/default map at an effective 4K USB rate. */
+        runtime->usb_report_rate_hz = 4000U;
+        return;
+    }
+
+    runtime->has_fn_overlay = 0U;
+    runtime->fn_hold_key = 0xFFU;
+    memset(runtime->fn_keys, 0, sizeof(runtime->fn_keys));
+
+    if(slot_id == 2U)
+    {
+        for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
+        {
+            if(builtin_profile2_key_kept(key_id) == 0U)
+            {
+                runtime->base_keys[key_id].usage = 0U;
+                runtime->base_keys[key_id].modifier_mask = 0U;
+            }
+
+            runtime->triggers[key_id].mode = AIK_RT_MODE_RAPID_TRIGGER;
+            runtime->triggers[key_id].press_pm = 200U;
+            runtime->triggers[key_id].rt_press_delta_pm = 200U;
+            runtime->triggers[key_id].rt_release_delta_pm = 200U;
+        }
+
+        /* The left and right space keys become their matching Shift keys. */
+        runtime->base_keys[73U].usage = 0U;
+        runtime->base_keys[73U].modifier_mask = 0x02U;
+        runtime->base_keys[40U].usage = 0U;
+        runtime->base_keys[40U].modifier_mask = 0x20U;
+        runtime->usb_report_rate_hz = 8000U;
+        return;
+    }
+
+    /* Profile 3 intentionally emits no key or local-control mapping. Its
+     * trigger configuration remains available for later PC edits. */
+    memset(runtime->base_keys, 0, sizeof(runtime->base_keys));
+    memset(runtime->locals, 0, sizeof(runtime->locals));
+    runtime->local_count = 0U;
+}
+
 int v3f_profile_runtime_prepare_slot(
     uint8_t slot_id,
     v3f_profile_runtime_t *out_candidate)
 {
     const uint8_t *pkg;
     uint32_t pkg_limit;
+    uint8_t use_empty_slot_builtin = 0U;
+    int status;
 
     if((out_candidate == 0) ||
        (slot_id >= AIK_PROFILE_SLOT_COUNT_TOTAL))
@@ -584,16 +720,17 @@ int v3f_profile_runtime_prepare_slot(
         pkg = v3f_profile_store_slot_ptr(slot_id);
         if(pkg == 0)
         {
-            /* An empty/deleted user slot is a named copy of Default.
-             * Keep the requested slot id so offline Fn switching remains
-             * predictable before the PC has uploaded every slot. */
+            /* Empty/deleted slots use their built-in defaults while keeping
+             * the requested logical id. A stored AKPK always wins. */
             pkg = g_v3f_factory_profile_image;
             pkg_limit = g_v3f_factory_profile_image_size;
+            use_empty_slot_builtin = 1U;
         }
         else if(user_slot_is_erased(pkg) != 0U)
         {
             pkg = g_v3f_factory_profile_image;
             pkg_limit = g_v3f_factory_profile_image_size;
+            use_empty_slot_builtin = 1U;
         }
         else
         {
@@ -601,8 +738,13 @@ int v3f_profile_runtime_prepare_slot(
         }
     }
 
-    return v3f_profile_runtime_prepare_package(pkg, pkg_limit, slot_id,
-                                               out_candidate);
+    status = v3f_profile_runtime_prepare_package(pkg, pkg_limit, slot_id,
+                                                 out_candidate);
+    if((status == V3F_PROFILE_OK) && (use_empty_slot_builtin != 0U))
+    {
+        apply_empty_slot_builtin(slot_id, out_candidate);
+    }
+    return status;
 }
 
 void v3f_profile_runtime_commit_candidate(

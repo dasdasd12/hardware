@@ -78,6 +78,111 @@ def test_h417_profile_shortcut_switches_after_current_report():
     assert report < usb_submit < activate < pc_poll
 
 
+def test_profile_shortcut_keys_are_split_by_board_model():
+    main_c = _read("firmware", "h417", "v3f", "applications", "main.c")
+    ch585_report_c = _read(
+        "firmware", "ch585", "applications", "half_scan",
+        "ch585_half_report.c",
+    )
+
+    h417_start = main_c.index("#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH")
+    h417_end = main_c.index("#if H417_BOARD_HAS_FN_LIGHT_TOGGLE", h417_start)
+    h417_keys = main_c[h417_start:h417_end]
+    h417_old, h417_new = h417_keys.split("#else", 1)
+
+    assert "#define V3F_PROFILE_KEY_0   10U" in h417_old
+    assert "#define V3F_PROFILE_KEY_1   52U" in h417_old
+    assert "#define V3F_PROFILE_KEY_2   51U" in h417_old
+    assert "#define V3F_PROFILE_KEY_3   50U" in h417_old
+    assert "V3F_PROFILE_KEY_0" not in h417_new
+    assert "#define V3F_PROFILE_KEY_1   45U" in h417_new
+    assert "#define V3F_PROFILE_KEY_2   44U" in h417_new
+    assert "#define V3F_PROFILE_KEY_3   43U" in h417_new
+
+    ch585_start = ch585_report_c.index(
+        "#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH",
+    )
+    ch585_end = ch585_report_c.index(
+        "#define CH585_GLOBAL_DOWN_BYTES", ch585_start,
+    )
+    ch585_keys = ch585_report_c[ch585_start:ch585_end]
+    ch585_old, ch585_new = ch585_keys.split("#else", 1)
+
+    assert "#define CH585_PROFILE_SLOT0_KEY  10U" in ch585_old
+    assert "#define CH585_PROFILE_SLOT1_KEY  52U" in ch585_old
+    assert "#define CH585_PROFILE_SLOT2_KEY  51U" in ch585_old
+    assert "#define CH585_PROFILE_SLOT3_KEY  50U" in ch585_old
+    assert "CH585_PROFILE_SLOT0_KEY" not in ch585_new
+    assert "CH585_PROFILE_SLOT1_KEY  CH585_MODE_KEY_F1" in ch585_new
+    assert "CH585_PROFILE_SLOT2_KEY  CH585_MODE_KEY_F2" in ch585_new
+    assert "CH585_PROFILE_SLOT3_KEY  CH585_MODE_KEY_F3" in ch585_new
+
+    assert "#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH\n    if(v3f_global_key_is_down(keys, V3F_PROFILE_KEY_0)" in main_c
+    assert "#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH\n        case CH585_PROFILE_SLOT0_KEY:" in ch585_report_c
+
+
+def test_builtin_profiles_and_usb_report_rate_are_runtime_features():
+    runtime_c = _read(
+        "firmware", "h417", "v3f", "applications", "profile_runtime.c"
+    )
+    runtime_h = _read(
+        "firmware", "h417", "v3f", "applications", "profile_runtime.h"
+    )
+    main_c = _read("firmware", "h417", "v3f", "applications", "main.c")
+
+    assert "uint16_t usb_report_rate_hz;" in runtime_h
+    assert "uint16_t wireless_report_rate_hz;" in runtime_h
+    assert "runtime->usb_report_rate_hz = 4000U;" in runtime_c
+    assert "runtime->usb_report_rate_hz = 8000U;" in runtime_c
+    assert "runtime->base_keys[73U].modifier_mask = 0x02U;" in runtime_c
+    assert "runtime->base_keys[40U].modifier_mask = 0x20U;" in runtime_c
+    assert "runtime->triggers[key_id].press_pm = 200U;" in runtime_c
+    assert "runtime->triggers[key_id].rt_press_delta_pm = 200U;" in runtime_c
+    assert "runtime->triggers[key_id].rt_release_delta_pm = 200U;" in runtime_c
+    assert "memset(runtime->base_keys, 0, sizeof(runtime->base_keys));" in runtime_c
+    assert "runtime->local_count = 0U;" in runtime_c
+
+    due_start = main_c.index("static uint16_t v3f_usb_nkro_interval_ticks")
+    due_end = main_c.index("int main(void)", due_start)
+    due = main_c[due_start:due_end]
+    assert "v3f_profile_runtime_get()->usb_report_rate_hz" in due
+    assert "v3f_usb_nkro_interval_ticks()" in due
+    assert "host_seq - last_submit_tick" in due
+    assert "submitted_once == 0U" in due
+
+    submit = main_c.index("v3f_usb_hid_nkro_submit(nkro16)")
+    guard = main_c.rfind(
+        "else if(usb_nkro_due_pending != 0U)", 0, submit
+    )
+    assert guard >= 0
+    assert "if(v3f_usb_nkro_report_due(host_seq," in main_c
+    assert "usb_nkro_due_pending = 1U;" in main_c
+    assert main_c.index(
+        "if(v3f_usb_hid_nkro_submit(nkro16) != 0U)", guard
+    ) < main_c.index("usb_nkro_due_pending = 0U;", guard)
+    assert "last_usb_nkro_submit_tick = host_seq;" in main_c
+    # Consumer and wheel branches stay ahead of the rate-limited ordinary
+    # keyboard report, so changing Profile rate does not throttle them.
+    consumer_submit = main_c.rfind(
+        "v3f_usb_hid_nkro_submit_consumer", 0, submit
+    )
+    wheel_submit = main_c.rfind(
+        "v3f_usb_hid_nkro_submit_mouse_wheel", 0, submit
+    )
+    assert 0 <= consumer_submit < submit
+    assert 0 <= wheel_submit < submit
+
+    # Supported rates are exact divisors of the 8K scheduler. A successful
+    # 4K report starts a two-tick minimum interval; 8K uses one tick.
+    assert (8000 + 4000 - 1) // 4000 == 2
+    assert (8000 + 8000 - 1) // 8000 == 1
+
+    # The production loop retains its previously validated delay mechanism;
+    # profile rate selection changes report cadence without introducing a
+    # new blocking clock source into the scan path.
+    assert "v3f_board_delay_us(V3F_USB_REPORT_INTERVAL_US);" in main_c
+
+
 def test_new_board_switch_controls_wireless_overlay_only():
     makefile = _read("firmware", "h417", "v3f", "Makefile")
     main_c = _read("firmware", "h417", "v3f", "applications", "main.c")

@@ -66,6 +66,13 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #error "V3F_USB_REPORT_INTERVAL_US must be non-zero"
 #endif
 
+#if V3F_USB_REPORT_INTERVAL_US > 1000000U
+#error "V3F_USB_REPORT_INTERVAL_US must not exceed one second"
+#endif
+
+#define V3F_USB_SCHEDULER_RATE_HZ \
+    (1000000UL / V3F_USB_REPORT_INTERVAL_US)
+
 #define V3F_LINK_STALE_US 5000U
 #define V3F_LINK_STALE_TICKS \
     ((uint8_t)((V3F_LINK_STALE_US + V3F_USB_REPORT_INTERVAL_US - 1U) / \
@@ -127,6 +134,17 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #define V3F_MODE_MASK_F1   0x01U
 #define V3F_MODE_MASK_F2   0x02U
 #define V3F_MODE_MASK_F3   0x04U
+#define V3F_PROFILE_KEY_0   10U
+#define V3F_PROFILE_KEY_1   52U
+#define V3F_PROFILE_KEY_2   51U
+#define V3F_PROFILE_KEY_3   50U
+#else
+/* NEW dedicates Fn+F1/F2/F3 to user Profiles 1/2/3.  The physical
+ * selector owns wireless mode selection, so no Factory-slot chord is
+ * needed and the legacy Fn+digit shortcuts do not remain reserved. */
+#define V3F_PROFILE_KEY_1   45U
+#define V3F_PROFILE_KEY_2   44U
+#define V3F_PROFILE_KEY_3   43U
 #endif
 #if H417_BOARD_HAS_FN_LIGHT_TOGGLE
 #define V3F_SWITCH_KEY_F5  41U
@@ -134,11 +152,6 @@ typedef ch32h417_usbfs_hid_nkro_diag_t v3f_usb_hid_nkro_diag_t;
 #if H417_BOARD_HAS_LEGACY_FN_LIGHTING
 #define V3F_SWITCH_KEY_F6  6U
 #endif
-#define V3F_PROFILE_KEY_0   10U
-#define V3F_PROFILE_KEY_1   52U
-#define V3F_PROFILE_KEY_2   51U
-#define V3F_PROFILE_KEY_3   50U
-
 #if H417_BOARD_HAS_FN_LIGHT_TOGGLE
 #ifndef V3F_LIGHTING_COMBO_PRESS_FRAMES
 #define V3F_LIGHTING_COMBO_PRESS_FRAMES 4U
@@ -748,10 +761,12 @@ static uint8_t v3f_profile_shortcut_slot_mask(
 {
     uint8_t mask = 0U;
 
+#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
     if(v3f_global_key_is_down(keys, V3F_PROFILE_KEY_0) != 0U)
     {
         mask |= (uint8_t)(1U << AIK_PROFILE_SLOT_FACTORY);
     }
+#endif
     if(v3f_global_key_is_down(keys, V3F_PROFILE_KEY_1) != 0U)
     {
         mask |= (uint8_t)(1U << 1U);
@@ -771,7 +786,9 @@ static void v3f_profile_shortcut_consume_keys(
     v3f_global_key_state_t *keys)
 {
     v3f_global_key_clear_one(keys, V3F_FN_LAYER_KEY);
+#if H417_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
     v3f_global_key_clear_one(keys, V3F_PROFILE_KEY_0);
+#endif
     v3f_global_key_clear_one(keys, V3F_PROFILE_KEY_1);
     v3f_global_key_clear_one(keys, V3F_PROFILE_KEY_2);
     v3f_global_key_clear_one(keys, V3F_PROFILE_KEY_3);
@@ -1155,6 +1172,41 @@ static void v3f_cdc_debug_poll(uint16_t tick,
 #endif
 }
 
+static uint16_t v3f_usb_nkro_interval_ticks(void)
+{
+    uint32_t requested_rate_hz = V3F_USB_SCHEDULER_RATE_HZ;
+
+    if(v3f_profile_runtime_valid() != 0U)
+    {
+        requested_rate_hz =
+            v3f_profile_runtime_get()->usb_report_rate_hz;
+    }
+    if((requested_rate_hz == 0U) ||
+       (requested_rate_hz >= V3F_USB_SCHEDULER_RATE_HZ))
+    {
+        return 1U;
+    }
+
+    return (uint16_t)((V3F_USB_SCHEDULER_RATE_HZ + requested_rate_hz - 1U) /
+                      requested_rate_hz);
+}
+
+static uint8_t v3f_usb_nkro_report_due(uint16_t host_seq,
+                                       uint16_t last_submit_tick,
+                                       uint8_t submitted_once)
+{
+    if(submitted_once == 0U)
+    {
+        return 1U;
+    }
+
+    /* Keep the 8K scan/SPI loop intact and schedule only ordinary NKRO
+     * submissions. Base the next deadline on the last successful keyboard
+     * report so a delayed report is not followed by a catch-up burst. */
+    return ((uint16_t)(host_seq - last_submit_tick) >=
+            v3f_usb_nkro_interval_ticks()) ? 1U : 0U;
+}
+
 int main(void)
 {
     v3f_half_cache_t left;
@@ -1176,7 +1228,10 @@ int main(void)
     uint16_t wireless_consumer_usage_pending = AIK_CONSUMER_USAGE_NONE;
     uint16_t last_wireless_right_consumer_usage = AIK_CONSUMER_USAGE_NONE;
     uint8_t usb_nkro_release_pending = 0U;
+    uint8_t usb_nkro_due_pending = 0U;
+    uint8_t usb_nkro_submitted_once = 0U;
     uint8_t usb_consumer_release_pending = 0U;
+    uint16_t last_usb_nkro_submit_tick = 0U;
     aik_host_shortcut_state_t host_shortcut;
     aik_profile_shortcut_state_t profile_shortcut;
     aik_approval_control_state_t approval_control;
@@ -1541,9 +1596,24 @@ int main(void)
            (v3f_output_mode_usb_enabled(output_mode) == 0U))
         {
             usb_nkro_release_pending = 1U;
+            usb_nkro_due_pending = 0U;
+            usb_nkro_submitted_once = 0U;
             usb_consumer_release_pending = 1U;
             usb_consumer_delta_pending = 0;
             usb_mouse_wheel_pending = 0;
+        }
+        if(v3f_output_mode_usb_enabled(output_mode) != 0U)
+        {
+            if(v3f_usb_nkro_report_due(host_seq,
+                                       last_usb_nkro_submit_tick,
+                                       usb_nkro_submitted_once) != 0U)
+            {
+                usb_nkro_due_pending = 1U;
+            }
+        }
+        else
+        {
+            usb_nkro_due_pending = 0U;
         }
         if(v3f_usb_hid_nkro_pending_empty() != 0U)
         {
@@ -1556,6 +1626,9 @@ int main(void)
                 if(v3f_usb_hid_nkro_submit(zero_nkro16) != 0U)
                 {
                     usb_nkro_release_pending = 0U;
+                    usb_nkro_due_pending = 0U;
+                    usb_nkro_submitted_once = 1U;
+                    last_usb_nkro_submit_tick = host_seq;
                 }
             }
             else if(usb_consumer_release_pending != 0U)
@@ -1613,9 +1686,14 @@ int main(void)
                         usb_mouse_wheel_pending++;
                     }
                 }
-                else
+                else if(usb_nkro_due_pending != 0U)
                 {
-                    (void)v3f_usb_hid_nkro_submit(nkro16);
+                    if(v3f_usb_hid_nkro_submit(nkro16) != 0U)
+                    {
+                        usb_nkro_due_pending = 0U;
+                        usb_nkro_submitted_once = 1U;
+                        last_usb_nkro_submit_tick = host_seq;
+                    }
                 }
             }
         }

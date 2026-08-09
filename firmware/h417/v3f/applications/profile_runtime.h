@@ -6,9 +6,10 @@
  * AKRT runtime table into RAM structures the report path reads, and
  * derives the per-half AKHR patches pushed to the CH585s.
  *
- * Load order at boot: active logical slot (an erased user slot resolves
- * to the embedded factory AKPK image) -> factory slot -> (caller falls
- * back to the legacy default_profile table when nothing validates).
+ * Load order at boot: active logical slot (an erased user slot derives
+ * its built-in preset from the embedded factory AKPK image) -> factory
+ * slot -> (caller falls back to the legacy default_profile table when
+ * nothing validates).
  */
 
 #include <stdint.h>
@@ -42,6 +43,8 @@ typedef struct
     uint8_t fn_hold_key;        /* 0xFF when no overlay hold key */
     uint16_t profile_id16;
     uint16_t generation16;
+    uint16_t usb_report_rate_hz;
+    uint16_t wireless_report_rate_hz;
     uint32_t revision;
     aik_hp_key_output_t base_keys[AIK_KEY_COUNT_TOTAL];
     aik_hp_key_output_t fn_keys[AIK_KEY_COUNT_TOTAL];
@@ -65,10 +68,10 @@ int v3f_profile_runtime_prepare_package(
     v3f_profile_runtime_t *out_candidate);
 
 /* Prepare a runtime by logical slot. Factory always uses the embedded
- * image. An erased user slot also uses that image while retaining the
- * requested user slot id, so Profiles 1..3 start as editable copies of
- * Default without writing flash during boot. Non-empty invalid slots
- * remain errors rather than being silently replaced. */
+ * image. An erased user slot derives its built-in Profile 1/2/3 preset
+ * from that image without writing flash during boot; a stored package
+ * always overrides the preset. Non-empty invalid slots remain errors
+ * rather than being silently replaced. */
 int v3f_profile_runtime_prepare_slot(
     uint8_t slot_id,
     v3f_profile_runtime_t *out_candidate);

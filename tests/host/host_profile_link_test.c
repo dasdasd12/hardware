@@ -586,16 +586,12 @@ static void test_wireless_mode_shortcut_board_behavior(void)
     ch585_half_report_reset_factory();
     ch585_half_report_build_nkro16(&left, &right, nkro);
 
-    /* NEW uses the physical switch, so the factory Fn+F3 chord must retain
-     * its ordinary F3 output. OLD reserves the same chord for BLE mode. */
+    /* NEW reserves Fn+F3 for Profile 3; OLD reserves it for BLE mode.
+     * Neither board may leak the chord as an ordinary F3 press. */
     set_half_global_key(&left, &right, 38U);
     set_half_global_key(&left, &right, 43U);
     ch585_half_report_build_nkro16(&left, &right, nkro);
-#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
     CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
-#else
-    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
-#endif
 
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
@@ -607,26 +603,17 @@ static void test_wireless_mode_shortcut_board_behavior(void)
     ch585_half_report_set_key_outputs(base_pairs);
     ch585_half_report_clear_fn_overlay();
 
-    /* A configurable Fn mapping follows the same board-specific policy. */
+    /* Reserved board chords win over configurable base mappings. */
     set_half_global_key(&left, &right, 38U);
     set_half_global_key(&left, &right, 43U);
     ch585_half_report_build_nkro16(&left, &right, nkro);
-#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
     CHECK(nkro_usage_set(nkro, 0x04U) == 0U);
     CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
-#else
-    CHECK(nkro_usage_set(nkro, 0x04U) == 1U);
-    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
-#endif
 
-    /* Releasing Fn first keeps OLD consumed; NEW keeps F3 visible. */
+    /* Releasing Fn first keeps either reserved chord consumed. */
     memset(&right, 0, sizeof(right));
     ch585_half_report_build_nkro16(&left, &right, nkro);
-#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
     CHECK(nkro_usage_set(nkro, 0x3CU) == 0U);
-#else
-    CHECK(nkro_usage_set(nkro, 0x3CU) == 1U);
-#endif
 
     memset(&left, 0, sizeof(left));
     ch585_half_report_build_nkro16(&left, &right, nkro);
@@ -642,6 +629,13 @@ static void test_wireless_profile_shortcut_consumption(void)
     uint8_t base_pairs[AIK_KEY_COUNT_TOTAL * 2U];
     uint8_t fn_pairs[AIK_KEY_COUNT_TOTAL * 2U];
     uint8_t nkro[AIK_NKRO_REPORT_BYTES];
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
+    const uint8_t profile1_key = 52U;
+    const uint8_t profile2_key = 51U;
+#else
+    const uint8_t profile1_key = 45U;
+    const uint8_t profile2_key = 44U;
+#endif
 
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
@@ -649,14 +643,14 @@ static void test_wireless_profile_shortcut_consumption(void)
 
     memset(base_pairs, 0, sizeof(base_pairs));
     base_pairs[38U * 2U] = 0x04U; /* Fn physical key -> A */
-    base_pairs[52U * 2U] = 0x05U; /* profile 1 key -> B */
-    base_pairs[51U * 2U] = 0x06U; /* profile 2 key -> C */
+    base_pairs[profile1_key * 2U] = 0x05U; /* Profile 1 key -> B */
+    base_pairs[profile2_key * 2U] = 0x06U; /* Profile 2 key -> C */
     ch585_half_report_set_key_outputs(base_pairs);
     ch585_half_report_clear_fn_overlay();
 
     /* A reserved Fn+slot chord wins over configurable base outputs. */
     set_half_global_key(&left, &right, 38U);
-    set_half_global_key(&left, &right, 52U);
+    set_half_global_key(&left, &right, profile1_key);
     ch585_half_report_build_nkro16(&left, &right, nkro);
     CHECK(nkro_usage_set(nkro, 0x04U) == 0U);
     CHECK(nkro_usage_set(nkro, 0x05U) == 0U);
@@ -670,14 +664,14 @@ static void test_wireless_profile_shortcut_consumption(void)
     /* Fn has now been released. A profile table swap while the slot key
      * remains held must not reset the shortcut state or expose the new
      * mapping. */
-    base_pairs[52U * 2U] = 0x07U; /* D */
+    base_pairs[profile1_key * 2U] = 0x07U; /* D */
     ch585_half_report_set_key_outputs(base_pairs);
     ch585_half_report_build_nkro16(&left, &right, nkro);
     CHECK(nkro_usage_set(nkro, 0x07U) == 0U);
 
     memset(&left, 0, sizeof(left));
     ch585_half_report_build_nkro16(&left, &right, nkro);
-    set_half_global_key(&left, &right, 52U);
+    set_half_global_key(&left, &right, profile1_key);
     ch585_half_report_build_nkro16(&left, &right, nkro);
     CHECK(nkro_usage_set(nkro, 0x07U) == 1U);
 
@@ -686,22 +680,22 @@ static void test_wireless_profile_shortcut_consumption(void)
     memset(&right, 0, sizeof(right));
     ch585_half_report_build_nkro16(&left, &right, nkro);
     memset(fn_pairs, 0, sizeof(fn_pairs));
-    fn_pairs[52U * 2U] = 0x08U; /* E */
+    fn_pairs[profile1_key * 2U] = 0x08U; /* E */
     ch585_half_report_set_fn_overlay(38U, fn_pairs);
     set_half_global_key(&left, &right, 38U);
-    set_half_global_key(&left, &right, 52U);
+    set_half_global_key(&left, &right, profile1_key);
     ch585_half_report_build_nkro16(&left, &right, nkro);
     CHECK(nkro_usage_set(nkro, 0x04U) == 0U);
     CHECK(nkro_usage_set(nkro, 0x07U) == 0U);
     CHECK(nkro_usage_set(nkro, 0x08U) == 0U);
 
-    /* Ambiguous multi-slot chords switch nowhere and leak no digit. */
+    /* Ambiguous multi-slot chords switch nowhere and leak no slot key. */
     memset(&left, 0, sizeof(left));
     memset(&right, 0, sizeof(right));
     ch585_half_report_build_nkro16(&left, &right, nkro);
     set_half_global_key(&left, &right, 38U);
-    set_half_global_key(&left, &right, 52U);
-    set_half_global_key(&left, &right, 51U);
+    set_half_global_key(&left, &right, profile1_key);
+    set_half_global_key(&left, &right, profile2_key);
     ch585_half_report_build_nkro16(&left, &right, nkro);
     CHECK(nkro_usage_set(nkro, 0x07U) == 0U);
     CHECK(nkro_usage_set(nkro, 0x06U) == 0U);
@@ -718,7 +712,7 @@ static void test_wireless_profile_shortcut_consumption(void)
     /* A newly recognized profile chord has priority over the F24 chord.
      * The center itself is not part of the profile chord and remains Enter. */
     set_half_global_key(&left, &right, 38U);
-    set_half_global_key(&left, &right, 52U);
+    set_half_global_key(&left, &right, profile1_key);
     aik_spi_half_set_bit(&left, AIK_LEFT_LOCAL_BIT_SCR_CENTER_QUALIFIED);
     aik_spi_half_set_bit(&left, AIK_LEFT_LOCAL_BIT_SCR_CENTER);
     ch585_half_report_build_nkro16(&left, &right, nkro);

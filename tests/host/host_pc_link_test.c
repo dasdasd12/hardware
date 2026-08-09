@@ -599,7 +599,7 @@ int main(void)
         CHECK(v3f_profile_runtime_rearm_take() == 1U);
     }
 
-    /* An erased user slot starts as a logical copy of Default and can be
+    /* An erased user slot starts from its built-in preset and can be
      * selected without first writing a package into flash. */
     send("AK ACTIVATE 2");
     CHECK(reply_starts("OK ACTIVATE 2"));

@@ -112,6 +112,7 @@ static inline uint16_t aik_profile_string_hash16(const char *s)
 #define AIK_PKG_SECTION_RESOURCE_ESTIMATE_JSON         0x0003U
 #define AIK_PKG_SECTION_FEATURE_FLAGS_JSON             0x0004U
 #define AIK_PKG_SECTION_RUNTIME_TABLE_CACHE_META_JSON  0x0005U
+#define AIK_PKG_SECTION_REPORT_RATE_POLICY             0x0006U
 
 #define AIK_PKG_ENCODING_CANONICAL_JSON       0x01U
 #define AIK_PKG_ENCODING_RUNTIME_TABLE_BINARY 0x02U
@@ -144,10 +145,21 @@ typedef struct AIK_PROFILE_PACKED
     uint32_t section_crc32c;         /* CRC-32C over payload only */
 } aik_pkg_section_entry_t;
 
+/* Optional AKPK v1 policy payload. Packages produced before this section was
+ * introduced remain valid; firmware supplies its compatibility defaults when
+ * it is absent. */
+typedef struct AIK_PROFILE_PACKED
+{
+    uint16_t usb_report_rate_hz;
+    uint16_t ch585_wireless_report_rate_hz;
+} aik_pkg_report_rate_policy_t;
+
 typedef char aik_pkg_header_size_check[
     (sizeof(aik_pkg_header_t) == AIK_PKG_HEADER_SIZE) ? 1 : -1];
 typedef char aik_pkg_section_entry_size_check[
     (sizeof(aik_pkg_section_entry_t) == 16U) ? 1 : -1];
+typedef char aik_pkg_report_rate_policy_size_check[
+    (sizeof(aik_pkg_report_rate_policy_t) == 4U) ? 1 : -1];
 
 /* ------------------------------------------------------------------ */
 /* RuntimeTableBinary v1 ("AKRT")                                     */

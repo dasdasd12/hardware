@@ -264,31 +264,158 @@ static void test_corrupt_package_rejected(void)
     CHECK(v3f_profile_package_validate(bad, size, 0) != V3F_PROFILE_OK);
 }
 
+static uint8_t profile2_key_kept(uint8_t key_id)
+{
+    if((key_id <= 13U) ||
+       ((key_id >= 41U) && (key_id <= 53U)))
+    {
+        return 1U;
+    }
+    if(((key_id >= 16U) && (key_id <= 19U)) ||
+       (key_id == 22U) || (key_id == 23U) ||
+       ((key_id >= 56U) && (key_id <= 60U)) ||
+       (key_id == 66U) || (key_id == 73U) || (key_id == 40U))
+    {
+        return 1U;
+    }
+    return 0U;
+}
+
 static void test_erased_user_slot_defaults(void)
 {
     v3f_profile_runtime_t factory;
-    v3f_profile_runtime_t user;
+    v3f_profile_runtime_t profile1;
+    v3f_profile_runtime_t profile2;
+    v3f_profile_runtime_t profile3;
+    v3f_profile_runtime_t stored;
     uint8_t active;
+    uint8_t key_id;
+    uint8_t mapped_count = 0U;
 
     memset(s_user_slot, 0xFF, sizeof(s_user_slot));
     CHECK(v3f_profile_runtime_prepare_slot(AIK_PROFILE_SLOT_FACTORY,
                                            &factory) ==
           V3F_PROFILE_OK);
-    CHECK(v3f_profile_runtime_prepare_slot(2U, &user) == V3F_PROFILE_OK);
-    CHECK(user.active_slot == 2U);
+    CHECK(factory.usb_report_rate_hz == 8000U);
+    CHECK(factory.wireless_report_rate_hz == 1000U);
 
-    factory.active_slot = 2U;
-    CHECK(memcmp(&factory, &user, sizeof(factory)) == 0);
+    CHECK(v3f_profile_runtime_prepare_slot(1U, &profile1) == V3F_PROFILE_OK);
+    CHECK(profile1.active_slot == 1U);
+    CHECK(profile1.profile_id16 == 0xDC75U);
+    CHECK(profile1.profile_id16 ==
+          aik_profile_string_hash16("builtin_profile_1"));
+    CHECK(profile1.generation16 == 1U);
+    CHECK(profile1.revision == 1U);
+    CHECK(profile1.usb_report_rate_hz == 4000U);
+    CHECK(profile1.wireless_report_rate_hz == 1000U);
+    CHECK(memcmp(profile1.base_keys, factory.base_keys,
+                 sizeof(factory.base_keys)) == 0);
+    CHECK(memcmp(profile1.triggers, factory.triggers,
+                 sizeof(factory.triggers)) == 0);
+    CHECK(memcmp(profile1.locals, factory.locals,
+                 sizeof(factory.locals)) == 0);
+
+    CHECK(v3f_profile_runtime_prepare_slot(2U, &profile2) == V3F_PROFILE_OK);
+    CHECK(profile2.active_slot == 2U);
+    CHECK(profile2.profile_id16 == 0x2F81U);
+    CHECK(profile2.profile_id16 ==
+          aik_profile_string_hash16("builtin_profile_2"));
+    CHECK(profile2.generation16 == 1U);
+    CHECK(profile2.revision == 1U);
+    CHECK(profile2.usb_report_rate_hz == 8000U);
+    CHECK(profile2.wireless_report_rate_hz == 1000U);
+    CHECK(profile2.has_fn_overlay == 0U);
+    CHECK(profile2.fn_hold_key == 0xFFU);
+    CHECK(profile2.local_count == factory.local_count);
+    CHECK(memcmp(profile2.locals, factory.locals,
+                 sizeof(factory.locals)) == 0);
+    for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
+    {
+        const aik_hp_key_output_t *output = &profile2.base_keys[key_id];
+
+        CHECK(profile2.fn_keys[key_id].usage == 0U);
+        CHECK(profile2.fn_keys[key_id].modifier_mask == 0U);
+        if((output->usage != 0U) || (output->modifier_mask != 0U))
+        {
+            mapped_count++;
+        }
+
+        if(key_id == 73U)
+        {
+            CHECK(output->usage == 0U);
+            CHECK(output->modifier_mask == 0x02U);
+        }
+        else if(key_id == 40U)
+        {
+            CHECK(output->usage == 0U);
+            CHECK(output->modifier_mask == 0x20U);
+        }
+        else if(profile2_key_kept(key_id) != 0U)
+        {
+            CHECK(memcmp(output, &factory.base_keys[key_id],
+                         sizeof(*output)) == 0);
+        }
+        else
+        {
+            CHECK(output->usage == 0U);
+            CHECK(output->modifier_mask == 0U);
+        }
+
+        CHECK(profile2.triggers[key_id].mode ==
+              AIK_RT_MODE_RAPID_TRIGGER);
+        CHECK(profile2.triggers[key_id].press_pm == 200U);
+        CHECK(profile2.triggers[key_id].rt_press_delta_pm == 200U);
+        CHECK(profile2.triggers[key_id].rt_release_delta_pm == 200U);
+    }
+    CHECK(mapped_count == 41U);
+
+    CHECK(v3f_profile_runtime_prepare_slot(3U, &profile3) == V3F_PROFILE_OK);
+    CHECK(profile3.active_slot == 3U);
+    CHECK(profile3.profile_id16 == 0xAC82U);
+    CHECK(profile3.profile_id16 ==
+          aik_profile_string_hash16("builtin_profile_3"));
+    CHECK(profile3.generation16 == 1U);
+    CHECK(profile3.revision == 1U);
+    CHECK(profile3.usb_report_rate_hz == 8000U);
+    CHECK(profile3.wireless_report_rate_hz == 1000U);
+    CHECK(profile3.has_fn_overlay == 0U);
+    CHECK(profile3.fn_hold_key == 0xFFU);
+    CHECK(profile3.local_count == 0U);
+    for(key_id = 0U; key_id < AIK_KEY_COUNT_TOTAL; key_id++)
+    {
+        CHECK(profile3.base_keys[key_id].usage == 0U);
+        CHECK(profile3.base_keys[key_id].modifier_mask == 0U);
+        CHECK(profile3.fn_keys[key_id].usage == 0U);
+        CHECK(profile3.fn_keys[key_id].modifier_mask == 0U);
+        CHECK(memcmp(&profile3.triggers[key_id], &factory.triggers[key_id],
+                     sizeof(profile3.triggers[key_id])) == 0);
+    }
 
     s_active_slot = 2U;
     active = v3f_profile_runtime_init();
     CHECK(active == 2U);
     CHECK(v3f_profile_runtime_get()->active_slot == 2U);
+    CHECK(v3f_profile_runtime_get()->profile_id16 == 0x2F81U);
+
+    /* A real stored AKPK always wins over the built-in slot preset. */
+    memset(s_user_slot, 0xFF, sizeof(s_user_slot));
+    memcpy(s_user_slot, g_v3f_factory_profile_image,
+           g_v3f_factory_profile_image_size);
+    CHECK(v3f_profile_runtime_prepare_slot(2U, &stored) == V3F_PROFILE_OK);
+    CHECK(stored.active_slot == 2U);
+    CHECK(stored.profile_id16 == factory.profile_id16);
+    CHECK(stored.usb_report_rate_hz == factory.usb_report_rate_hz);
+    CHECK(memcmp(stored.base_keys, factory.base_keys,
+                 sizeof(factory.base_keys)) == 0);
+    CHECK(memcmp(stored.triggers, factory.triggers,
+                 sizeof(factory.triggers)) == 0);
+    CHECK(memcmp(stored.locals, factory.locals,
+                 sizeof(factory.locals)) == 0);
 
     /* Non-erased invalid content is corruption, not an empty default. */
     memset(s_user_slot, 0xFF, sizeof(s_user_slot));
     s_user_slot[0] = 0U;
-    CHECK(v3f_profile_runtime_prepare_slot(1U, &user) != V3F_PROFILE_OK);
+    CHECK(v3f_profile_runtime_prepare_slot(1U, &stored) != V3F_PROFILE_OK);
 
     s_active_slot = 1U;
     active = v3f_profile_runtime_init();

@@ -94,10 +94,18 @@
 #define CH585_MODE_MASK_F1       0x01U
 #define CH585_MODE_MASK_F2       0x02U
 #define CH585_MODE_MASK_F3       0x04U
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
 #define CH585_PROFILE_SLOT0_KEY  10U
 #define CH585_PROFILE_SLOT1_KEY  52U
 #define CH585_PROFILE_SLOT2_KEY  51U
 #define CH585_PROFILE_SLOT3_KEY  50U
+#else
+/* NEW uses the physical wireless selector, leaving Fn+F1/F2/F3 for
+ * user Profiles 1/2/3.  Factory remains selectable over the PC link. */
+#define CH585_PROFILE_SLOT1_KEY  CH585_MODE_KEY_F1
+#define CH585_PROFILE_SLOT2_KEY  CH585_MODE_KEY_F2
+#define CH585_PROFILE_SLOT3_KEY  CH585_MODE_KEY_F3
+#endif
 #define CH585_GLOBAL_DOWN_BYTES  ((AIK_KEY_COUNT_TOTAL + 7U) / 8U)
 
 typedef struct
@@ -417,8 +425,10 @@ static uint8_t profile_shortcut_slot_bit(uint8_t key_id)
 {
     switch(key_id)
     {
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
         case CH585_PROFILE_SLOT0_KEY:
             return (uint8_t)(1U << AIK_PROFILE_SLOT_FACTORY);
+#endif
         case CH585_PROFILE_SLOT1_KEY:
             return (uint8_t)(1U << AIK_PROFILE_USER_SLOT_FIRST);
         case CH585_PROFILE_SLOT2_KEY:
@@ -472,10 +482,12 @@ static uint8_t profile_shortcut_slot_mask(
 {
     uint8_t mask = 0U;
 
+#if CH585_BOARD_HAS_LEGACY_FN_OUTPUT_SWITCH
     if(global_key_down(left, right, CH585_PROFILE_SLOT0_KEY) != 0U)
     {
         mask |= (uint8_t)(1U << AIK_PROFILE_SLOT_FACTORY);
     }
+#endif
     if(global_key_down(left, right, CH585_PROFILE_SLOT1_KEY) != 0U)
     {
         mask |= (uint8_t)(1U << AIK_PROFILE_USER_SLOT_FIRST);
