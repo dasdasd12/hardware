@@ -81,6 +81,13 @@ int gd5f1g_read_page(const gd5f1g_spi_bus_t *bus,
                      uint8_t *data,
                      uint32_t length,
                      uint8_t *status_out);
+int gd5f1g_read_page_ignore_ecc(const gd5f1g_spi_bus_t *bus,
+                                uint32_t row_address,
+                                uint16_t column,
+                                uint8_t *data,
+                                uint32_t length,
+                                uint8_t *status_out);
+
 int gd5f1g_read_bad_block_marker(const gd5f1g_spi_bus_t *bus,
                                  uint32_t block,
                                  uint8_t *marker,

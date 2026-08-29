@@ -120,6 +120,7 @@ APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_SRC += $(PROJECT_ROOT)/applications/board_init.c
 APP_SRC += $(PROJECT_ROOT)/applications/approval_mailbox.c
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_link.c
+APP_SRC += $(PROJECT_ROOT)/applications/spi1_bus_arbiter.c
 APP_SRC += $(PROJECT_ROOT)/applications/half_state.c
 APP_SRC += $(PROJECT_ROOT)/applications/default_profile.c
 APP_SRC += $(PROJECT_ROOT)/applications/factory_profile_image.c
@@ -153,6 +154,7 @@ APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_flash.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_gpio.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_dbgmcu.c
 APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_spi.c
+APP_SRC += $(SRC_ROOT)/Peripheral/src/ch32h417_hsem.c
 
 ifeq ($(V3F_USBSS_OFFICIAL_OWNER),1)
 APP_SRC += $(SRC_ROOT)/Debug/debug.c

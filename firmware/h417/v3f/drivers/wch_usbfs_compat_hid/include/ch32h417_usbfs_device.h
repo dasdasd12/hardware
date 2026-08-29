@@ -95,7 +95,9 @@ extern volatile uint8_t  USBFS_DevEnumStatus;
 
 /* Endpoint Buffer */
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP0_Buf[];
+#if V3F_USBFS_HAS_HID
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP2_Buf[];
+#endif
 #if V3F_ENABLE_USBFS_CDC_DEBUG
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP3_Buf[];
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP4_Buf[];

@@ -12,6 +12,7 @@
 #include "ch32h417_usbfs_device.h"
 #include "usbfs_desc.h"
 #include "ch32h417_usb.h"
+#if V3F_USBFS_HAS_HID
 #include "usbfs_compatibility_hid.h"
 
 __attribute__((weak)) void ch32h417_usbfs_hid_nkro_on_bus_reset(void)
@@ -27,6 +28,7 @@ __attribute__((weak)) void ch32h417_usbfs_hid_nkro_on_output_report(
     (void)data;
     (void)len;
 }
+#endif
 /*******************************************************************************/
 /* Variable Definition */
 
@@ -48,9 +50,11 @@ volatile uint8_t  USBFS_DevSleepStatus;
 volatile uint8_t  USBFS_DevEnumStatus;
 
 /* HID Class Command */
+#if V3F_USBFS_HAS_HID
 volatile uint8_t USBFS_HidIdle;
 volatile uint8_t USBFS_HidProtocol;
 static uint16_t s_usbfs_hid_report_ptr;
+#endif
 
 #if V3F_ENABLE_USBFS_CDC_DEBUG
 uint8_t USBFS_CDC_LineCoding[7] = {0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08};
@@ -59,7 +63,9 @@ volatile uint16_t USBFS_CDC_ControlLineState;
 
 /* Endpoint Buffer */
 __attribute__ ((aligned(4))) uint8_t USBFS_EP0_Buf[DEF_USBD_UEP0_SIZE];   
+#if V3F_USBFS_HAS_HID
 __attribute__ ((aligned(4))) uint8_t USBFS_EP2_Buf[DEF_USB_EP2_FS_SIZE]; 
+#endif
 #if V3F_ENABLE_USBFS_CDC_DEBUG
 __attribute__ ((aligned(4))) uint8_t USBFS_EP3_Buf[DEF_USB_EP3_FS_SIZE];
 __attribute__ ((aligned(4))) uint8_t USBFS_EP4_Buf[DEF_USB_EP4_FS_SIZE];
@@ -112,7 +118,7 @@ void USBFS_Device_Endp_Init( void )
 {
 #if V3F_ENABLE_USBFS_CDC_DEBUG
     USBFSD->UEP4_1_MOD = USBFS_UEP1_RX_EN | USBFS_UEP4_TX_EN;
-    USBFSD->UEP2_3_MOD = USBFS_UEP2_TX_EN | USBFS_UEP3_TX_EN;
+    USBFSD->UEP2_3_MOD = USBFS_UEP3_TX_EN;
 #else
     USBFSD->UEP4_1_MOD = USBFS_UEP1_RX_EN;
     USBFSD->UEP2_3_MOD = USBFS_UEP2_TX_EN;
@@ -120,7 +126,9 @@ void USBFS_Device_Endp_Init( void )
 
     USBFSD->UEP0_DMA = (uint32_t)USBFS_EP0_Buf;
     USBFSD->UEP1_DMA = (uint32_t)USBFS_Data_Buffer;
+#if V3F_USBFS_HAS_HID
     USBFSD->UEP2_DMA = (uint32_t)USBFS_EP2_Buf;
+#endif
 #if V3F_ENABLE_USBFS_CDC_DEBUG
     USBFSD->UEP3_DMA = (uint32_t)USBFS_EP3_Buf;
     USBFSD->UEP4_DMA = (uint32_t)USBFS_EP4_Buf;
@@ -129,7 +137,9 @@ void USBFS_Device_Endp_Init( void )
     USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
     USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;
     USBFSD->UEP1_RX_CTRL = USBFS_UEP_R_RES_ACK;
+#if V3F_USBFS_HAS_HID
     USBFSD->UEP2_TX_CTRL = USBFS_UEP_T_RES_NAK;
+#endif
 #if V3F_ENABLE_USBFS_CDC_DEBUG
     USBFSD->UEP3_TX_LEN = 0U;
     USBFSD->UEP4_TX_LEN = 0U;
@@ -255,11 +265,13 @@ void USBFS_IRQHandler( void )
 
 
 
-                        /* end-point 2 data in interrupt */
+#if V3F_USBFS_HAS_HID
+                        /* end-point 2 HID data in interrupt */
                         case USBFS_UIS_TOKEN_IN | DEF_UEP2:
                             USBFSD->UEP2_TX_CTRL = (USBFSD->UEP2_TX_CTRL & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
 							USBFSD->UEP2_TX_CTRL ^= USBFS_UEP_T_TOG;
                             break;
+#endif
 
 #if V3F_ENABLE_USBFS_CDC_DEBUG
                         case USBFS_UIS_TOKEN_IN | DEF_UEP3:
@@ -305,8 +317,11 @@ void USBFS_IRQHandler( void )
                                         USBFS_SetupReqLen = 0U;
                                         USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_TOG | USBFS_UEP_T_RES_NAK;
                                     }
+#if V3F_USBFS_HAS_HID
                                     else
 #endif
+#endif
+#if V3F_USBFS_HAS_HID
                                     if (( USBFS_SetupReqType & USB_REQ_TYP_MASK ) == USB_REQ_TYP_CLASS)
                                     {
                                         switch( USBFS_SetupReqCode )
@@ -340,6 +355,7 @@ void USBFS_IRQHandler( void )
                                                 break;
                                         }
                                     }
+#endif
                                 }
                                 else
                                 {
@@ -448,6 +464,7 @@ void USBFS_IRQHandler( void )
                                 break;
 #endif
 
+#if V3F_USBFS_HAS_HID
                             case HID_SET_REPORT:
                                 if((USBFS_SetupReqIndex == DEF_USBD_HID_INTERFACE) &&
                                    ((uint8_t)(USBFS_SetupReqValue >> 8) == 0x02U) &&
@@ -519,6 +536,7 @@ void USBFS_IRQHandler( void )
                                     errflag = 0xFF;
                                 }
                                 break;
+#endif
                             default:
                                 errflag = 0xFF;
                                 break;
@@ -545,6 +563,7 @@ void USBFS_IRQHandler( void )
                                     pUSBFS_Descr = MyCfgDescr;
                                     len = DEF_USBD_CONFIG_DESC_LEN;
 									break;
+#if V3F_USBFS_HAS_HID
                               /* get usb report descriptor */
                               case USB_DESCR_TYP_REPORT:
                                     if (USBFS_SetupReqIndex == DEF_USBD_HID_INTERFACE)
@@ -569,6 +588,7 @@ void USBFS_IRQHandler( void )
                                         errflag = 0xFF;
                                     }
                                     break;
+#endif
 
                                 /* get usb string descriptor */
                                 case USB_DESCR_TYP_STRING:
@@ -661,10 +681,12 @@ void USBFS_IRQHandler( void )
                                             USBFSD->UEP1_RX_CTRL =  USBFS_UEP_R_RES_ACK;
                                             break;
 
+#if V3F_USBFS_HAS_HID
                                         case ( DEF_UEP_IN | DEF_UEP2 ):
                                             /* Set End-point 2 IN NAK */
                                             USBFSD->UEP2_TX_CTRL =  USBFS_UEP_T_RES_NAK;
                                             break;
+#endif
 
 #if V3F_ENABLE_USBFS_CDC_DEBUG
                                         case ( DEF_UEP_IN | DEF_UEP3 ):
@@ -725,9 +747,11 @@ void USBFS_IRQHandler( void )
                                         case ( DEF_UEP_OUT | DEF_UEP1 ):
                                             USBFSD->UEP1_RX_CTRL = ( USBFSD->UEP1_RX_CTRL & ~USBFS_UEP_R_RES_MASK ) | USBFS_UEP_R_RES_STALL;
                                             break;
+#if V3F_USBFS_HAS_HID
 	                                    case ( DEF_UEP_IN | DEF_UEP2 ):
                                             USBFSD->UEP2_TX_CTRL = ( USBFSD->UEP2_TX_CTRL & ~USBFS_UEP_T_RES_MASK ) | USBFS_UEP_T_RES_STALL;
                                             break;
+#endif
 
 #if V3F_ENABLE_USBFS_CDC_DEBUG
 	                                    case ( DEF_UEP_IN | DEF_UEP3 ):
@@ -788,6 +812,7 @@ void USBFS_IRQHandler( void )
                                         USBFS_EP0_Buf[ 0 ] = 0x01;
                                     }
                                 }
+#if V3F_USBFS_HAS_HID
                                 else if((uint8_t)(USBFS_SetupReqIndex&0xFF) == ( DEF_UEP_IN | DEF_UEP2 ))
                                 {
                                     if( ( USBFSD->UEP2_TX_CTRL & USBFS_UEP_T_RES_MASK ) == USBFS_UEP_T_RES_STALL )
@@ -795,6 +820,7 @@ void USBFS_IRQHandler( void )
                                         USBFS_EP0_Buf[ 0 ] = 0x01;
                                     }
                                 }
+#endif
 #if V3F_ENABLE_USBFS_CDC_DEBUG
                                 else if((uint8_t)(USBFS_SetupReqIndex&0xFF) == ( DEF_UEP_IN | DEF_UEP3 ))
                                 {
@@ -878,8 +904,10 @@ void USBFS_IRQHandler( void )
         USBFS_DevAddr = 0;
         USBFS_DevSleepStatus = 0;
         USBFS_DevEnumStatus = 0;
+#if V3F_USBFS_HAS_HID
         s_usbfs_hid_report_ptr = 0U;
         ch32h417_usbfs_hid_nkro_on_bus_reset();
+#endif
 #if V3F_ENABLE_USBFS_CDC_DEBUG
         USBFS_CDC_ControlLineState = 0U;
 #endif

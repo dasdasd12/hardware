@@ -394,6 +394,212 @@ class FirmwareMainMvpContract(unittest.TestCase):
         ):
             self.assertIn(mascot_row, v5f_claude_ui)
 
+    def test_h417_v5f_flash_animation_preserves_ui_and_backlight_ownership(self):
+        makefile = read_text("firmware", "h417", "v5f_rtthread", "Makefile")
+        main_c = read_text(
+            "firmware", "h417", "v5f_rtthread", "applications", "main.c"
+        )
+        animation = read_text(
+            "firmware",
+            "h417",
+            "v5f_rtthread",
+            "applications",
+            "v5f_flash_animation.c",
+        )
+        display = read_text(
+            "firmware", "h417", "v5f_rtthread", "applications", "v5f_display.c"
+        )
+        rtconfig = read_text(
+            "firmware", "h417", "v5f_rtthread", "rtconfig.h"
+        )
+        approval_ui = read_text(
+            "firmware",
+            "h417",
+            "v5f_rtthread",
+            "applications",
+            "v5f_approval_ui.c",
+        )
+        h4v1 = read_text(
+            "hw_tests",
+            "h417",
+            "cases",
+            "v5f_rtthread",
+            "src",
+            "v5f_hw_test_h4v1.c",
+        )
+        coldboot = read_text(
+            "hw_tests",
+            "h417",
+            "cases",
+            "v5f_rtthread",
+            "src",
+            "h4v1_flash_coldboot_core.c",
+        )
+
+        self.assertIn(
+            "APP_ENABLE_V5F_FLASH_ANIMATION ?= $(APP_ENABLE_V5F_DISPLAY)",
+            makefile,
+        )
+        self.assertIn("-DV5F_SDRAM_H4V1_CHUNKED_FRAMES=165u", makefile)
+        self.assertIn("-DH4V1_FLASH_COLDBOOT_PRODUCT=1", makefile)
+        self.assertIn("GPIOE", animation)
+        self.assertIn("GPIO_Pin_14", animation)
+        self.assertIn("GPIO_Mode_IPU", animation)
+        self.assertIn("== Bit_RESET", animation)
+        self.assertIn("V5F_FLASH_ANIMATION_DEBOUNCE_MS        60u", animation)
+        self.assertIn("s_candidate_since = rt_tick_get();", animation)
+        self.assertIn("rt_tick_from_millisecond", animation)
+        self.assertNotIn("DEBOUNCE_SAMPLES", animation)
+        self.assertIn("RT_MAIN_THREAD_STACK_SIZE   8192", rtconfig)
+        self.assertIn("RT_MAIN_THREAD_STACK_SIZE   2048", rtconfig)
+        self.assertIn("APP_ENABLE_V5F_FLASH_ANIMATION", rtconfig)
+        self.assertIn("Animation start failed", approval_ui)
+        self.assertIn("v5f_flash_animation_last_failure", main_c)
+        self.assertNotIn("backlight", animation.lower())
+        self.assertNotIn("disp_enable", animation)
+        self.assertNotIn("control_init", animation)
+
+        self.assertLess(
+            main_c.index("v5f_flash_animation_poll();"),
+            main_c.index("v5f_flash_animation_run_blocking();"),
+        )
+        self.assertLess(
+            main_c.index("v5f_flash_animation_run_blocking();"),
+            main_c.index("v5f_approval_ui_init();", main_c.index("while (1)")),
+        )
+
+        deactivate = display[
+            display.index("int v5f_display_deactivate(void)") :
+            display.index("int v5f_display_activate_ui(void)")
+        ]
+        activate = display[
+            display.index("int v5f_display_activate_ui(void)") :
+            display.index("uint8_t v5f_display_is_ready(void)")
+        ]
+        for forbidden in (
+            "ch32h417_lcd_rgb_control_init",
+            "ch32h417_lcd_rgb_disp_enable",
+            "ch32h417_lcd_rgb_backlight_enable",
+        ):
+            self.assertNotIn(forbidden, deactivate)
+            self.assertNotIn(forbidden, activate)
+        self.assertLess(
+            activate.index("ch32h417_ltdc_rgb_layer1_enable(1u);"),
+            activate.index("rt_thread_mdelay(V5F_DISPLAY_CLUT_SETTLE_MS);"),
+        )
+        self.assertLess(
+            activate.index("rt_thread_mdelay(V5F_DISPLAY_CLUT_SETTLE_MS);"),
+            activate.index("ch32h417_ltdc_rgb_layer1_load_clut_rgb888"),
+        )
+        self.assertIn("V5F_DISPLAY_RELOAD_TIMEOUT_MS", display)
+        self.assertIn("rt_tick_get()", display)
+        self.assertNotIn("V5F_DISPLAY_RELOAD_GUARD", display)
+
+        pa_control_start = h4v1.index("* The SDRAM input candidates have fixed priority")
+        pa_control = h4v1[
+            pa_control_start : h4v1.index("sdram_gpio_af(GPIOE", pa_control_start)
+        ]
+        self.assertIn("#if !V5F_H4V1_PRODUCT", pa_control)
+        self.assertIn("GPIO_PinSource9, GPIO_AF15", pa_control)
+        self.assertIn("GPIO_PinSource10, GPIO_AF15", pa_control)
+        self.assertLess(
+            pa_control.index("GPIO_PinSource9, GPIO_AF15"),
+            pa_control.index("#if !V5F_H4V1_PRODUCT"),
+        )
+        self.assertLess(
+            pa_control.index("#if !V5F_H4V1_PRODUCT"),
+            pa_control.index("GPIO_PinSource10, GPIO_AF15"),
+        )
+        for command in ("0x03u", "0x0Fu", "0x13u", "0x9Fu"):
+            self.assertIn(command, coldboot)
+        for forbidden_command in ("CMD_PROGRAM", "CMD_ERASE", "CMD_WREN"):
+            self.assertNotIn(forbidden_command, coldboot)
+
+    def test_h417_spi1_flash_animation_lease_preserves_ch585_owner(self):
+        arbiter = read_text("firmware", "common", "aik_spi1_bus_arbiter.h")
+        v3_main = read_text(
+            "firmware", "h417", "v3f", "applications", "main.c"
+        )
+        v3_arbiter = read_text(
+            "firmware",
+            "h417",
+            "v3f",
+            "applications",
+            "spi1_bus_arbiter.c",
+        )
+        ch585_link = read_text(
+            "firmware", "h417", "v3f", "applications", "ch585_link.c"
+        )
+        ch585_spi_driver = read_text(
+            "firmware",
+            "h417",
+            "v3f",
+            "drivers",
+            "ch585_spi_link",
+            "src",
+            "ch32h417_ch585_spi_link.c",
+        )
+        v5_lease = read_text(
+            "firmware",
+            "h417",
+            "v5f_rtthread",
+            "applications",
+            "v5f_spi1_lease.c",
+        )
+        h4v1 = read_text(
+            "hw_tests",
+            "h417",
+            "cases",
+            "v5f_rtthread",
+            "src",
+            "v5f_hw_test_h4v1.c",
+        )
+
+        self.assertIn("AIK_SPI1_ARB_MAILBOX_ADDR       0x20179000UL", arbiter)
+        self.assertIn("AIK_SPI1_ARB_HSEM_ID            31U", arbiter)
+        self.assertIn("sizeof(aik_spi1_arb_mailbox_t)", arbiter)
+        self.assertLess(
+            v3_main.index("v3f_spi1_bus_arbiter_init();"),
+            v3_main.index("v3f_board_start_v5f();"),
+        )
+        self.assertLess(
+            v3_main.index("v3f_spi1_bus_arbiter_service();"),
+            v3_main.index("v3f_profile_sync_poll(host_seq)"),
+        )
+        self.assertIn("AIK_SPI1_ARB_STATE_QUIESCED", v3_arbiter)
+        for source in (3, 4, 5):
+            self.assertIn(
+                f"GPIO_PinAFConfig(GPIOB, GPIO_PinSource{source}, GPIO_AF15);",
+                v3_arbiter,
+            )
+        self.assertIn("GPIO_Mode_AIN", v3_arbiter)
+        self.assertNotIn("GPIO_Mode_IN_FLOATING", v3_arbiter)
+        self.assertIn("restores AF5", v3_arbiter)
+        self.assertIn("v3f_ch585_link_restore_idle();", v3_arbiter)
+        self.assertGreaterEqual(
+            ch585_link.count("v3f_spi1_bus_arbiter_transfer_allowed()"), 2
+        )
+        self.assertNotIn(
+            "GPIO_PinRemapConfig(GPIO_Remap_VIO3V3_IO_HSLV, ENABLE)",
+            ch585_spi_driver,
+        )
+        self.assertNotIn(
+            "GPIO_PinRemapConfig(GPIO_Remap_VDD3V3_IO_HSLV, ENABLE)",
+            ch585_spi_driver,
+        )
+        self.assertLess(
+            v5_lease.index("AIK_SPI1_ARB_STATE_QUIESCED"),
+            v5_lease.index("HSEM_Take(HSEM_ID31"),
+        )
+        self.assertIn("AIK_SPI1_ARB_CMD_RELEASE", v5_lease)
+        self.assertIn("AIK_SPI1_ARB_RESPONSE_RESTORED", v5_lease)
+        self.assertLess(
+            h4v1.index("v5f_spi1_lease_acquire("),
+            h4v1.index("h4v1_flash_coldboot_reset();"),
+        )
+        self.assertIn("v5f_spi1_lease_progress(committed)", h4v1)
+        self.assertIn("v5f_spi1_lease_release(", h4v1)
+
     def test_h417_default_profile_uses_latex_default_keymap(self):
         source = read_text("firmware", "h417", "v3f", "applications", "default_profile.c")
 

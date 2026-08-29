@@ -13,6 +13,7 @@
 #define V5F_DISPLAY_CLUT_SETTLE_MS       100u
 #define V5F_DISPLAY_SCAN_TIMEOUT_MS      100u
 #define V5F_DISPLAY_SCAN_MIN_CHANGES     3u
+#define V5F_DISPLAY_RELOAD_TIMEOUT_MS    100u
 
 #define V5F_DISPLAY_COLOR_BACKGROUND     0u
 
@@ -22,6 +23,7 @@
 
 static uint8_t s_framebuffer[V5F_DISPLAY_FRAMEBUFFER_BYTES]
     __attribute__((section(".lcd_fb"), aligned(64)));
+static volatile uint8_t s_ui_active;
 
 volatile v5f_display_diag_t g_v5f_display_diag;
 
@@ -144,6 +146,30 @@ static int wait_for_scanout(void)
     return V5F_DISPLAY_ERR_SCANOUT;
 }
 
+static int reload_at_vertical_blank(void)
+{
+    rt_tick_t start = rt_tick_get();
+    rt_tick_t timeout = rt_tick_from_millisecond(
+        (rt_int32_t)V5F_DISPLAY_RELOAD_TIMEOUT_MS);
+
+    if(timeout == 0u)
+    {
+        timeout = 1u;
+    }
+
+    LTDC_ReloadConfig(LTDC_VBReload);
+    while((LTDC->SRCR & LTDC_SRCR_VBR) != 0u)
+    {
+        if((rt_tick_t)(rt_tick_get() - start) >= timeout)
+        {
+            return V5F_DISPLAY_ERR_MODE_SWITCH;
+        }
+        rt_thread_mdelay(1u);
+    }
+
+    return V5F_DISPLAY_OK;
+}
+
 int v5f_display_init(void)
 {
     ch32h417_ltdc_rgb_layer_t layer = {0};
@@ -219,7 +245,121 @@ int v5f_display_init(void)
     }
 
     ch32h417_lcd_rgb_backlight_enable(1u);
+    s_ui_active = 1u;
     g_v5f_display_diag.initialized = 1u;
+    g_v5f_display_diag.last_error = V5F_DISPLAY_OK;
+    return V5F_DISPLAY_OK;
+}
+
+int v5f_display_deactivate(void)
+{
+    int result;
+
+    if((g_v5f_display_diag.initialized == 0u) ||
+       (g_v5f_display_diag.last_error != V5F_DISPLAY_OK))
+    {
+        return V5F_DISPLAY_ERR_MODE_SWITCH;
+    }
+    if(s_ui_active == 0u)
+    {
+        return V5F_DISPLAY_OK;
+    }
+
+    /* Block product UI writers before Layer1 is handed to the player. */
+    s_ui_active = 0u;
+    ch32h417_ltdc_rgb_layer1_clut_enable(0u);
+    ch32h417_ltdc_rgb_layer1_enable(0u);
+    result = reload_at_vertical_blank();
+    if(result != V5F_DISPLAY_OK)
+    {
+        g_v5f_display_diag.last_error = result;
+    }
+    return result;
+}
+
+int v5f_display_activate_ui(void)
+{
+    ch32h417_ltdc_rgb_layer_t layer = {0};
+    int result;
+
+    if(g_v5f_display_diag.initialized == 0u)
+    {
+        return V5F_DISPLAY_ERR_MODE_SWITCH;
+    }
+
+    /* Build the home screen while Layer1 still belongs to neither renderer. */
+    s_ui_active = 0u;
+    v5f_competition_ui_draw();
+
+    ch32h417_ltdc_rgb_layer1_enable(0u);
+    ch32h417_ltdc_rgb_layer1_clut_enable(0u);
+
+    layer.width = V5F_DISPLAY_WIDTH;
+    layer.height = V5F_DISPLAY_HEIGHT;
+    layer.pixel_format = LTDC_Pixelformat_L8;
+    layer.framebuffer = (uint32_t)s_framebuffer;
+    layer.line_pitch = V5F_DISPLAY_WIDTH;
+    result = ch32h417_ltdc_rgb_layer1_config(
+        &ch32h417_ltdc_rgb_panel_800x480,
+        &layer);
+    if(result != CH32H417_LTDC_RGB_OK)
+    {
+        g_v5f_display_diag.last_error = V5F_DISPLAY_ERR_LTDC;
+        return V5F_DISPLAY_ERR_LTDC;
+    }
+
+    /*
+     * Preserve the hardware-qualified order used at first boot: establish a
+     * live L8 scanout, let it settle, and only then rewrite the H417 CLUT.
+     * The alternate renderer reinitializes LTDC and therefore cannot be
+     * assumed to leave the product palette intact.
+     */
+    ch32h417_ltdc_rgb_layer1_enable(1u);
+    ch32h417_ltdc_rgb_enable(1u);
+    result = reload_at_vertical_blank();
+    if(result != V5F_DISPLAY_OK)
+    {
+        g_v5f_display_diag.last_error = result;
+        return result;
+    }
+
+    result = display_registers_valid();
+    if(result == V5F_DISPLAY_OK)
+    {
+        result = wait_for_scanout();
+    }
+    if(result != V5F_DISPLAY_OK)
+    {
+        g_v5f_display_diag.last_error = result;
+        return result;
+    }
+
+    rt_thread_mdelay(V5F_DISPLAY_CLUT_SETTLE_MS);
+    result = ch32h417_ltdc_rgb_layer1_load_clut_rgb888(
+        v5f_ui_clut_rgb888(),
+        CH32H417_LTDC_RGB_CLUT_ENTRIES);
+    if(result != CH32H417_LTDC_RGB_OK)
+    {
+        g_v5f_display_diag.last_error = V5F_DISPLAY_ERR_CLUT;
+        return V5F_DISPLAY_ERR_CLUT;
+    }
+    g_v5f_display_diag.last_layer_cr = LTDC_Layer1->CR;
+    g_v5f_display_diag.last_layer_pfcr = LTDC_Layer1->PFCR;
+    if(((LTDC_Layer1->CR & (LTDC_CR_LEN | LTDC_CR_CLUTEN)) !=
+        (LTDC_CR_LEN | LTDC_CR_CLUTEN)) ||
+       ((LTDC_Layer1->PFCR & LTDC_PFCR_PF) != LTDC_Pixelformat_L8))
+    {
+        g_v5f_display_diag.last_error = V5F_DISPLAY_ERR_CLUT;
+        return V5F_DISPLAY_ERR_CLUT;
+    }
+    result = wait_for_scanout();
+    if(result != V5F_DISPLAY_OK)
+    {
+        g_v5f_display_diag.last_error = result;
+        return result;
+    }
+
+    s_ui_active = 1u;
     g_v5f_display_diag.last_error = V5F_DISPLAY_OK;
     return V5F_DISPLAY_OK;
 }
@@ -227,5 +367,6 @@ int v5f_display_init(void)
 uint8_t v5f_display_is_ready(void)
 {
     return (uint8_t)((g_v5f_display_diag.initialized != 0u) &&
-                     (g_v5f_display_diag.last_error == V5F_DISPLAY_OK));
+                     (g_v5f_display_diag.last_error == V5F_DISPLAY_OK) &&
+                     (s_ui_active != 0u));
 }

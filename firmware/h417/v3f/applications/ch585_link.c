@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "ch32h417_ch585_spi_link.h"
+#include "spi1_bus_arbiter.h"
 
 /*
  * Profile commands are handled in the CH585 foreground loop.  After the
@@ -95,7 +96,16 @@ static uint8_t transfer_checked(uint8_t half_id,
                                 uint8_t *rx,
                                 uint16_t len)
 {
-    int rc = ch32h417_ch585_spi_link_transfer(tx, rx, len);
+    int rc;
+
+    /* HSEM31 is held for every physical CH585 transaction.  A deliberate
+     * V5F lease is not a link error and therefore must not pollute stats. */
+    if(v3f_spi1_bus_arbiter_transfer_allowed() == 0U)
+    {
+        return 0U;
+    }
+
+    rc = ch32h417_ch585_spi_link_transfer(tx, rx, len);
 
     s_stats[half_id].last_diag = ch32h417_ch585_spi_link_last_diag();
     if(rc != CH32H417_CH585_SPI_LINK_OK)
@@ -111,6 +121,12 @@ static uint8_t begin_command(uint8_t half_id,
                              uint8_t cmd_rx[AIK_SPI_HOST_CMD_SIZE])
 {
     ch32h417_ch585_spi_link_config_t config;
+
+    /* Gate before init: init itself deinitializes/reconfigures shared SPI1. */
+    if(v3f_spi1_bus_arbiter_transfer_allowed() == 0U)
+    {
+        return 0U;
+    }
 
     ch32h417_ch585_spi_link_config_for_side(link_side_from_half(half_id),
                                             &config);
@@ -198,6 +214,16 @@ static uint8_t profile_xfer_matches(
 void v3f_ch585_link_init(void)
 {
     memset(s_stats, 0, sizeof(s_stats));
+}
+
+void v3f_ch585_link_restore_idle(void)
+{
+    ch32h417_ch585_spi_link_config_t config;
+
+    /* Either side's config restores the same SPI mode and parks both CS high. */
+    ch32h417_ch585_spi_link_config_for_side(
+        CH32H417_CH585_SPI_LINK_SIDE_LEFT, &config);
+    ch32h417_ch585_spi_link_init(&config);
 }
 
 uint8_t v3f_ch585_link_poll(uint8_t half_id,

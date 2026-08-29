@@ -372,6 +372,61 @@ int gd5f1g_read_page(const gd5f1g_spi_bus_t *bus,
     return GD5F1G_OK;
 }
 
+/*
+ * Same page read, but the ECC status is reported instead of enforced: the
+ * data is always returned.  Callers in the video pipeline gate integrity
+ * with CRC32 over the whole payload, so a (possibly meaningless, ECC_EN was
+ * never configured on the program path) ECC status must not withhold data.
+ */
+int gd5f1g_read_page_ignore_ecc(const gd5f1g_spi_bus_t *bus,
+                                uint32_t row_address,
+                                uint16_t column,
+                                uint8_t *data,
+                                uint32_t length,
+                                uint8_t *status_out)
+{
+    uint32_t i;
+    uint8_t status = 0u;
+    int result;
+
+    if(!gd5f1g_bus_valid(bus) ||
+       (data == 0) ||
+       (length == 0u) ||
+       ((uint32_t)column + length > (GD5F1G_PAGE_SIZE + GD5F1G_SPARE_SIZE_ECC_ON)))
+    {
+        return GD5F1G_ERR_PARAM;
+    }
+
+    bus->select(bus->context);
+    (void)gd5f1g_transfer(bus, GD5F1G_CMD_PAGE_READ);
+    gd5f1g_write_row(bus, row_address);
+    bus->deselect(bus->context);
+
+    result = gd5f1g_wait_ready(bus, &status);
+    if(result != GD5F1G_OK)
+    {
+        return result;
+    }
+
+    bus->select(bus->context);
+    (void)gd5f1g_transfer(bus, GD5F1G_CMD_READ_CACHE);
+    (void)gd5f1g_transfer(bus, (uint8_t)(column >> 8));
+    (void)gd5f1g_transfer(bus, (uint8_t)column);
+    (void)gd5f1g_transfer(bus, 0x00u);
+    for(i = 0; i < length; ++i)
+    {
+        data[i] = gd5f1g_transfer(bus, 0xFFu);
+    }
+    bus->deselect(bus->context);
+
+    if(status_out != 0)
+    {
+        *status_out = status;
+    }
+
+    return GD5F1G_OK;
+}
+
 int gd5f1g_read_bad_block_marker(const gd5f1g_spi_bus_t *bus,
                                  uint32_t block,
                                  uint8_t *marker,

@@ -51,7 +51,18 @@
 
 /* Thread */
 #define RT_USING_USER_MAIN
+#if defined(APP_ENABLE_V5F_FLASH_ANIMATION) && \
+    (APP_ENABLE_V5F_FLASH_ANIMATION != 0)
+/*
+ * The product H4V1 player runs synchronously from main and its qualified
+ * decode/preload call chain is substantially deeper than the normal UI loop.
+ * Keep the legacy UI-only footprint unchanged while giving the animation
+ * build enough margin for error formatting and nested RT-Thread calls.
+ */
+#define RT_MAIN_THREAD_STACK_SIZE   8192
+#else
 #define RT_MAIN_THREAD_STACK_SIZE   2048
+#endif
 #define RT_MAIN_THREAD_PRIORITY     10
 
 /* Compiler */

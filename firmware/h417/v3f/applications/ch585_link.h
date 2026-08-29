@@ -30,6 +30,8 @@ typedef struct
 } v3f_ch585_link_stats_t;
 
 void v3f_ch585_link_init(void);
+/* Restore both CH585 chip selects and the shared SPI1 pins after a V5F lease. */
+void v3f_ch585_link_restore_idle(void);
 uint8_t v3f_ch585_link_poll(uint8_t half_id,
                             const aik_spi_host_cmd_v1_t *cmd,
                             aik_spi_half_state_v1_t *out);

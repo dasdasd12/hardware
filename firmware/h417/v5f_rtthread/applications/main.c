@@ -23,8 +23,16 @@
 #define APP_ENABLE_V5F_DISPLAY 1
 #endif
 
+#ifndef APP_ENABLE_V5F_FLASH_ANIMATION
+#define APP_ENABLE_V5F_FLASH_ANIMATION 0
+#endif
+
 #if APP_ENABLE_V5F_DISPLAY
 #include "v5f_display.h"
+#if APP_ENABLE_V5F_FLASH_ANIMATION
+#include "v5f_flash_animation.h"
+#include "v5f_competition_ui.h"
+#endif
 #include "v5f_approval_ui.h"
 #endif
 
@@ -639,6 +647,9 @@ static void usb_hs_hid_status_report_poll(rt_uint32_t heartbeat)
 int main(void)
 {
     rt_uint32_t heartbeat = 0;
+#if APP_ENABLE_V5F_DISPLAY && APP_ENABLE_V5F_FLASH_ANIMATION
+    uint8_t animation_error_visible = 0u;
+#endif
 #if APP_ENABLE_BOARD_HEARTBEAT_PIN
     rt_base_t heartbeat_pin = rt_pin_get(APP_BOARD_HEARTBEAT_PIN_NAME);
 #endif
@@ -652,6 +663,9 @@ int main(void)
     }
     else
     {
+#if APP_ENABLE_V5F_FLASH_ANIMATION
+        v5f_flash_animation_init();
+#endif
         v5f_approval_ui_init();
         rt_kprintf("V5F 800x480 L8 display is running.\n");
     }
@@ -709,7 +723,49 @@ int main(void)
     while (1)
     {
 #if APP_ENABLE_V5F_DISPLAY
+#if APP_ENABLE_V5F_FLASH_ANIMATION
+        v5f_flash_animation_poll();
+        if(v5f_flash_animation_requested() != 0u)
+        {
+            int animation_result = v5f_flash_animation_run_blocking();
+
+            /* Redraw the newest mailbox state after the L8 home is restored. */
+            v5f_approval_ui_init();
+            if((animation_result != V5F_FLASH_ANIMATION_OK) &&
+               (v5f_display_is_ready() != 0u))
+            {
+                v5f_approval_ui_draw_animation_error(
+                    v5f_flash_animation_last_failure());
+                animation_error_visible = 1u;
+            }
+            else
+            {
+                animation_error_visible = 0u;
+            }
+        }
+        else if(v5f_flash_animation_failure_latched() != 0u)
+        {
+            if((animation_error_visible == 0u) &&
+               (v5f_display_is_ready() != 0u))
+            {
+                v5f_approval_ui_draw_animation_error(
+                    v5f_flash_animation_last_failure());
+                animation_error_visible = 1u;
+            }
+        }
+        else
+        {
+            if(animation_error_visible != 0u)
+            {
+                v5f_competition_ui_draw();
+                v5f_approval_ui_init();
+                animation_error_visible = 0u;
+            }
+            v5f_approval_ui_poll();
+        }
+#else
         v5f_approval_ui_poll();
+#endif
 #endif
 #if APP_ENABLE_BOARD_HEARTBEAT_PIN
         rt_pin_write(heartbeat_pin, (heartbeat & 1U) ? PIN_HIGH : PIN_LOW);

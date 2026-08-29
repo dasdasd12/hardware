@@ -5,6 +5,7 @@
 #include "ch32h417.h"
 #include "ch32h417_usb.h"
 #include "ch32h417_usbfs_device.h"
+#if V3F_USBFS_HAS_HID
 #include "usbfs_compatibility_hid.h"
 
 uint8_t USBFS_HID_Report_Buffer[64];
@@ -12,7 +13,6 @@ volatile uint8_t USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 
 static uint32_t s_report_count;
 static volatile uint8_t s_keyboard_leds;
-static ch32h417_usbfs_hid_nkro_diag_t s_diag;
 
 #define H417_HID_REPORT_ID_NKRO      1U
 #define H417_HID_REPORT_ID_CONSUMER  2U
@@ -21,6 +21,9 @@ static ch32h417_usbfs_hid_nkro_diag_t s_diag;
 #define H417_HID_CONSUMER_PACKET_BYTES 3U
 #define H417_HID_MOUSE_PACKET_BYTES  5U
 #define H417_HID_KEYBOARD_LED_CAPS_LOCK 0x02U
+#endif
+
+static ch32h417_usbfs_hid_nkro_diag_t s_diag;
 
 void Delay_Us(uint32_t n)
 {
@@ -56,32 +59,45 @@ static void refresh_diag(void)
     s_diag.uep0_dma = USBFSD->UEP0_DMA;
     s_diag.last_intflag = USBFSD->INT_FG;
     s_diag.last_intst = USBFSD->INT_ST;
+#if V3F_USBFS_HAS_HID
     s_diag.last_tx_len = USBFSD_UEP_TLEN(DEF_UEP2);
+#elif V3F_ENABLE_USBFS_CDC_DEBUG
+    s_diag.last_tx_len = USBFSD_UEP_TLEN(DEF_UEP3);
+#else
+    s_diag.last_tx_len = 0U;
+#endif
     s_diag.last_rx_len = USBFSD->RX_LEN;
 }
 
+#if V3F_USBFS_HAS_HID
 static uint8_t ep2_in_ready(void)
 {
     return (uint8_t)(((USBFSD->UEP2_TX_CTRL & USBFS_UEP_T_RES_MASK) ==
                       USBFS_UEP_T_RES_NAK) ? 1U : 0U);
 }
+#endif
 
 void ch32h417_usbfs_hid_nkro_init(void)
 {
     NVIC_DisableIRQ(USBFS_IRQn);
+#if V3F_USBFS_HAS_HID
     memset((void *)USBFS_HID_Report_Buffer, 0, sizeof(USBFS_HID_Report_Buffer));
+#endif
     memset((void *)&USBFS_RingBuffer_Comm, 0, sizeof(USBFS_RingBuffer_Comm));
     memset((void *)USBFS_Data_Buffer, 0, DEF_RING_BUFFER_SIZE);
     memset(&s_diag, 0, sizeof(s_diag));
+#if V3F_USBFS_HAS_HID
     s_report_count = 0U;
     s_keyboard_leds = 0U;
     USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
+#endif
 
     USBFS_RCC_Init();
     USBFS_Device_Init(ENABLE);
     refresh_diag();
 }
 
+#if V3F_USBFS_HAS_HID
 void ch32h417_usbfs_hid_nkro_send(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
 {
     if((nkro16 == 0) || (USBFS_DevEnumStatus == 0U))
@@ -211,6 +227,45 @@ uint32_t ch32h417_usbfs_hid_nkro_reports(void)
 {
     return s_report_count;
 }
+#else
+void ch32h417_usbfs_hid_nkro_send(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
+{
+    (void)nkro16;
+}
+
+uint8_t ch32h417_usbfs_hid_nkro_pending_empty(void)
+{
+    return 0U;
+}
+
+uint8_t ch32h417_usbfs_hid_nkro_submit(const uint8_t nkro16[AIK_NKRO_REPORT_BYTES])
+{
+    (void)nkro16;
+    return 0U;
+}
+
+uint8_t ch32h417_usbfs_hid_nkro_submit_consumer(uint16_t usage)
+{
+    (void)usage;
+    return 0U;
+}
+
+uint8_t ch32h417_usbfs_hid_nkro_submit_mouse_wheel(int8_t wheel)
+{
+    (void)wheel;
+    return 0U;
+}
+
+uint8_t ch32h417_usbfs_hid_nkro_caps_lock_on(void)
+{
+    return 0U;
+}
+
+uint32_t ch32h417_usbfs_hid_nkro_reports(void)
+{
+    return 0U;
+}
+#endif
 
 uint8_t ch32h417_usbfs_hid_nkro_debug_write(const char *line)
 {
@@ -243,6 +298,7 @@ void ch32h417_usbfs_hid_nkro_diag_snapshot(ch32h417_usbfs_hid_nkro_diag_t *diag)
     }
 }
 
+#if V3F_USBFS_HAS_HID
 void ch32h417_usbfs_hid_nkro_on_bus_reset(void)
 {
     s_keyboard_leds = 0U;
@@ -271,3 +327,4 @@ void ch32h417_usbfs_hid_nkro_on_output_report(uint8_t report_id,
     }
     USBFS_HID_Set_Report_Flag = SET_REPORT_DEAL_OVER;
 }
+#endif

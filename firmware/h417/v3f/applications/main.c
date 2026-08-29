@@ -17,6 +17,7 @@
 #include "profile_sync.h"
 #include "rf_report_bridge.h"
 #include "rgb_status.h"
+#include "spi1_bus_arbiter.h"
 
 #ifndef V3F_ENABLE_USBHS_8K
 #define V3F_ENABLE_USBHS_8K 0
@@ -1252,6 +1253,10 @@ int main(void)
     /* Bring USB up before profile parsing so enumeration can isolate early boot faults. */
     v3f_usb_hid_nkro_init();
 #if V3F_ENABLE_USBHS_8K && V3F_ENABLE_USBFS_CDC
+    /* The CH634 exposes USBHS and USBFS as two downstream devices.  Stagger
+     * their pull-ups so the hub/host finishes the stable HID port before the
+     * CDC port attaches; this is the only variable in this diagnostic build. */
+    v3f_board_delay_us(250000U);
     ch32h417_usbfs_hid_nkro_init();
     /* Keep the 8K HID interrupt ahead of CDC bulk traffic. */
     NVIC_SetPriority(USBHS_IRQn, 0x00U);
@@ -1263,6 +1268,8 @@ int main(void)
      * restored by each CH585.  Matching halves need no flash rewrite;
      * mismatches are marked dirty by v3f_profile_sync_status_poll(). */
     v3f_ch585_link_init();
+    /* V3F owns HSEM31 before V5F can leave reset. */
+    (void)v3f_spi1_bus_arbiter_init();
     v3f_rgb_status_init();
     v3f_rgb_status_set_enabled(0U);
     v3f_board_start_v5f();
@@ -1271,7 +1278,11 @@ int main(void)
     {
         uint8_t got_left;
         uint8_t got_right;
-        uint8_t sync_mask = v3f_profile_sync_poll(host_seq);
+        /* This is the only grant boundary: it runs before every possible
+         * profile or keyboard SPI transaction in the foreground loop. */
+        uint8_t spi1_active = v3f_spi1_bus_arbiter_service();
+        uint8_t sync_mask = (spi1_active != 0U) ?
+                            v3f_profile_sync_poll(host_seq) : 0U;
         uint8_t previous_output_mode = output_mode;
         uint8_t approval_active = v3f_approval_mailbox_active();
         uint8_t approval_selected_yes =
@@ -1721,13 +1732,18 @@ int main(void)
         v3f_link_diag_trace(&left, &right);
         v3f_report_diag_trace(&keys, nkro16);
         v3f_usb_diag_trace();
-        v3f_profile_status_poll(host_seq);
+        if(spi1_active != 0U)
+        {
+            v3f_profile_status_poll(host_seq);
+        }
         if(profile_shortcut_slot != AIK_PROFILE_SHORTCUT_NONE)
         {
             (void)v3f_profile_activate_slot(profile_shortcut_slot);
         }
         v3f_pc_link_poll();
         v3f_cdc_debug_poll(host_seq, &left, &right, &keys, nkro16);
+#if V3F_ENABLE_USBHS_8K && V3F_ENABLE_USBFS_CDC
+#endif
         v3f_rgb_status_task(host_seq);
 
         host_seq++;

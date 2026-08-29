@@ -157,8 +157,12 @@ void ch32h417_ch585_spi_link_init(
                           RCC_HB2Periph_GPIOF |
                           RCC_HB2Periph_SPI1, ENABLE);
 
-    GPIO_PinRemapConfig(GPIO_Remap_VIO3V3_IO_HSLV, ENABLE);
-    GPIO_PinRemapConfig(GPIO_Remap_VDD3V3_IO_HSLV, ENABLE);
+    /*
+     * Both board IO domains are powered at 3.3 V.  AFIO HSLV only applies
+     * below 2.7 V, and its register is shared by both cores.  Leaving it at
+     * reset value avoids racing the V5F SDRAM/Flash setup without changing
+     * the 3.3 V CH585 electrical mode.
+     */
 
     GPIO_SetBits(s_ch585_spi_link_config.cs_port,
                  s_ch585_spi_link_config.cs_pin);

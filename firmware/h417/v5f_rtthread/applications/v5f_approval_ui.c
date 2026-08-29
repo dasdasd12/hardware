@@ -351,6 +351,42 @@ static void ui_draw_approval(const aik_approval_payload_t *payload)
     v5f_display_present();
 }
 
+void v5f_approval_ui_draw_animation_error(const char *reason)
+{
+    uint16_t reason_length = 0u;
+
+    if(v5f_display_is_ready() == 0u)
+    {
+        return;
+    }
+    if(reason == NULL)
+    {
+        reason = "unknown";
+    }
+    while((reason[reason_length] != '\0') && (reason_length < 34u))
+    {
+        reason_length++;
+    }
+
+    v5f_display_fill(UI_COLOR_BG);
+    ui_draw_border(48u, 36u, 704u, 408u, 3u, UI_COLOR_BORDER);
+    v5f_display_fill_rect(76u, 72u, 16u, 16u, UI_COLOR_ORANGE);
+    ui_draw_text(112u, 60u, "Animation start failed", 3u, UI_COLOR_WHITE);
+    ui_draw_text(80u, 148u, "Reason:", 2u, UI_COLOR_GRAY);
+    ui_draw_text_n(80u,
+                   188u,
+                   reason,
+                   reason_length,
+                   2u,
+                   UI_COLOR_ORANGE);
+    ui_draw_text(80u,
+                 360u,
+                 "Move switch to UI, then back to retry",
+                 2u,
+                 UI_COLOR_WHITE);
+    v5f_display_present();
+}
+
 void v5f_approval_ui_init(void)
 {
     s_last_sequence = 0u;

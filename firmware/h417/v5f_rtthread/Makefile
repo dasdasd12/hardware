@@ -38,6 +38,11 @@ V5F_HW_TEST_ASSET_ROOT := $(V5F_HW_TEST_ROOT)/assets
 V5F_HW_TEST_MAIN ?= v5f_hw_test.c
 V5F_HW_TEST_EXTRA_SRC ?=
 V5F_HW_TEST_LINK_AFTER_USB ?= 0
+V5F_HW_TEST_TAIL_SRC ?=
+V5F_HW_TEST_LINKER_TRANSFORM ?=
+V5F_HW_TEST_POST_LINK_PATCH ?=
+V5F_HW_TEST_REFERENCE_ELF ?=
+PYTHON ?= python
 HW_TEST_COMMON_ROOT ?= ../../../hw_tests/common
 
 # RT-Thread root
@@ -112,14 +117,28 @@ endif
 
 ifeq ($(APP_V5F_HW_TEST),none)
 APP_ENABLE_V5F_DISPLAY ?= 1
+APP_ENABLE_V5F_FLASH_ANIMATION ?= $(APP_ENABLE_V5F_DISPLAY)
 else
 APP_ENABLE_V5F_DISPLAY ?= 0
+APP_ENABLE_V5F_FLASH_ANIMATION ?= 0
 endif
 
 ifeq ($(APP_ENABLE_V5F_DISPLAY),1)
 ifneq ($(APP_V5F_HW_TEST),none)
 $(error APP_ENABLE_V5F_DISPLAY cannot be combined with APP_V5F_HW_TEST)
 endif
+endif
+
+ifeq ($(APP_ENABLE_V5F_FLASH_ANIMATION),1)
+ifneq ($(APP_V5F_HW_TEST),none)
+$(error APP_ENABLE_V5F_FLASH_ANIMATION cannot be combined with APP_V5F_HW_TEST)
+endif
+ifneq ($(APP_ENABLE_V5F_DISPLAY),1)
+$(error APP_ENABLE_V5F_FLASH_ANIMATION requires APP_ENABLE_V5F_DISPLAY=1)
+endif
+# Compile the qualified H4V1 player path while keeping the product selector
+# string at "none" and APP_ENABLE_V5F_HW_TEST disabled.
+APP_V5F_HW_TEST_ID := 19
 endif
 
 APP_ENABLE_USB_TEST ?= 0
@@ -144,6 +163,7 @@ DEFS += -DAPP_ENABLE_CH585_SPI_SCAN=$(APP_ENABLE_CH585_SPI_SCAN)
 DEFS += -DAPP_ENABLE_SERIAL_HEARTBEAT=$(APP_ENABLE_SERIAL_HEARTBEAT)
 DEFS += -DAPP_ENABLE_V5F_HW_TEST=$(APP_ENABLE_V5F_HW_TEST)
 DEFS += -DAPP_ENABLE_V5F_DISPLAY=$(APP_ENABLE_V5F_DISPLAY)
+DEFS += -DAPP_ENABLE_V5F_FLASH_ANIMATION=$(APP_ENABLE_V5F_FLASH_ANIMATION)
 DEFS += -DAPP_V5F_HW_TEST=$(APP_V5F_HW_TEST_ID)
 DEFS += -DAPP_V5F_HW_TEST_NAME=\"$(APP_V5F_HW_TEST)\"
 DEFS += -DAPP_ENABLE_USBSS_CDC=$(APP_ENABLE_USBSS_CDC)
@@ -154,6 +174,12 @@ DEFS += -DAPP_ENABLE_USB2_HS_HID=$(APP_ENABLE_USB2_HS_HID)
 DEFS += -DAPP_ENABLE_CH585_BLE_BRIDGE=$(APP_ENABLE_CH585_BLE_BRIDGE)
 ifneq ($(APP_MAIN_LOOP_DELAY_MS),)
 DEFS += -DAPP_MAIN_LOOP_DELAY_MS=$(APP_MAIN_LOOP_DELAY_MS)
+endif
+ifeq ($(APP_ENABLE_V5F_FLASH_ANIMATION),1)
+DEFS += -DV5F_SDRAM_H4V1_CHUNKED_FRAMES=165u
+DEFS += -DV5F_SDRAM_H4V1_MAX_FRAMES=165u
+DEFS += -DH4V1_FLASH_COLD_BOOT_FRAMES=165u
+DEFS += -DH4V1_FLASH_COLDBOOT_PRODUCT=1
 endif
 DEFS += $(DEFS_EXTRA)
 
@@ -171,6 +197,9 @@ ifneq ($(APP_V5F_HW_TEST),none)
 INC += -I"$(V5F_HW_TEST_ROOT)/include"
 INC += -I"$(HW_TEST_COMMON_ROOT)"
 INC += -I"$(V5F_HW_TEST_ASSET_ROOT)/ltdc" -I"$(V5F_HW_TEST_ASSET_ROOT)/flash"
+else ifeq ($(APP_ENABLE_V5F_FLASH_ANIMATION),1)
+INC += -I"$(V5F_HW_TEST_ROOT)/include"
+INC += -I"$(HW_TEST_COMMON_ROOT)"
 endif
 ifeq ($(APP_V5F_HW_TEST),sdram_official_16bit)
 INC += -I"$(V5F_HW_TEST_SRC_ROOT)/official/wch_sdram_16bit"
@@ -266,6 +295,14 @@ APP_SRC += $(PROJECT_ROOT)/applications/v5f_competition_ui.c
 APP_SRC += $(PROJECT_ROOT)/applications/v5f_claude_ui.c
 APP_SRC += $(PROJECT_ROOT)/applications/v5f_approval_ui.c
 endif
+ifeq ($(APP_ENABLE_V5F_FLASH_ANIMATION),1)
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_flash_animation.c
+APP_SRC += $(PROJECT_ROOT)/applications/v5f_spi1_lease.c
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/v5f_hw_test_h4v1.c
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/h4v1_video.c
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/h4v1_chunk120_gate.c
+APP_SRC += $(V5F_HW_TEST_SRC_ROOT)/h4v1_flash_coldboot_core.c
+endif
 ifeq ($(APP_ENABLE_CH585_SPI_SCAN),1)
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_spi_scan.c
 APP_SRC += $(PROJECT_ROOT)/applications/keyboard_engine.c
@@ -310,8 +347,10 @@ endif
 ifeq ($(APP_V5F_HW_TEST),ltdc_l8_palette_image)
 APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/ltdc/v5f_ltdc_palette_image.S
 endif
+ifneq ($(APP_V5F_HW_TEST),none)
 ifeq ($(APP_V5F_HW_TEST_ID),19)
 APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/ltdc/v5f_ltdc_argb8888_probe.S
+endif
 endif
 ifeq ($(APP_V5F_HW_TEST),flash_l8_assets)
 APP_ASM += $(V5F_HW_TEST_ASSET_ROOT)/flash/v5f_ltdc_flash_assets.S
@@ -337,15 +376,19 @@ SDK_SRC += $(wildcard $(SRC_ROOT)/Peripheral/src/*.c)
 
 # Startup and linker
 STARTUP := $(PROJECT_ROOT)/bsp/startup_ch32h417_v5f.S
-LDSCRIPT := $(PROJECT_ROOT)/bsp/linker_scripts/Link_v5f.ld
+BASE_LDSCRIPT := $(PROJECT_ROOT)/bsp/linker_scripts/Link_v5f.ld
+LDSCRIPT := $(BASE_LDSCRIPT)
 
 # All sources
-C_SOURCES := $(RTT_SRC) $(LIBCPU_SRC) $(BSP_SRC) $(DRV_SRC) $(APP_SRC) $(SDK_SRC) $(CHERRYUSB_SRC) $(V5F_HW_TEST_POST_USB_SRC)
+C_SOURCES := $(RTT_SRC) $(LIBCPU_SRC) $(BSP_SRC) $(DRV_SRC) $(APP_SRC) $(SDK_SRC) $(CHERRYUSB_SRC) $(V5F_HW_TEST_POST_USB_SRC) $(V5F_HW_TEST_TAIL_SRC)
 ASM_SOURCES := $(LIBCPU_ASM) $(APP_ASM) $(STARTUP)
 
 # Build directory
 BUILD := $(BUILD_ROOT)/$(CORE)
 ELF := $(BUILD)/$(PROJECT_NAME)_$(CORE).elf
+ifneq ($(strip $(V5F_HW_TEST_LINKER_TRANSFORM)),)
+LDSCRIPT := $(BUILD)/Link_v5f_h4v1_postpass.ld
+endif
 
 # Object file generation
 OBJS := $(patsubst %.c,$(BUILD)/%.o,$(notdir $(C_SOURCES)))
@@ -370,9 +413,18 @@ $(BUILD)/%.o: %.S | $(BUILD)
 	@echo "AS  $(notdir $<)"
 	@$(AS) -c $(ASFLAGS) $(DEFS) $(INC) $< -o $@
 
+ifneq ($(strip $(V5F_HW_TEST_LINKER_TRANSFORM)),)
+$(LDSCRIPT): $(BASE_LDSCRIPT) $(V5F_HW_TEST_LINKER_TRANSFORM) | $(BUILD)
+	@echo "LDS $(notdir $@)"
+	@$(PYTHON) "$(V5F_HW_TEST_LINKER_TRANSFORM)" linker --input "$(BASE_LDSCRIPT)" --output "$@"
+endif
+
 $(ELF): $(OBJS) $(LDSCRIPT)
 	@echo "LD  $(notdir $@)"
 	@$(LD) $(OBJS) $(LDFLAGS) -T"$(LDSCRIPT)" -Wl,-Map,"$(BUILD)/$(PROJECT_NAME)_$(CORE).map" -lm -o $@
+ifneq ($(strip $(V5F_HW_TEST_POST_LINK_PATCH)),)
+	@$(PYTHON) "$(V5F_HW_TEST_POST_LINK_PATCH)" patch --elf "$@" --reference-elf "$(V5F_HW_TEST_REFERENCE_ELF)"
+endif
 
 $(BUILD)/%.hex: $(ELF)
 	@echo "HEX $(notdir $@)"

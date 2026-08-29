@@ -34,12 +34,19 @@ OFFICIAL_USBSS_V3F_USER_ROOT := $(OFFICIAL_USBSS_EXAMPLE_ROOT)/V3F/User
 V3F_STANDALONE_ROOT := cases/v3f_standalone
 V3F_STANDALONE_SRC_ROOT := $(V3F_STANDALONE_ROOT)/src
 H417_V3F_WAKE_STUB_TEST := h417_v5f_wake_stub
-H417_DUAL_CORE_TESTS := h417_v5f_ltdc h417_v5f_ltdc_l8_palette_image h417_v5f_ltdc_rgb565_diag h417_v5f_ltdc_ui_frames h417_v5f_gpha_r2m_fill h417_v5f_gpha_pfc_l8_rgb565 h417_v5f_gpha_blend_rgb565 h417_v5f_gpha_l8_ltdc_fullscreen h417_v5f_flash h417_v5f_flash_l8_assets h417_v5f_tick_diag h417_v5f_sdram_memtest h417_v5f_sdram_video h417_v5f_sdram_video_h4v1 h417_v5f_ch585_spi_speed h417_v5f_ch585_adc_key_cal
+H417_DUAL_CORE_TESTS := h417_v5f_ltdc h417_v5f_ltdc_l8_palette_image h417_v5f_ltdc_rgb565_diag h417_v5f_ltdc_ui_frames h417_v5f_gpha_r2m_fill h417_v5f_gpha_pfc_l8_rgb565 h417_v5f_gpha_blend_rgb565 h417_v5f_gpha_l8_ltdc_fullscreen h417_v5f_flash h417_v5f_flash_l8_assets h417_v5f_tick_diag h417_v5f_sdram_memtest h417_v5f_sdram_video h417_v5f_sdram_video_h4v1 h417_v5f_sdram_video_h4v1_120 h417_v5f_sdram_video_h4v1_165 h417_v5f_flash_h4v1_install h417_v5f_flash_h4v1_write_probe h417_v5f_flash_h4v1_165_write_probe h417_v5f_flash_h4v1_165_install h417_v5f_flash_h4v1_165_coldboot h417_v5f_ch585_spi_speed h417_v5f_ch585_adc_key_cal
 IS_DUAL_CORE_TEST := $(filter $(HW_TEST),$(H417_DUAL_CORE_TESTS))
 APP_V5F_HW_TEST_ID_OVERRIDE :=
 APP_V5F_HW_TEST_USB_CDC :=
 APP_V5F_HW_TEST_SOURCE_ARGS :=
 H417_HW_TEST_BUILD_NAME := $(HW_TEST)
+H417_REFERENCE_HW_TEST :=
+H417_REFERENCE_EXTEND_V5 :=
+H417_REFERENCE_REBUILD_V5_MAIN :=
+H417_REFERENCE_V3_BIN_SHA256 :=
+H417_REFERENCE_V5_BIN_SHA256 :=
+H417_REFERENCE_V5_ELF_SHA256 :=
+H417_REFERENCE_V5_OBJECTS_SHA256 :=
 
 ifeq ($(HW_TEST),h417_v5f_ltdc)
 APP_V5F_HW_TEST_MODE := ltdc
@@ -78,6 +85,100 @@ APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
 APP_V5F_HW_TEST_ID_OVERRIDE := 19
 APP_V5F_HW_TEST_USB_CDC := 1
 APP_V5F_HW_TEST_SOURCE_ARGS := V5F_HW_TEST_MAIN=v5f_hw_test_h4v1.c V5F_HW_TEST_EXTRA_SRC=h4v1_video.c V5F_HW_TEST_LINK_AFTER_USB=1 DEFS_EXTRA="-DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u -DAPP_USBFS_STREAM_DIAG=1 -DAPP_USBFS_CLEAR_TRANSFER_BEFORE_CALLBACK=1"
+else ifeq ($(HW_TEST),h417_v5f_sdram_video_h4v1_120)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 19
+APP_V5F_HW_TEST_USB_CDC := 1
+# Isolated 120-frame qualification target.  It deliberately has no Flash
+# post-PASS tail.  Freeze every qualified object except the H4V1 test main so
+# the timing-sensitive USB/CDC path retains its exact machine code and VMA.
+H417_REFERENCE_HW_TEST := h417_v5f_sdram_video_h4v1
+H417_REFERENCE_REBUILD_V5_MAIN := 1
+H417_REFERENCE_V3_BIN_SHA256 := a78380eee6ddbc7711f7029b85caddfdf23b6f87640a69c993291e751e10897b
+H417_REFERENCE_V5_BIN_SHA256 := ddab4a5592a42f592058621f16f0261a14e18719e9f516f9cb156128b380599d
+H417_REFERENCE_V5_ELF_SHA256 := 6c9b0fbc7b0fe1413a1f1fcad87897f294b18d9659379a282d147625b11f5133
+H417_REFERENCE_V5_OBJECTS_SHA256 := b9ad2fad02774fbe107dd89d1fc7c99d193deebef4a483c1abb9fcca00337730
+APP_V5F_HW_TEST_SOURCE_ARGS := V5F_HW_TEST_MAIN=v5f_hw_test_h4v1.c V5F_HW_TEST_EXTRA_SRC="h4v1_video.c h4v1_chunk120_gate.c" V5F_HW_TEST_LINK_AFTER_USB=1 DEFS_EXTRA="-DV5F_SDRAM_H4V1_CHUNKED_FRAMES=120u -DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u -DAPP_USBFS_STREAM_DIAG=1 -DAPP_USBFS_CLEAR_TRANSFER_BEFORE_CALLBACK=1"
+else ifeq ($(HW_TEST),h417_v5f_sdram_video_h4v1_165)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 19
+APP_V5F_HW_TEST_USB_CDC := 1
+# Full-source 165-frame qualification target.  Clone the hardware-qualified
+# 120-frame image and all 99 V5F objects, then rebuild only the H4V1 main.
+H417_REFERENCE_HW_TEST := h417_v5f_sdram_video_h4v1_120
+H417_REFERENCE_REBUILD_V5_MAIN := 1
+H417_REFERENCE_V3_BIN_SHA256 := a78380eee6ddbc7711f7029b85caddfdf23b6f87640a69c993291e751e10897b
+H417_REFERENCE_V5_BIN_SHA256 := 1c9a77f316afec3393c35e30d174bf4d7ce8bb22defdb7cbf6cb08ebb1a4d261
+H417_REFERENCE_V5_ELF_SHA256 := 174246c4bd5bed50ee643932041c3db1789eab577eebd91bb71cd720254c430d
+H417_REFERENCE_V5_OBJECTS_SHA256 := 94cb62c11376d10ca520642fbf0bc8527e4414f612b801671e4572808980b061
+APP_V5F_HW_TEST_SOURCE_ARGS := V5F_HW_TEST_MAIN=v5f_hw_test_h4v1.c V5F_HW_TEST_EXTRA_SRC="h4v1_video.c h4v1_chunk120_gate.c" V5F_HW_TEST_LINK_AFTER_USB=1 DEFS_EXTRA="-DV5F_SDRAM_H4V1_CHUNKED_FRAMES=165u -DV5F_SDRAM_H4V1_MAX_FRAMES=165u -DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u -DAPP_USBFS_STREAM_DIAG=1 -DAPP_USBFS_CLEAR_TRANSFER_BEFORE_CALLBACK=1"
+else ifeq ($(HW_TEST),h417_v5f_flash_h4v1_install)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 19
+APP_V5F_HW_TEST_USB_CDC := 1
+# Reuse the qualified H4V1 V3F image and all qualified V5F objects.  The only
+# new V5F objects live in an isolated post-image tail and are reached by one
+# fail-closed post-link hook after RESULT PASS.
+H417_REFERENCE_HW_TEST := h417_v5f_sdram_video_h4v1
+H417_REFERENCE_EXTEND_V5 := 1
+H417_REFERENCE_V3_BIN_SHA256 := a78380eee6ddbc7711f7029b85caddfdf23b6f87640a69c993291e751e10897b
+H417_REFERENCE_V5_BIN_SHA256 := ddab4a5592a42f592058621f16f0261a14e18719e9f516f9cb156128b380599d
+APP_V5F_HW_TEST_SOURCE_ARGS := V5F_HW_TEST_MAIN=v5f_hw_test_h4v1.c V5F_HW_TEST_EXTRA_SRC=h4v1_video.c V5F_HW_TEST_LINK_AFTER_USB=1 V5F_HW_TEST_TAIL_SRC="../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage1.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage2.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage3.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage4.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_hook.c" V5F_HW_TEST_LINKER_TRANSFORM=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_POST_LINK_PATCH=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_REFERENCE_ELF=../../../hw_tests/h417/$(BUILD_ROOT)/h417_v5f_sdram_video_h4v1/V5F/rtthread_ch32h417_V5F.elf DEFS_EXTRA="-DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u -DAPP_USBFS_STREAM_DIAG=1 -DAPP_USBFS_CLEAR_TRANSFER_BEFORE_CALLBACK=1"
+else ifeq ($(HW_TEST),h417_v5f_flash_h4v1_write_probe)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 19
+APP_V5F_HW_TEST_USB_CDC := 1
+# Explicit destructive qualification target.  It reuses the exact qualified
+# H4V1 images/objects, but substitutes a dedicated Stage1..5 tail and hook.
+# The read-only h417_v5f_flash_h4v1_install target above remains unchanged.
+H417_REFERENCE_HW_TEST := h417_v5f_sdram_video_h4v1
+H417_REFERENCE_EXTEND_V5 := 1
+H417_REFERENCE_V3_BIN_SHA256 := a78380eee6ddbc7711f7029b85caddfdf23b6f87640a69c993291e751e10897b
+H417_REFERENCE_V5_BIN_SHA256 := ddab4a5592a42f592058621f16f0261a14e18719e9f516f9cb156128b380599d
+APP_V5F_HW_TEST_SOURCE_ARGS := V5F_HW_TEST_MAIN=v5f_hw_test_h4v1.c V5F_HW_TEST_EXTRA_SRC=h4v1_video.c V5F_HW_TEST_LINK_AFTER_USB=1 V5F_HW_TEST_TAIL_SRC="../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage1.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage2.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage3.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage4.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage5.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_write_probe_hook.c" V5F_HW_TEST_LINKER_TRANSFORM=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_POST_LINK_PATCH=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_REFERENCE_ELF=../../../hw_tests/h417/$(BUILD_ROOT)/h417_v5f_sdram_video_h4v1/V5F/rtthread_ch32h417_V5F.elf DEFS_EXTRA="-DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u -DAPP_USBFS_STREAM_DIAG=1 -DAPP_USBFS_CLEAR_TRANSFER_BEFORE_CALLBACK=1"
+else ifeq ($(HW_TEST),h417_v5f_flash_h4v1_165_write_probe)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 19
+APP_V5F_HW_TEST_USB_CDC := 1
+# Destructive Stage5 qualification rebased on the exact 165-frame image that
+# passed on hardware.  All existing V3/V5 objects are copied verbatim; only
+# isolated post-PASS tail objects are added.
+H417_REFERENCE_HW_TEST := h417_v5f_sdram_video_h4v1_165
+H417_REFERENCE_EXTEND_V5 := 1
+H417_REFERENCE_V3_BIN_SHA256 := a78380eee6ddbc7711f7029b85caddfdf23b6f87640a69c993291e751e10897b
+H417_REFERENCE_V5_BIN_SHA256 := 15aa43e5f698ce1a5c63ad30ca9af0fd1462ebf563877ef8cea5a6dfc17931db
+H417_REFERENCE_V5_ELF_SHA256 := 60de05b7f53f70315309fd4f3b8967707738c61904e414223fa6665386ef54fb
+H417_REFERENCE_V5_OBJECTS_SHA256 := 3290162d0734dd984b2bc1d59c0dffb0df8de1a5107cbb12863d2348cd2a2f58
+APP_V5F_HW_TEST_SOURCE_ARGS := V5F_HW_TEST_MAIN=v5f_hw_test_h4v1.c V5F_HW_TEST_EXTRA_SRC="h4v1_video.c h4v1_chunk120_gate.c" V5F_HW_TEST_LINK_AFTER_USB=1 V5F_HW_TEST_TAIL_SRC="../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage1.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage2.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage3.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage4.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage5.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_write_probe_hook.c" V5F_HW_TEST_LINKER_TRANSFORM=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_POST_LINK_PATCH=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_REFERENCE_ELF=../../../hw_tests/h417/$(BUILD_ROOT)/h417_v5f_sdram_video_h4v1_165/V5F/rtthread_ch32h417_V5F.elf DEFS_EXTRA="-DV5F_SDRAM_H4V1_CHUNKED_FRAMES=165u -DV5F_SDRAM_H4V1_MAX_FRAMES=165u -DH4V1_FLASH_WRITE_PROBE_FRAMES=165u -DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u -DAPP_USBFS_STREAM_DIAG=1 -DAPP_USBFS_CLEAR_TRANSFER_BEFORE_CALLBACK=1"
+else ifeq ($(HW_TEST),h417_v5f_flash_h4v1_165_install)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 19
+APP_V5F_HW_TEST_USB_CDC := 1
+# Transactional USB -> SDRAM -> NAND installer rebased on the exact 165-frame
+# hardware-qualified image.  The 99 qualified V5F objects remain byte exact;
+# only Stage1, Stage6 and the dedicated post-PASS hook occupy the isolated tail.
+H417_REFERENCE_HW_TEST := h417_v5f_sdram_video_h4v1_165
+H417_REFERENCE_EXTEND_V5 := 1
+H417_REFERENCE_V3_BIN_SHA256 := a78380eee6ddbc7711f7029b85caddfdf23b6f87640a69c993291e751e10897b
+H417_REFERENCE_V5_BIN_SHA256 := 15aa43e5f698ce1a5c63ad30ca9af0fd1462ebf563877ef8cea5a6dfc17931db
+H417_REFERENCE_V5_ELF_SHA256 := 60de05b7f53f70315309fd4f3b8967707738c61904e414223fa6665386ef54fb
+H417_REFERENCE_V5_OBJECTS_SHA256 := 3290162d0734dd984b2bc1d59c0dffb0df8de1a5107cbb12863d2348cd2a2f58
+APP_V5F_HW_TEST_SOURCE_ARGS := V5F_HW_TEST_MAIN=v5f_hw_test_h4v1.c V5F_HW_TEST_EXTRA_SRC="h4v1_video.c h4v1_chunk120_gate.c" V5F_HW_TEST_LINK_AFTER_USB=1 V5F_HW_TEST_TAIL_SRC="../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage1.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_postpass_stage6.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_install_hook.c" V5F_HW_TEST_LINKER_TRANSFORM=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_POST_LINK_PATCH=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_REFERENCE_ELF=../../../hw_tests/h417/$(BUILD_ROOT)/h417_v5f_sdram_video_h4v1_165/V5F/rtthread_ch32h417_V5F.elf DEFS_EXTRA="-DV5F_SDRAM_H4V1_CHUNKED_FRAMES=165u -DV5F_SDRAM_H4V1_MAX_FRAMES=165u -DH4V1_FLASH_INSTALL_FRAMES=165u -DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u -DAPP_USBFS_STREAM_DIAG=1 -DAPP_USBFS_CLEAR_TRANSFER_BEFORE_CALLBACK=1"
+else ifeq ($(HW_TEST),h417_v5f_flash_h4v1_165_coldboot)
+APP_V5F_HW_TEST_MODE := ltdc_rgb565_diag
+APP_V5F_HW_TEST_ID_OVERRIDE := 19
+APP_V5F_HW_TEST_USB_CDC := 1
+# Read-only committed-Flash cold boot rebased on the exact hardware-qualified
+# 165-frame image.  The 99 qualified objects remain byte exact.  A dedicated
+# tail supplies only the fixed config, NAND source and status replay adapters;
+# Stage6 and every NAND-mutating command are deliberately absent.
+H417_REFERENCE_HW_TEST := h417_v5f_sdram_video_h4v1_165
+H417_REFERENCE_EXTEND_V5 := 1
+H417_REFERENCE_V3_BIN_SHA256 := a78380eee6ddbc7711f7029b85caddfdf23b6f87640a69c993291e751e10897b
+H417_REFERENCE_V5_BIN_SHA256 := 15aa43e5f698ce1a5c63ad30ca9af0fd1462ebf563877ef8cea5a6dfc17931db
+H417_REFERENCE_V5_ELF_SHA256 := 60de05b7f53f70315309fd4f3b8967707738c61904e414223fa6665386ef54fb
+H417_REFERENCE_V5_OBJECTS_SHA256 := 3290162d0734dd984b2bc1d59c0dffb0df8de1a5107cbb12863d2348cd2a2f58
+APP_V5F_HW_TEST_SOURCE_ARGS := V5F_HW_TEST_MAIN=v5f_hw_test_h4v1.c V5F_HW_TEST_EXTRA_SRC="h4v1_video.c h4v1_chunk120_gate.c" V5F_HW_TEST_LINK_AFTER_USB=1 V5F_HW_TEST_TAIL_SRC="../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_coldboot_core.c ../../../hw_tests/h417/cases/v5f_rtthread/src/h4v1_flash_coldboot_hook.c" V5F_HW_TEST_LINKER_TRANSFORM=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_POST_LINK_PATCH=../../../hw_tests/h417/tools/h4v1_postpass_elf.py V5F_HW_TEST_REFERENCE_ELF=../../../hw_tests/h417/$(BUILD_ROOT)/h417_v5f_sdram_video_h4v1_165/V5F/rtthread_ch32h417_V5F.elf DEFS_EXTRA="-DV5F_SDRAM_H4V1_CHUNKED_FRAMES=165u -DV5F_SDRAM_H4V1_MAX_FRAMES=165u -DH4V1_FLASH_COLD_BOOT_FRAMES=165u -DAPP_USB_CDC_RAW_RX_BUFFER_ADDR=0x20160000u -DAPP_USB_CDC_RAW_RX_BUFFER_BYTES=65536u -DAPP_USBFS_STREAM_DIAG=1 -DAPP_USBFS_CLEAR_TRANSFER_BEFORE_CALLBACK=1"
 else ifeq ($(HW_TEST),h417_v5f_ch585_spi_speed)
 APP_V5F_HW_TEST_MODE := ch585_spi_speed
 APP_V5F_HW_TEST_ID_OVERRIDE := 15
@@ -123,6 +224,7 @@ ifeq ($(IS_DUAL_CORE_TEST),$(HW_TEST))
 
 .PHONY: all clean size
 
+ifeq ($(H417_REFERENCE_HW_TEST),)
 all:
 	@$(MAKE) HW_TEST=$(H417_V3F_WAKE_STUB_TEST) BUILD_ROOT=$(H417_V3F_WAKE_BUILD_ROOT) H417_LOCAL_V3F_PROJECT=h417_V3F H417_LOCAL_V3F_BUILD_DIR=$(H417_V3F_WAKE_BUILD_ROOT)
 ifeq ($(APP_V5F_HW_TEST_ID_OVERRIDE),)
@@ -132,6 +234,106 @@ else
 endif
 	@echo "V3F build: $(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F"
 	@echo "V5F build: $(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F"
+else
+ifeq ($(H417_REFERENCE_REBUILD_V5_MAIN),1)
+all:
+	@ref_v3="$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V3F/h417_V3F.bin"; \
+	ref_v5="$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F/rtthread_ch32h417_V5F.bin"; \
+	ref_elf="$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F/rtthread_ch32h417_V5F.elf"; \
+	test -f "$$ref_v3" -a -f "$$ref_v5" -a -f "$$ref_elf" || { \
+		echo "Qualified H4V1 reference artifacts are missing; refusing to rebuild them implicitly."; \
+		exit 1; \
+	}; \
+	actual_v3=$$(sha256sum "$$ref_v3" | awk '{print $$1}'); \
+	actual_v5=$$(sha256sum "$$ref_v5" | awk '{print $$1}'); \
+	actual_elf=$$(sha256sum "$$ref_elf" | awk '{print $$1}'); \
+	actual_objects=$$(cd "$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F" && sha256sum *.o | sha256sum | awk '{print $$1}'); \
+	test "$$actual_v3" = "$(H417_REFERENCE_V3_BIN_SHA256)" || { \
+		echo "Qualified V3F hash mismatch: $$actual_v3"; exit 1; \
+	}; \
+	test "$$actual_v5" = "$(H417_REFERENCE_V5_BIN_SHA256)" || { \
+		echo "Qualified V5F hash mismatch: $$actual_v5"; exit 1; \
+	}; \
+	test "$$actual_elf" = "$(H417_REFERENCE_V5_ELF_SHA256)" || { \
+		echo "Qualified V5F ELF hash mismatch: $$actual_elf"; exit 1; \
+	}; \
+	test "$$actual_objects" = "$(H417_REFERENCE_V5_OBJECTS_SHA256)" || { \
+		echo "Qualified V5F object-set hash mismatch: $$actual_objects"; exit 1; \
+	}; \
+	echo "Qualified H4V1 reference hashes PASS"
+	@mkdir -p "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F" "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F"
+	@for ext in bin elf hex lst map; do \
+		cp -f "$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V3F/h417_V3F.$$ext" "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F/h417_V3F.$$ext"; \
+	done
+	@rm -f "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/"*.o \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/"*.d \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.elf" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.hex" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.bin" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.lst" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.map"
+	@cp -f "$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F/"*.o "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/"
+	@touch "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/"*.o
+	@rm -f "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/v5f_hw_test_h4v1.o"
+	@$(MAKE) -C "$(H417_FIRMWARE_ROOT)/v5f_rtthread" PREFIX=$(PREFIX) BUILD_ROOT=$(DIRECT_V5F_BUILD_ROOT) CORE=V5F APP_V5F_HW_TEST=$(APP_V5F_HW_TEST_MODE) APP_V5F_HW_TEST_ID=$(APP_V5F_HW_TEST_ID_OVERRIDE) $(APP_V5F_HW_TEST_USB_CDC_ARGS) $(APP_V5F_HW_TEST_SOURCE_ARGS)
+	@echo "Qualified H4V1 objects + rebuilt V5 test main: $(H417_REFERENCE_HW_TEST) -> $(H417_HW_TEST_BUILD_NAME)"
+else
+ifeq ($(H417_REFERENCE_EXTEND_V5),1)
+all:
+	@ref_v3="$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V3F/h417_V3F.bin"; \
+	ref_v5="$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F/rtthread_ch32h417_V5F.bin"; \
+	test -f "$$ref_v3" -a -f "$$ref_v5" || { \
+		echo "Qualified H4V1 reference artifacts are missing; refusing to rebuild them implicitly."; \
+		exit 1; \
+	}; \
+	actual_v3=$$(sha256sum "$$ref_v3" | awk '{print $$1}'); \
+	actual_v5=$$(sha256sum "$$ref_v5" | awk '{print $$1}'); \
+	test "$$actual_v3" = "$(H417_REFERENCE_V3_BIN_SHA256)" || { \
+		echo "Qualified V3F hash mismatch: $$actual_v3"; exit 1; \
+	}; \
+	test "$$actual_v5" = "$(H417_REFERENCE_V5_BIN_SHA256)" || { \
+		echo "Qualified V5F hash mismatch: $$actual_v5"; exit 1; \
+	}; \
+	if test -n "$(H417_REFERENCE_V5_ELF_SHA256)"; then \
+		ref_elf="$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F/rtthread_ch32h417_V5F.elf"; \
+		test -f "$$ref_elf" || { echo "Qualified V5F ELF is missing"; exit 1; }; \
+		actual_elf=$$(sha256sum "$$ref_elf" | awk '{print $$1}'); \
+		test "$$actual_elf" = "$(H417_REFERENCE_V5_ELF_SHA256)" || { \
+			echo "Qualified V5F ELF hash mismatch: $$actual_elf"; exit 1; \
+		}; \
+	fi; \
+	if test -n "$(H417_REFERENCE_V5_OBJECTS_SHA256)"; then \
+		actual_objects=$$(cd "$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F" && sha256sum *.o | sha256sum | awk '{print $$1}'); \
+		test "$$actual_objects" = "$(H417_REFERENCE_V5_OBJECTS_SHA256)" || { \
+			echo "Qualified V5F object-set hash mismatch: $$actual_objects"; exit 1; \
+		}; \
+	fi; \
+	echo "Qualified H4V1 reference hashes PASS"
+	@mkdir -p "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F" "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F"
+	@for ext in bin elf hex lst map; do \
+		cp -f "$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V3F/h417_V3F.$$ext" "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F/h417_V3F.$$ext"; \
+	done
+	@cp -f "$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F/"*.o "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/"
+	@rm -f "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.elf" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.hex" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.bin" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.lst" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.map" \
+		"$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/Link_v5f_h4v1_postpass.ld"
+	@$(MAKE) -C "$(H417_FIRMWARE_ROOT)/v5f_rtthread" PREFIX=$(PREFIX) BUILD_ROOT=$(DIRECT_V5F_BUILD_ROOT) CORE=V5F APP_V5F_HW_TEST=$(APP_V5F_HW_TEST_MODE) APP_V5F_HW_TEST_ID=$(APP_V5F_HW_TEST_ID_OVERRIDE) $(APP_V5F_HW_TEST_USB_CDC_ARGS) $(APP_V5F_HW_TEST_SOURCE_ARGS)
+	@echo "Reference V3F + isolated post-PASS V5F: $(H417_REFERENCE_HW_TEST) -> $(H417_HW_TEST_BUILD_NAME)"
+else
+all:
+	@$(MAKE) HW_TEST=$(H417_REFERENCE_HW_TEST) BUILD_ROOT=$(BUILD_ROOT)
+	@mkdir -p "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F" "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F"
+	@for ext in bin elf hex lst map; do \
+		cp -f "$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V3F/h417_V3F.$$ext" "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F/h417_V3F.$$ext"; \
+		cp -f "$(BUILD_ROOT)/$(H417_REFERENCE_HW_TEST)/V5F/rtthread_ch32h417_V5F.$$ext" "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V5F/rtthread_ch32h417_V5F.$$ext"; \
+	done
+	@echo "Reference clone: $(H417_REFERENCE_HW_TEST) -> $(H417_HW_TEST_BUILD_NAME)"
+endif
+endif
+endif
 
 size:
 	@$(SIZE) "$(BUILD_ROOT)/$(H417_HW_TEST_BUILD_NAME)/V3F/h417_V3F.elf"

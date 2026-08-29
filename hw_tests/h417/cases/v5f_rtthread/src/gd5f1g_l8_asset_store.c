@@ -232,7 +232,7 @@ int gd5f1g_l8_asset_read_linear(const gd5f1g_spi_bus_t *bus,
             chunk = length - done;
         }
 
-        result = gd5f1g_read_page(bus, row, column, &data[done], chunk, &status);
+        result = gd5f1g_read_page_ignore_ecc(bus, row, column, &data[done], chunk, &status);
         if(status_out != 0)
         {
             *status_out = status;

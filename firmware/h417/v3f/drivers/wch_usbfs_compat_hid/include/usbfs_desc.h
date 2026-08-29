@@ -23,6 +23,15 @@
 #define V3F_ENABLE_USBFS_CDC_DEBUG   0
 #endif
 
+/* The production dual-controller build uses USBFS only for CDC.  Keep the
+ * legacy USBFS HID descriptor available solely for the standalone USBFS HID
+ * build where CDC is disabled. */
+#if V3F_ENABLE_USBFS_CDC_DEBUG
+#define V3F_USBFS_HAS_HID            0
+#else
+#define V3F_USBFS_HAS_HID            1
+#endif
+
 /* usb device info define  */
 #define DEF_USB_VID                  0x1A86
 #if V3F_ENABLE_USBFS_CDC_DEBUG
@@ -57,10 +66,7 @@
 /* LS end-point size */
 /* ... */
 
-#if V3F_ENABLE_USBFS_CDC_DEBUG
-#define DEF_USBD_HID_INTERFACE       0x02U
-#define DEF_USBD_HID_DESC_OFFSET     84U
-#else
+#if V3F_USBFS_HAS_HID
 #define DEF_USBD_HID_INTERFACE       0x00U
 #define DEF_USBD_HID_DESC_OFFSET     18U
 #endif
@@ -84,5 +90,7 @@ extern const uint8_t USBFS_MyLangDescr[];
 extern const uint8_t USBFS_MyManuInfo[];
 extern const uint8_t USBFS_MyProdInfo[];
 extern const uint8_t USBFS_MySerNumInfo[];
+#if V3F_USBFS_HAS_HID
 extern const uint8_t  MyHIDReportDesc[];
+#endif
 #endif /* USER_USB_DESC_H_ */

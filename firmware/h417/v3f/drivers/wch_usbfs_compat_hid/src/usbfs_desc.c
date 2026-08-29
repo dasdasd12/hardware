@@ -45,8 +45,8 @@ const uint8_t  MyCfgDescr[] =
     /* Configuration Descriptor */
     0x09,                           // bLength
     0x02,                           // bDescriptorType
-    0x64, 0x00,                     // wTotalLength
-    0x03,                           // bNumInterfaces
+    0x4B, 0x00,                     // wTotalLength: CDC only
+    0x02,                           // bNumInterfaces: CDC control + data
     0x01,                           // bConfigurationValue
     0x00,                           // iConfiguration
     0xA0,                           // bmAttributes Bus Powered, Remote Wakeup
@@ -112,16 +112,6 @@ const uint8_t  MyCfgDescr[] =
     0x40, 0x00,                     // wMaxPacketSize
     0x00,                           // bInterval
 
-    /* Interface 2: HID keyboard */
-    0x09,                           // bLength
-    0x04,                           // bDescriptorType (Interface)
-    0x02,                           // bInterfaceNumber 2
-    0x00,                           // bAlternateSetting
-    0x01,                           // bNumEndpoints
-    0x03,                           // bInterfaceClass HID
-    0x00,                           // bInterfaceSubClass
-    0x00,                           // bInterfaceProtocol
-    0x00,                           // iInterface
 #else
     /* Configuration Descriptor */
     0x09,                           // bLength
@@ -144,7 +134,7 @@ const uint8_t  MyCfgDescr[] =
     0x00,                           // bInterfaceProtocol
     0x00,                           // iInterface (String Index)
 #endif
-
+#if V3F_USBFS_HAS_HID
     /* HID Descriptor */
     0x09,                           // bLength
     0x21,                           // bDescriptorType
@@ -161,8 +151,18 @@ const uint8_t  MyCfgDescr[] =
     0x03,                           // bmAttributes
     0x20, 0x00,                     // wMaxPacketSize
     0x01,                           // bInterval: 1mS
+#endif
 };
 
+#if V3F_ENABLE_USBFS_CDC_DEBUG
+typedef char usbfs_cdc_config_desc_size_check[
+    (sizeof(MyCfgDescr) == 0x4BU) ? 1 : -1];
+#else
+typedef char usbfs_hid_config_desc_size_check[
+    (sizeof(MyCfgDescr) == 0x22U) ? 1 : -1];
+#endif
+
+#if V3F_USBFS_HAS_HID
 /* HID Report Descriptor */
 const uint8_t  MyHIDReportDesc[ ] =
 {
@@ -247,6 +247,7 @@ const uint8_t  MyHIDReportDesc[ ] =
 
 typedef char usbfs_hid_report_desc_size_check[
     (sizeof(MyHIDReportDesc) == DEF_USBD_REPORT_DESC_LEN) ? 1 : -1];
+#endif
 
 /* Language Descriptor */
 const uint8_t  USBFS_MyLangDescr[] =
@@ -270,6 +271,25 @@ const uint8_t  USBFS_MyManuInfo[ ] =
 /* Product Information */
 const uint8_t USBFS_MyProdInfo[ ]  =
 {
+#if V3F_ENABLE_USBFS_CDC_DEBUG
+    0x20,
+    0x03,
+    'A', 0,
+    'I', 0,
+    ' ', 0,
+    'K', 0,
+    'e', 0,
+    'y', 0,
+    ' ', 0,
+    'H', 0,
+    '4', 0,
+    '1', 0,
+    '7', 0,
+    ' ', 0,
+    'C', 0,
+    'D', 0,
+    'C', 0
+#else
     0x22,
     0x03, 
     'A', 0,
@@ -288,6 +308,7 @@ const uint8_t USBFS_MyProdInfo[ ]  =
     'K', 0,
     'R', 0,
     'O', 0
+#endif
 };
 
 /* Serial Number Information */

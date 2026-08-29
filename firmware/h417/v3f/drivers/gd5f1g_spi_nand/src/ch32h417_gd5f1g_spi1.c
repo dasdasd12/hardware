@@ -10,7 +10,7 @@
 #define FLASH_MISO_PIN     GPIO_Pin_9
 
 #ifndef CH32H417_GD5F1G_SPI_BAUD_PRESCALER
-#define CH32H417_GD5F1G_SPI_BAUD_PRESCALER SPI_BaudRatePrescaler_Mode5
+#define CH32H417_GD5F1G_SPI_BAUD_PRESCALER SPI_BaudRatePrescaler_Mode2
 #endif
 
 static void spi1_delay_us(void *context, uint32_t us);
